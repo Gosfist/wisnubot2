@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { getPool } from "../config/database.js";
 import { baileysManager } from "./baileys.service.js";
 import { messageService } from "./message.service.js";
-import { resolveBroadcastTable } from "../utils/helpers.js";
+import { resolveBroadcastTable, parseScheduleEntries } from "../utils/helpers.js";
 import { logger } from "../utils/logger.js";
 
 class SchedulerService {
@@ -76,17 +76,18 @@ class SchedulerService {
 
   registerJob(broadcastId, userId, scheduleTimes, scheduleDays) {
     this.unregisterJob(broadcastId);
-    const timeList = this.parseList(scheduleTimes);
+    // Accept either new structured format ([{time, days}]) or legacy (times[] + days[]).
+    const entries = parseScheduleEntries(scheduleTimes, scheduleDays);
     const tasks = [];
 
-    for (const scheduleTime of timeList) {
-      const cronExpr = this.toCronExpression(scheduleTime, scheduleDays);
+    for (const entry of entries) {
+      const cronExpr = this.toCronExpression(entry.time, entry.days);
       if (!cronExpr) {
         logger.warn(
           {
             broadcastId,
-            scheduleTime,
-            scheduleDays,
+            scheduleTime: entry.time,
+            scheduleDays: entry.days,
           },
           "Invalid cron for broadcast",
         );
@@ -259,10 +260,17 @@ class SchedulerService {
       );
 
       for (const broadcast of broadcasts) {
-        const days = this.parseList(broadcast.schedule_days);
-        const times = this.parseList(broadcast.schedule_time);
-        if (days.length > 0 && times.length > 0) {
-          this.registerJob(broadcast.id, broadcast.user_id, times, days);
+        const entries = parseScheduleEntries(
+          broadcast.schedule_time,
+          broadcast.schedule_days,
+        );
+        if (entries.length > 0) {
+          this.registerJob(
+            broadcast.id,
+            broadcast.user_id,
+            entries,
+            broadcast.schedule_days,
+          );
         }
       }
 

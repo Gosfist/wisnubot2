@@ -9,7 +9,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useToast } from "../../hooks/useToast";
 import { cn } from "../../lib/cn";
 import { appConfig } from "../../lib/config";
-import type { BroadcastModel } from "../../types/models";
+import type { BroadcastModel, BroadcastScheduleEntry } from "../../types/models";
 
 const TIME_ITEM_HEIGHT = 56;
 
@@ -19,6 +19,39 @@ interface LocationState {
 
 type TargetMode = "all" | "selected" | "all_except";
 
+const DAY_KEYS = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"] as const;
+const DAY_LABELS: Record<string, string> = {
+  senin: "Senin",
+  selasa: "Selasa",
+  rabu: "Rabu",
+  kamis: "Kamis",
+  jumat: "Jumat",
+  sabtu: "Sabtu",
+  minggu: "Minggu",
+};
+const DAY_SHORT_LABELS: Record<string, string> = {
+  senin: "Sen",
+  selasa: "Sel",
+  rabu: "Rab",
+  kamis: "Kam",
+  jumat: "Jum",
+  sabtu: "Sab",
+  minggu: "Min",
+};
+
+function sortDayKeys(days: string[]): string[] {
+  const order = new Map<string, number>(DAY_KEYS.map((d, i) => [d, i]));
+  return [...new Set(days)].sort(
+    (a, b) => (order.get(a) ?? 99) - (order.get(b) ?? 99),
+  );
+}
+
+function formatScheduleDays(days: string[]): string {
+  const sorted = sortDayKeys(days);
+  if (sorted.length === DAY_KEYS.length) return "Setiap Hari";
+  return sorted.map((d) => DAY_SHORT_LABELS[d] ?? d).join(", ");
+}
+
 function normalizeDay(day: string) {
   return day
     .toString()
@@ -26,6 +59,15 @@ function normalizeDay(day: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f']/g, "");
+}
+
+function sortSchedules(list: BroadcastScheduleEntry[]): BroadcastScheduleEntry[] {
+  return [...list].sort((a, b) => {
+    if (a.time !== b.time) return a.time.localeCompare(b.time);
+    const aFirst = sortDayKeys(a.days)[0] ?? "";
+    const bFirst = sortDayKeys(b.days)[0] ?? "";
+    return aFirst.localeCompare(bFirst);
+  });
 }
 
 function resolveImagePreviewUrl(imageUrl: string | null) {
@@ -63,9 +105,12 @@ export function AddBroadcastPage() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>(editData?.targetGroupIds ?? []);
   const [excludedGroupIds, setExcludedGroupIds] = useState<number[]>(editData?.targetExcludedGroupIds ?? []);
   const [selectedBotIds, setSelectedBotIds] = useState<number[]>(editData?.targetBotIds ?? []);
-  const [times, setTimes] = useState<string[]>([...(editData?.scheduleTimes ?? [])].sort());
+  const [schedules, setSchedules] = useState<BroadcastScheduleEntry[]>(
+    sortSchedules(editData?.schedules ?? []),
+  );
   const [draftHour, setDraftHour] = useState(0);
   const [draftMinute, setDraftMinute] = useState(0);
+  const [draftDays, setDraftDays] = useState<string[]>([]);
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -96,7 +141,7 @@ export function AddBroadcastPage() {
 
     setTitle(data.title ?? "");
     setMessageText(data.messageText ?? "");
-    setTimes([...(data.scheduleTimes ?? [])].sort());
+    setSchedules(sortSchedules(data.schedules ?? []));
     setSelectedGroupIds([...(data.targetGroupIds ?? [])]);
     setExcludedGroupIds([...(data.targetExcludedGroupIds ?? [])]);
     setSelectedBotIds([...(data.targetBotIds ?? [])]);
@@ -339,56 +384,75 @@ export function AddBroadcastPage() {
   }
 
   function findBroadcastConflict(
-    candidateTimes: string[],
-    candidateDays: string[],
+    candidateEntries: BroadcastScheduleEntry[],
     candidateGroupIds: number[],
   ) {
     const candidateGroupSet = new Set(candidateGroupIds.map((id) => Number(id)));
     for (const broadcast of appData.broadcasts) {
-      if (editData && broadcast.id === editData.id) {
-        continue;
-      }
-      if (!broadcast.isActive) {
-        continue;
-      }
-      if (!hasDayOverlap(candidateDays, broadcast.targetDays)) {
-        continue;
-      }
+      if (editData && broadcast.id === editData.id) continue;
+      if (!broadcast.isActive) continue;
+
+      const existingEntries = broadcast.schedules ?? [];
+      if (!existingEntries.length) continue;
 
       const overlappingGroupIds = resolveBroadcastGroupIds(broadcast).filter((id) =>
         candidateGroupSet.has(Number(id)),
       );
-      if (!overlappingGroupIds.length) {
-        continue;
-      }
+      if (!overlappingGroupIds.length) continue;
 
-      const timeConflict = findScheduleGapConflict(candidateTimes, broadcast.scheduleTimes);
-      if (!timeConflict) {
-        continue;
+      for (const candidate of candidateEntries) {
+        const candidateDaySet = new Set(candidate.days);
+        for (const existing of existingEntries) {
+          const sharesDay = existing.days.some((d) => candidateDaySet.has(d));
+          if (!sharesDay) continue;
+          if (!hasEnoughScheduleGap(candidate.time, [existing.time])) {
+            return {
+              title: broadcast.title,
+              time: existing.time,
+            };
+          }
+        }
       }
-
-      return {
-        title: broadcast.title,
-        time: timeConflict.existingTime,
-      };
     }
 
     return null;
   }
 
   function handleAddTime() {
-    if (times.includes(draftTime)) {
-      showToast("Jam tersebut sudah dipilih", "danger");
+    if (draftDays.length === 0) {
+      showToast("Pilih minimal satu hari untuk jam ini", "danger");
       return;
     }
 
-    if (!hasEnoughScheduleGap(draftTime, times)) {
-      showToast("Jarak antar jam delay 30 menit untuk menghindari suspend", "danger");
+    // Check duplicate (same time + same day set)
+    const draftDaySet = new Set(draftDays);
+    const exists = schedules.some(
+      (s) =>
+        s.time === draftTime &&
+        s.days.length === draftDays.length &&
+        s.days.every((d) => draftDaySet.has(d)),
+    );
+    if (exists) {
+      showToast("Entry jam + hari ini sudah ada", "danger");
       return;
     }
 
-    setTimes((current) => [...current, draftTime].sort());
+    // Check 30-min gap conflict only against entries that share at least one day
+    const conflictingTimes = schedules
+      .filter((s) => s.days.some((d) => draftDaySet.has(d)))
+      .map((s) => s.time);
+    if (conflictingTimes.length && !hasEnoughScheduleGap(draftTime, conflictingTimes)) {
+      showToast("Jarak antar jam pada hari yang sama minimal 30 menit", "danger");
+      return;
+    }
+
+    const newEntry: BroadcastScheduleEntry = {
+      time: draftTime,
+      days: sortDayKeys(draftDays),
+    };
+    setSchedules((current) => sortSchedules([...current, newEntry]));
     setShowTimeModal(false);
+    setDraftDays([]);
   }
 
   function toggleGroup(groupId: number, isActive: boolean) {
@@ -503,8 +567,15 @@ export function AddBroadcastPage() {
       return true;
     }
 
-    const sortedCurrentTimes = [...times].sort();
-    const sortedOriginalTimes = [...editData.scheduleTimes].sort();
+    const serializeSchedules = (list: BroadcastScheduleEntry[]) =>
+      JSON.stringify(
+        sortSchedules(list).map((entry) => ({
+          time: entry.time,
+          days: sortDayKeys(entry.days),
+        })),
+      );
+    const currentSchedulesSig = serializeSchedules(schedules);
+    const originalSchedulesSig = serializeSchedules(editData.schedules ?? []);
     const sortedCurrentGroups = [...nextGroupIds].sort((a, b) => a - b);
     const sortedOriginalGroups = [...editData.targetGroupIds].sort((a, b) => a - b);
     const sortedCurrentExcludedGroups = [...nextExcludedGroupIds].sort((a, b) => a - b);
@@ -521,7 +592,7 @@ export function AddBroadcastPage() {
       nextTitle !== editData.title ||
       nextText !== editData.messageText ||
       nextTargetMode !== originalTargetMode ||
-      JSON.stringify(sortedCurrentTimes) !== JSON.stringify(sortedOriginalTimes) ||
+      currentSchedulesSig !== originalSchedulesSig ||
       JSON.stringify(sortedCurrentGroups) !== JSON.stringify(sortedOriginalGroups) ||
       JSON.stringify(sortedCurrentExcludedGroups) !== JSON.stringify(sortedOriginalExcludedGroups) ||
       JSON.stringify(sortedCurrentBots) !== JSON.stringify(sortedOriginalBots)
@@ -557,8 +628,8 @@ export function AddBroadcastPage() {
       showToast("Teks broadcast tidak boleh kosong!", "danger");
       return;
     }
-    if (!times.length) {
-      showToast("Atur jadwal auto broadcast terlebih dahulu", "danger");
+    if (!schedules.length) {
+      showToast("Tambahkan minimal satu jadwal (jam + hari)", "danger");
       return;
     }
     if (targetMode === "selected" && !groupIds.length) {
@@ -582,8 +653,7 @@ export function AddBroadcastPage() {
 
     const candidateGroupIds = resolveCandidateGroupIds(groupIds, excludedIds);
     const crossBroadcastConflict = findBroadcastConflict(
-      times,
-      ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"],
+      schedules,
       candidateGroupIds,
     );
     if (crossBroadcastConflict) {
@@ -604,8 +674,7 @@ export function AddBroadcastPage() {
       const payload: Record<string, unknown> = {
         title: trimmedTitle,
         messageText: trimmedText,
-        scheduleTime: times,
-        scheduleDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"],
+        scheduleTime: schedules,
         targetGroupIds: groupIds,
         targetExcludedGroupIds: excludedIds,
         targetBotIds: onlineBotIds,
@@ -879,20 +948,29 @@ export function AddBroadcastPage() {
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {times.map((time) => (
-              <button
-                key={time}
-                className="rounded-full border border-[rgba(56,189,248,0.24)] bg-[rgba(37,99,235,0.18)] px-4 py-2 text-sm font-semibold text-accent transition hover:bg-[rgba(37,99,235,0.26)]"
-                type="button"
-                onClick={() => setTimes((current) => current.filter((item) => item !== time))}
-              >
-                {time}
-              </button>
-            ))}
-            {!times.length ? <p className="text-sm text-text-secondary">Belum ada jadwal dipilih.</p> : null}
+          <div className="flex flex-col gap-2">
+            {schedules.length === 0 ? (
+              <p className="text-sm text-text-secondary">Belum ada jadwal dipilih.</p>
+            ) : (
+              schedules.map((entry, index) => (
+                <button
+                  key={`${entry.time}-${entry.days.join(",")}-${index}`}
+                  className="flex w-full items-center justify-between gap-3 rounded-[16px] border border-[rgba(56,189,248,0.24)] bg-[rgba(37,99,235,0.18)] px-4 py-3 text-left text-sm font-semibold text-accent transition hover:bg-[rgba(37,99,235,0.26)]"
+                  type="button"
+                  onClick={() =>
+                    setSchedules((current) => current.filter((_, i) => i !== index))
+                  }
+                  title="Klik untuk hapus jadwal ini"
+                >
+                  <span className="tabular-nums text-base">{entry.time}</span>
+                  <span className="text-xs font-medium text-text-secondary">
+                    {formatScheduleDays(entry.days)}
+                  </span>
+                  <X size={16} className="text-danger" />
+                </button>
+              ))
+            )}
           </div>
-
         </SurfaceCard>
       </div>
 
@@ -909,7 +987,10 @@ export function AddBroadcastPage() {
       <Modal
         open={showTimeModal}
         title="Pilih Waktu"
-        onClose={() => setShowTimeModal(false)}
+        onClose={() => {
+          setShowTimeModal(false);
+          setDraftDays([]);
+        }}
         closeButtonVariant="icon"
       >
         <div className="space-y-4">
@@ -962,6 +1043,49 @@ export function AddBroadcastPage() {
           </div>
 
           <p className="text-center text-sm text-text-secondary">Waktu dipilih: <span className="font-semibold text-text-primary tabular-nums">{draftTime}</span></p>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">HARI</span>
+              <button
+                className="text-xs font-semibold text-accent transition hover:brightness-125"
+                type="button"
+                onClick={() =>
+                  setDraftDays((current) =>
+                    current.length === DAY_KEYS.length ? [] : [...DAY_KEYS],
+                  )
+                }
+              >
+                {draftDays.length === DAY_KEYS.length ? "Hapus semua" : "Pilih semua"}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {DAY_KEYS.map((day) => {
+                const isSelected = draftDays.includes(day);
+                return (
+                  <button
+                    key={day}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-sm font-semibold transition",
+                      isSelected
+                        ? "border-[rgba(56,189,248,0.34)] bg-[rgba(37,99,235,0.18)] text-accent"
+                        : "border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.68)] text-text-secondary hover:border-[rgba(56,189,248,0.28)]",
+                    )}
+                    type="button"
+                    onClick={() =>
+                      setDraftDays((current) =>
+                        current.includes(day)
+                          ? current.filter((d) => d !== day)
+                          : [...current, day],
+                      )
+                    }
+                  >
+                    {DAY_LABELS[day]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <button
             className="flex w-full items-center justify-center rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110"

@@ -85,6 +85,59 @@ function parseJsonArrayString(value: unknown): unknown[] {
   return [];
 }
 
+const VALID_DAY_KEYS = new Set([
+  "senin",
+  "selasa",
+  "rabu",
+  "kamis",
+  "jumat",
+  "sabtu",
+  "minggu",
+]);
+
+function normalizeDayKey(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f']/g, "");
+}
+
+function parseScheduleEntries(
+  scheduleTimeRaw: unknown,
+  scheduleDaysRaw: unknown,
+): { time: string; days: string[] }[] {
+  const rawList = parseJsonArrayString(scheduleTimeRaw);
+  const fallbackDays = parseJsonArrayString(scheduleDaysRaw)
+    .map(normalizeDayKey)
+    .filter((d) => VALID_DAY_KEYS.has(d));
+
+  const entries: { time: string; days: string[] }[] = [];
+  for (const item of rawList) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const obj = item as Record<string, unknown>;
+      const time = obj.time ?? obj.t;
+      if (typeof time !== "string" || !/^\d{1,2}:\d{2}$/.test(time.trim())) continue;
+      const daysSource = Array.isArray(obj.days) ? obj.days : fallbackDays;
+      const days = [
+        ...new Set(
+          daysSource.map(normalizeDayKey).filter((d) => VALID_DAY_KEYS.has(d)),
+        ),
+      ];
+      if (!days.length) continue;
+      const [h, m] = time.trim().split(":");
+      const normalized = `${String(parseInt(h, 10)).padStart(2, "0")}:${String(parseInt(m, 10)).padStart(2, "0")}`;
+      entries.push({ time: normalized, days });
+    } else if (typeof item === "string" && /^\d{1,2}:\d{2}$/.test(item.trim())) {
+      if (!fallbackDays.length) continue;
+      const [h, m] = item.trim().split(":");
+      const normalized = `${String(parseInt(h, 10)).padStart(2, "0")}:${String(parseInt(m, 10)).padStart(2, "0")}`;
+      entries.push({ time: normalized, days: [...fallbackDays] });
+    }
+  }
+  return entries;
+}
+
 function parseBroadcast(payload: Record<string, unknown>): BroadcastModel {
   return {
     id: Number(payload.id ?? 0),
@@ -92,8 +145,7 @@ function parseBroadcast(payload: Record<string, unknown>): BroadcastModel {
     messageText: String(payload.message_text ?? ""),
     imageUrl: payload.image_url ? String(payload.image_url) : null,
     isActive: Boolean(payload.is_active ?? true),
-    scheduleTimes: parseJsonArrayString(payload.schedule_time).map(String),
-    targetDays: parseJsonArrayString(payload.schedule_days).map(String),
+    schedules: parseScheduleEntries(payload.schedule_time, payload.schedule_days),
     targetGroupIds: parseJsonArrayString(payload.target_group_ids).map(Number),
     targetExcludedGroupIds: parseJsonArrayString(payload.target_excluded_group_ids).map(Number),
     targetBotIds: parseJsonArrayString(payload.target_bot_ids).map(Number),

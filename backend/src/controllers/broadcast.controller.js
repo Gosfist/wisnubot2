@@ -1,6 +1,10 @@
 import { getPool } from "../config/database.js";
 import { schedulerService } from "../services/scheduler.service.js";
-import { resolveBroadcastTable } from "../utils/helpers.js";
+import {
+  resolveBroadcastTable,
+  parseScheduleEntries,
+  unionDaysFromEntries,
+} from "../utils/helpers.js";
 import { logger } from "../utils/logger.js";
 import { deleteUploadedFile, getUploadedImageUrl } from "../middleware/upload.js";
 
@@ -107,6 +111,17 @@ function normalizeTimeList(times) {
 
 function normalizeDayList(days) {
   return [...new Set(parseList(days).map(normalizeDay).filter(Boolean))];
+}
+
+/**
+ * Normalize incoming schedule input from request body.
+ * Accepts either:
+ *   - new format: [{ time: "HH:MM", days: ["Senin", ...] }]
+ *   - legacy format: array of "HH:MM" strings (combined with scheduleDays)
+ * Returns canonical entries [{ time, days: [normalized day keys] }].
+ */
+function normalizeScheduleEntries(scheduleTimeInput, scheduleDaysInput) {
+  return parseScheduleEntries(scheduleTimeInput, scheduleDaysInput);
 }
 
 function parseTimeToMinutes(time) {
@@ -221,8 +236,7 @@ async function ensureNoBroadcastScheduleConflict(
     targetGroupIds = [],
     targetExcludedGroupIds = [],
     targetBotIds = [],
-    scheduleTimes = [],
-    scheduleDays = [],
+    scheduleEntries = [],
     isActive = true,
   },
 ) {
@@ -230,10 +244,7 @@ async function ensureNoBroadcastScheduleConflict(
     return;
   }
 
-  const normalizedScheduleTimes = normalizeTimeList(scheduleTimes);
-  const normalizedScheduleDays = normalizeDayList(scheduleDays);
-
-  if (normalizedScheduleTimes.length === 0 || normalizedScheduleDays.length === 0) {
+  if (!Array.isArray(scheduleEntries) || scheduleEntries.length === 0) {
     return;
   }
 
@@ -264,16 +275,32 @@ async function ensureNoBroadcastScheduleConflict(
   const candidateGroupSet = new Set(candidateGroupIds);
 
   for (const broadcast of broadcasts) {
-    const existingScheduleDays = normalizeDayList(broadcast.schedule_days);
-    if (!hasDayOverlap(normalizedScheduleDays, existingScheduleDays)) {
+    const existingEntries = parseScheduleEntries(
+      broadcast.schedule_time,
+      broadcast.schedule_days,
+    );
+    if (existingEntries.length === 0) {
       continue;
     }
 
-    const existingScheduleTimes = normalizeTimeList(broadcast.schedule_time);
-    const timeConflict = hasScheduleGapConflict(
-      normalizedScheduleTimes,
-      existingScheduleTimes,
-    );
+    // For each candidate entry, check time-gap conflict only against existing
+    // entries that share at least one day with it.
+    let timeConflict = null;
+    let conflictExisting = null;
+    outer: for (const candidate of scheduleEntries) {
+      const candidateDaySet = new Set(candidate.days ?? []);
+      for (const existing of existingEntries) {
+        const sharesDay = (existing.days ?? []).some((d) => candidateDaySet.has(d));
+        if (!sharesDay) continue;
+        const conflict = hasScheduleGapConflict([candidate.time], [existing.time]);
+        if (conflict) {
+          timeConflict = conflict;
+          conflictExisting = existing;
+          break outer;
+        }
+      }
+    }
+
     if (!timeConflict) {
       continue;
     }
@@ -297,7 +324,7 @@ async function ensureNoBroadcastScheduleConflict(
     throw new Error(
       `Jadwal broadcast bentrok. Group yang sama sudah dipakai oleh broadcast "${String(
         broadcast.title ?? `#${broadcast.id}`,
-      )}" pada jam ${timeConflict.second}. Minimal jarak antar broadcast untuk group yang sama adalah 30 menit.`,
+      )}" pada jam ${conflictExisting?.time ?? timeConflict.second}. Minimal jarak antar broadcast untuk group yang sama adalah 30 menit.`,
     );
   }
 }
@@ -365,13 +392,13 @@ export async function createBroadcast(req, res) {
     const userId = req.user.id;
     const broadcastTable = await resolveBroadcastTable(pool);
 
-    const scheduleTimes = normalizeTimeList(scheduleTime);
+    const scheduleEntries = normalizeScheduleEntries(scheduleTime, scheduleDays);
     const normalizedTargetGroupIds = parseIdList(targetGroupIds);
     const normalizedTargetExcludedGroupIds = parseIdList(targetExcludedGroupIds);
-    const normalizedScheduleDays = parseStringList(scheduleDays);
+    const unionDays = unionDaysFromEntries(scheduleEntries);
 
-    if (scheduleTimes.length === 0) {
-      return sendBroadcastError(res, req, 400, "Minimal pilih 1 jadwal broadcast");
+    if (scheduleEntries.length === 0) {
+      return sendBroadcastError(res, req, 400, "Minimal pilih 1 jadwal broadcast (jam + hari)");
     }
 
     if (
@@ -400,10 +427,6 @@ export async function createBroadcast(req, res) {
         "b.user_id = ?",
       ];
       const groupParams = [...groupIdsToValidate, userId];
-
-      if (req.user.role === "owner") {
-        groupClauses.push(`${getBroadcastBotRoleSql("b.bot_role")} = 'broadcast'`);
-      }
 
       const [validGroups] = await pool.execute(
         `SELECT g.id
@@ -447,10 +470,6 @@ export async function createBroadcast(req, res) {
     ];
     const botParams = [...normalizedTargetBotIds, userId];
 
-    if (req.user.role === "owner") {
-      botClauses.push(`${getBroadcastBotRoleSql("bot_role")} = 'broadcast'`);
-    }
-
     const [validBots] = await pool.execute(
       `SELECT id FROM bots WHERE ${botClauses.join(" AND ")}`,
       botParams,
@@ -470,8 +489,7 @@ export async function createBroadcast(req, res) {
       targetGroupIds: normalizedTargetGroupIds,
       targetExcludedGroupIds: normalizedTargetExcludedGroupIds,
       targetBotIds: normalizedTargetBotIds,
-      scheduleTimes,
-      scheduleDays: normalizedScheduleDays,
+      scheduleEntries,
       isActive: true,
     });
 
@@ -488,19 +506,19 @@ export async function createBroadcast(req, res) {
         JSON.stringify(normalizedTargetGroupIds),
         JSON.stringify(normalizedTargetExcludedGroupIds),
         JSON.stringify(normalizedTargetBotIds),
-        JSON.stringify(scheduleTimes),
-        JSON.stringify(normalizedScheduleDays),
+        JSON.stringify(scheduleEntries),
+        JSON.stringify(unionDays),
       ],
     );
 
     const broadcastId = result.insertId;
 
-    if (scheduleTimes.length > 0 && normalizedScheduleDays.length > 0) {
+    if (scheduleEntries.length > 0) {
       schedulerService.registerJob(
         broadcastId,
         userId,
-        scheduleTimes,
-        normalizedScheduleDays,
+        scheduleEntries,
+        unionDays,
       );
     }
 
@@ -553,12 +571,13 @@ export async function updateBroadcast(req, res) {
 
     currentBroadcast = broadcasts[0];
 
-    const scheduleTimes = normalizeTimeList(scheduleTime);
-    const normalizedScheduleDays =
-      scheduleDays !== undefined ? parseStringList(scheduleDays) : null;
+    const incomingScheduleEntries =
+      scheduleTime !== undefined
+        ? normalizeScheduleEntries(scheduleTime, scheduleDays)
+        : null;
 
-    if (scheduleTime !== undefined && scheduleTimes.length === 0) {
-      return sendBroadcastError(res, req, 400, "Minimal pilih 1 jadwal broadcast");
+    if (scheduleTime !== undefined && (incomingScheduleEntries?.length ?? 0) === 0) {
+      return sendBroadcastError(res, req, 400, "Minimal pilih 1 jadwal broadcast (jam + hari)");
     }
 
     let normalizedTargetGroupIds = null;
@@ -599,10 +618,6 @@ export async function updateBroadcast(req, res) {
         "b.user_id = ?",
       ];
       const groupParams = [...groupIdsToValidate, req.user.id];
-
-      if (req.user.role === "owner") {
-        groupClauses.push(`${getBroadcastBotRoleSql("b.bot_role")} = 'broadcast'`);
-      }
 
       const [validGroups] = await pool.execute(
         `SELECT g.id
@@ -648,10 +663,6 @@ export async function updateBroadcast(req, res) {
       ];
       const botParams = [...normalizedTargetBotIds, req.user.id];
 
-      if (req.user.role === "owner") {
-        botClauses.push(`${getBroadcastBotRoleSql("bot_role")} = 'broadcast'`);
-      }
-
       const [validBots] = await pool.execute(
         `SELECT id FROM bots WHERE ${botClauses.join(" AND ")}`,
         botParams,
@@ -679,14 +690,14 @@ export async function updateBroadcast(req, res) {
       normalizedTargetBotIds !== null
         ? normalizedTargetBotIds
         : parseList(currentBroadcast.target_bot_ids);
-    const effectiveScheduleTimes =
-      scheduleTime !== undefined
-        ? scheduleTimes
-        : normalizeTimeList(currentBroadcast.schedule_time);
-    const effectiveScheduleDays =
-      normalizedScheduleDays !== null
-        ? normalizedScheduleDays
-        : parseStringList(currentBroadcast.schedule_days);
+    const effectiveScheduleEntries =
+      incomingScheduleEntries !== null
+        ? incomingScheduleEntries
+        : parseScheduleEntries(
+            currentBroadcast.schedule_time,
+            currentBroadcast.schedule_days,
+          );
+    const effectiveUnionDays = unionDaysFromEntries(effectiveScheduleEntries);
     const effectiveIsActive =
       isActive !== undefined
         ? parseBooleanValue(isActive)
@@ -698,8 +709,7 @@ export async function updateBroadcast(req, res) {
       targetGroupIds: effectiveTargetGroupIds,
       targetExcludedGroupIds: effectiveTargetExcludedGroupIds,
       targetBotIds: effectiveTargetBotIds,
-      scheduleTimes: effectiveScheduleTimes,
-      scheduleDays: effectiveScheduleDays,
+      scheduleEntries: effectiveScheduleEntries,
       isActive: effectiveIsActive,
     });
 
@@ -738,24 +748,24 @@ export async function updateBroadcast(req, res) {
           ? JSON.stringify(normalizedTargetExcludedGroupIds)
           : null,
         normalizedTargetBotIds ? JSON.stringify(normalizedTargetBotIds) : null,
-        scheduleTime !== undefined ? JSON.stringify(scheduleTimes) : null,
-        normalizedScheduleDays !== null ? JSON.stringify(normalizedScheduleDays) : null,
+        incomingScheduleEntries !== null
+          ? JSON.stringify(incomingScheduleEntries)
+          : null,
+        incomingScheduleEntries !== null
+          ? JSON.stringify(unionDaysFromEntries(incomingScheduleEntries))
+          : null,
         isActive !== undefined ? (parseBooleanValue(isActive) ? 1 : 0) : null,
         broadcastId,
       ],
     );
 
     schedulerService.unregisterJob(parseInt(broadcastId, 10));
-    if (
-      effectiveScheduleTimes.length > 0 &&
-      effectiveScheduleDays.length > 0 &&
-      effectiveIsActive
-    ) {
+    if (effectiveScheduleEntries.length > 0 && effectiveIsActive) {
       schedulerService.registerJob(
         parseInt(broadcastId, 10),
         req.user.id,
-        effectiveScheduleTimes,
-        effectiveScheduleDays,
+        effectiveScheduleEntries,
+        effectiveUnionDays,
       );
     }
 

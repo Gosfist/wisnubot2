@@ -20,14 +20,18 @@ export interface GroupModel {
   isActive: boolean;
 }
 
+export interface BroadcastScheduleEntry {
+  time: string; // "HH:MM"
+  days: string[]; // normalized lowercase day keys: senin, selasa, ...
+}
+
 export interface BroadcastModel {
   id: number;
   title: string;
   messageText: string;
   imageUrl: string | null;
   isActive: boolean;
-  scheduleTimes: string[];
-  targetDays: string[];
+  schedules: BroadcastScheduleEntry[];
   targetGroupIds: number[];
   targetExcludedGroupIds: number[];
   targetBotIds: number[];

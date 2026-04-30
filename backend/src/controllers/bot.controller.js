@@ -143,7 +143,7 @@ export async function testUserBot(req, res) {
     const userId = req.user.id;
 
     const [bots] = await pool.execute(
-      "SELECT id, phone_number FROM bots WHERE user_id = ? AND is_online = 1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT id, phone_number, owner_phone_number FROM bots WHERE user_id = ? AND is_online = 1 ORDER BY created_at DESC LIMIT 1",
       [userId],
     );
 
@@ -157,12 +157,29 @@ export async function testUserBot(req, res) {
       return res.status(400).json({ error: "Bot sedang offline, coba lagi nanti" });
     }
 
+    const ownerPhone = normalizeWhatsappPhoneNumber(bot.owner_phone_number ?? "");
+    if (!ownerPhone) {
+      return res.status(400).json({
+        error: "Nomor WA owner belum terdaftar untuk bot ini. Silakan add ulang bot dengan nomor owner.",
+      });
+    }
+
+    const ownerJid = `${ownerPhone}@s.whatsapp.net`;
+    const testMessage = `✅ Test Bot Berhasil\n\nBot ${bot.phone_number} sedang online dan siap digunakan.\n\nPesan ini dikirim otomatis dari WisnuBot.`;
+
+    try {
+      await sock.sendMessage(ownerJid, { text: testMessage });
+    } catch (sendErr) {
+      logger.error(sendErr, "Test bot send message error");
+      return res.status(500).json({ error: "Gagal mengirim pesan test ke nomor owner" });
+    }
+
     await pool.execute(
       "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
-      [userId, "test_bot", `Test bot via ${bot.phone_number}`],
+      [userId, "test_bot", `Test bot via ${bot.phone_number} ke owner ${ownerPhone}`],
     );
 
-    res.json({ message: `Bot ${bot.phone_number} sedang online dan siap digunakan` });
+    res.json({ message: `Pesan test berhasil dikirim ke nomor owner ${ownerPhone}` });
   } catch (err) {
     logger.error(err, "Test bot error");
     res.status(500).json({ error: "Server error" });
