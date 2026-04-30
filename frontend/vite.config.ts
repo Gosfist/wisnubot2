@@ -1,0 +1,18 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react-swc";
+import packageJson from "./package.json";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: "0.0.0.0",
+    port: 5173,
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 4173,
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version),
+  },
+});
