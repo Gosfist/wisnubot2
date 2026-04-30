@@ -117,17 +117,12 @@ export function CustomerServicePage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[840px]">
+              <table className="w-full min-w-[640px]">
                 <thead>
                   <tr className="border-b border-glass-border bg-[rgba(15,23,42,0.42)] text-left">
                     <th className="w-[3ch] pl-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase whitespace-nowrap">
                       No
                     </th>
-                    {isOwner ? (
-                      <th className="px-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase whitespace-nowrap">
-                        Bot
-                      </th>
-                    ) : null}
                     <th className="px-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase">
                       Nama Perintah
                     </th>
@@ -153,11 +148,6 @@ export function CustomerServicePage() {
                           <td className="w-[3ch] pl-5 py-4 text-sm text-text-secondary whitespace-nowrap">
                             {(currentPage - 1) * ITEMS_PER_PAGE + index + 1}
                           </td>
-                          {isOwner ? (
-                            <td className="px-5 py-4 text-sm text-text-secondary whitespace-nowrap">
-                              {item.botPhoneNumber || `Bot #${item.botId}`}
-                            </td>
-                          ) : null}
                           <td className="px-5 py-4 text-sm font-semibold text-text-primary">
                             {item.commandName}
                           </td>
@@ -230,8 +220,8 @@ export function CustomerServicePage() {
                     <button
                       key={page}
                       className={`rounded-[16px] px-4 py-2 text-sm font-semibold transition ${page === currentPage
-                          ? "bg-linear-to-r from-primary to-accent text-white shadow-glow"
-                          : "border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] text-text-primary hover:border-[rgba(56,189,248,0.32)]"
+                        ? "bg-linear-to-r from-primary to-accent text-white shadow-glow"
+                        : "border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] text-text-primary hover:border-[rgba(56,189,248,0.32)]"
                         }`}
                       type="button"
                       onClick={() => setCurrentPage(page)}

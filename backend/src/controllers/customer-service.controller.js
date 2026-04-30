@@ -14,7 +14,6 @@ export async function listCustomerService(req, res) {
 export async function createCustomerService(req, res) {
   try {
     const item = await customerServiceService.createEntry(req.user, {
-      botId: req.body?.botId,
       namaPerintah: req.body?.namaPerintah,
       value: req.body?.value,
     });
@@ -31,7 +30,6 @@ export async function createCustomerService(req, res) {
 export async function updateCustomerService(req, res) {
   try {
     await customerServiceService.updateEntry(req.user, req.params.entryId, {
-      botId: req.body?.botId,
       namaPerintah: req.body?.namaPerintah,
       value: req.body?.value,
     });

@@ -156,9 +156,7 @@ function parseBroadcast(payload: Record<string, unknown>): BroadcastModel {
 function parseCustomerService(payload: Record<string, unknown>): CustomerServiceItemModel {
   return {
     id: Number(payload.id ?? 0),
-    botId: Number(payload.bot_id ?? 0),
-    botPhoneNumber: String(payload.bot_phone_number ?? "-"),
-    commandName: String(payload.command_name ?? ""),
+    commandName: String(payload.nama_perintah ?? payload.command_name ?? ""),
     value: String(payload.value ?? ""),
     createdAt: String(payload.created_at ?? ""),
     updatedAt: String(payload.updated_at ?? ""),

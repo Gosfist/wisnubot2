@@ -30,7 +30,6 @@ export function AddCustomerServicePage() {
   const [existingItem, setExistingItem] = useState<CustomerServiceItemModel | null>(null);
   const [commandName, setCommandName] = useState("");
   const [value, setValue] = useState("");
-  const [selectedBotId, setSelectedBotId] = useState(0);
   const [selectedMenus, setSelectedMenus] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(Boolean(editId));
@@ -38,9 +37,9 @@ export function AddCustomerServicePage() {
   // --- Menu ordering helpers ---
   const availableCommands = useMemo(() => {
     return appData.customerServiceItems.filter(
-      (i) => i.botId === selectedBotId && i.commandName.trim().toLowerCase() !== "welcome"
+      (i) => i.commandName.trim().toLowerCase() !== "welcome",
     );
-  }, [appData.customerServiceItems, selectedBotId]);
+  }, [appData.customerServiceItems]);
 
   function moveMenu(index: number, direction: number) {
     const newMenus = [...selectedMenus];
@@ -69,24 +68,6 @@ export function AddCustomerServicePage() {
   const isWelcomeCommand =
     existingItem?.commandName.trim().toLowerCase() === "welcome";
 
-  // --- Bot resolution ---
-  // For owners: filter to broadcast bot only (shown as read-only display).
-  // For users: bot is resolved server-side; we just show the active bot for info.
-  const availableBots = useMemo(() => {
-    const allBots = appData.bots;
-    return allBots.filter((bot) => bot.status === "online");
-  }, [appData.bots]);
-
-  const userActiveBot = availableBots[0] ?? null;
-  const ownerBroadcastBot = availableBots[0] ?? null;
-
-  const selectedBot =
-    availableBots.find((bot) => Number(bot.id) === Number(selectedBotId)) ?? null;
-  const selectedBotLabel =
-    selectedBot?.phoneNumber ||
-    existingItem?.botPhoneNumber ||
-    (selectedBotId ? `Bot #${selectedBotId}` : "-");
-
   useEffect(() => {
     if (appData.bots.length > 0) {
       return;
@@ -96,10 +77,6 @@ export function AddCustomerServicePage() {
 
   useEffect(() => {
     if (!editId) {
-      const firstBot = availableBots[0] ?? null;
-      if (firstBot && !selectedBotId) {
-        setSelectedBotId(Number(firstBot.id));
-      }
       return;
     }
 
@@ -136,7 +113,6 @@ export function AddCustomerServicePage() {
 
           setValue(parsedText);
           setSelectedMenus(activeMenus);
-          setSelectedBotId(nextItem.botId);
         } else {
           showToast("Data customer service tidak ditemukan.", "danger");
           navigate(basePath, { replace: true });
@@ -151,26 +127,7 @@ export function AddCustomerServicePage() {
     return () => {
       mounted = false;
     };
-  }, [editId, appData.customerServiceItems, availableBots, basePath, navigate, showToast]);
-
-  useEffect(() => {
-    if (availableBots.length === 0) {
-      setSelectedBotId(0);
-      return;
-    }
-
-    const hasSelectedBot = availableBots.some(
-      (bot) => Number(bot.id) === Number(selectedBotId),
-    );
-    if (hasSelectedBot) {
-      return;
-    }
-
-    const preferredBot =
-      availableBots.find((bot) => Number(bot.id) === Number(existingItem?.botId)) ??
-      availableBots[0];
-    setSelectedBotId(Number(preferredBot.id));
-  }, [availableBots, existingItem?.botId, selectedBotId]);
+  }, [editId, appData.customerServiceItems, basePath, navigate, showToast]);
 
   async function handleSave() {
     const trimmedCommandName = commandName.trim();
@@ -183,12 +140,6 @@ export function AddCustomerServicePage() {
 
     if (!trimmedValue) {
       showToast("Value wajib diisi.", "danger");
-      return;
-    }
-
-    // For users check their bot is online before saving
-    if (!isOwner && !userActiveBot) {
-      showToast("Bot kamu harus online. Hubungkan bot di Dashboard terlebih dahulu.", "danger");
       return;
     }
 
@@ -206,14 +157,11 @@ export function AddCustomerServicePage() {
     try {
       if (existingItem) {
         await appData.updateCustomerService(existingItem.id, {
-          // botId not needed for users (server auto-resolves), but required by owner
-          botId: isOwner ? selectedBotId : undefined,
           namaPerintah: trimmedCommandName,
           value: finalValue,
         });
       } else {
         await appData.createCustomerService({
-          botId: isOwner ? selectedBotId : undefined,
           namaPerintah: trimmedCommandName,
           value: finalValue,
         });
@@ -234,7 +182,7 @@ export function AddCustomerServicePage() {
     }
   }
 
-  const isSaveDisabled = isSaving || isLoading || (isOwner && !selectedBotId);
+  const isSaveDisabled = isSaving || isLoading;
 
   return (
     <div className="space-y-5">
@@ -249,23 +197,6 @@ export function AddCustomerServicePage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Bot Target — read-only info for both owner and user */}
-            <div className="space-y-2">
-              <span className="block text-sm font-semibold text-text-secondary">
-                Bot Target
-              </span>
-              <div className="flex min-h-[54px] items-center rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 text-sm text-white">
-                {isOwner
-                  ? (ownerBroadcastBot?.phoneNumber ?? "Bot broadcast belum terhubung")
-                  : (userActiveBot?.phoneNumber ?? "Bot belum online — hubungkan di Dashboard")}
-              </div>
-              <p className="text-xs text-text-secondary">
-                {isOwner
-                  ? "Customer service owner selalu memakai bot broadcast owner."
-                  : "Bot CS mengikuti bot aktif kamu secara otomatis. Jika ganti bot, semua perintah CS akan otomatis beralih ke bot baru."}
-              </p>
-            </div>
-
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">
                 Nama Perintah

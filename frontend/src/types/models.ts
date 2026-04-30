@@ -40,8 +40,6 @@ export interface BroadcastModel {
 
 export interface CustomerServiceItemModel {
   id: number;
-  botId: number;
-  botPhoneNumber: string;
   commandName: string;
   value: string;
   createdAt: string;

@@ -17,10 +17,6 @@ router.get("/", listCustomerService);
 router.post(
   "/",
   [
-    body("botId")
-      .optional({ values: "falsy" })
-      .isInt({ min: 1 })
-      .withMessage("botId tidak valid"),
     body("namaPerintah").trim().notEmpty().withMessage("Nama perintah wajib diisi"),
     body("value").trim().notEmpty().withMessage("Value wajib diisi"),
     validate,
@@ -30,10 +26,6 @@ router.post(
 router.put(
   "/:entryId",
   [
-    body("botId")
-      .optional({ values: "falsy" })
-      .isInt({ min: 1 })
-      .withMessage("botId tidak valid"),
     body("namaPerintah").trim().notEmpty().withMessage("Nama perintah wajib diisi"),
     body("value").trim().notEmpty().withMessage("Value wajib diisi"),
     validate,
