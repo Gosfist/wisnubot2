@@ -99,6 +99,9 @@ class BaileysManager {
     this.reconnectTimers = new Map();
     this.connectingBots = new Set();
     this.manualDisconnectBots = new Set();
+    // Tracks when each bot's connection became ready (epoch seconds).
+    // Used to skip offline/backlog messages whose messageTimestamp is older.
+    this.connectionReadyAt = new Map();
     this.mismatchDisconnectPayloads = new Map();
     this.pendingConnections = new Map();
     this.nextPendingBotId = -1;
@@ -725,14 +728,51 @@ class BaileysManager {
             : [];
 
           for (const message of messages) {
-            // Abaikan pesan yang umurnya lebih dari 60 detik (offline messages)
-            const msgTimestamp = message?.messageTimestamp;
-            if (msgTimestamp) {
-              const nowSeconds = Math.floor(Date.now() / 1000);
-              if (nowSeconds - msgTimestamp > 60) {
-                continue;
-              }
+            // Abaikan pesan yang dikirim SEBELUM bot connection-ready saat ini
+            // (mis. pesan offline yang ter-replay saat reconnect).
+            const rawTs = message?.messageTimestamp;
+            let msgTimestamp =
+              typeof rawTs === "number"
+                ? rawTs
+                : typeof rawTs?.toNumber === "function"
+                  ? rawTs.toNumber()
+                  : Number(rawTs ?? 0);
+            // Auto-detect: jika nilai terlalu besar berarti dalam milidetik,
+            // konversi ke detik agar bisa dibandingkan dengan readyAt.
+            if (msgTimestamp > 1e12) {
+              msgTimestamp = Math.floor(msgTimestamp / 1000);
             }
+            const readyAt =
+              this.connectionReadyAt.get(runtimeBotId) ??
+              this.connectionReadyAt.get(key) ??
+              0;
+            // Pesan yang punya atribut "offline" dari WA pasti backlog.
+            const offlineCount = Number(
+              message?.key?.offline ?? message?.offline ?? 0,
+            );
+            if (offlineCount > 0) {
+              logger.info(
+                `Skip offline-flagged message (offline=${offlineCount}) from ${message?.key?.remoteJid}`,
+              );
+              continue;
+            }
+            // Tambah toleransi 2 detik agar pesan yang masuk persis bersamaan
+            // dengan event "open" tetap diproses.
+            if (!readyAt) {
+              logger.info(
+                `Skip message: bot not yet ready (ts=${msgTimestamp}) from ${message?.key?.remoteJid}`,
+              );
+              continue;
+            }
+            if (msgTimestamp && msgTimestamp < readyAt - 2) {
+              logger.info(
+                `Skip backlog (ts=${msgTimestamp}, readyAt=${readyAt}, diff=${readyAt - msgTimestamp}s) from ${message?.key?.remoteJid}`,
+              );
+              continue;
+            }
+            logger.info(
+              `Process message (ts=${msgTimestamp}, readyAt=${readyAt}) from ${message?.key?.remoteJid}`,
+            );
 
             const remoteJid = String(message?.key?.remoteJid ?? "");
             const isFromMe = Boolean(message?.key?.fromMe);
@@ -998,6 +1038,13 @@ class BaileysManager {
           logger.info(`Bot connected for user ${userId}`);
           this.clearReconnectState(key);
           this.connectingBots.delete(key);
+          // Mark when this connection became ready so we can ignore older
+          // offline/backlog messages on reconnect.
+          const readyAt = Math.floor(Date.now() / 1000);
+          this.connectionReadyAt.set(key, readyAt);
+          if (runtimeBotId && runtimeBotId !== key) {
+            this.connectionReadyAt.set(runtimeBotId, readyAt);
+          }
           const scannedPhoneNumberRaw = sock.user?.id?.split(":")[0] || "";
           const scannedPhoneNumber = this.normalizeWhatsappPhoneNumber(
             scannedPhoneNumberRaw,
@@ -1052,6 +1099,9 @@ class BaileysManager {
             );
           }
           runtimeBotId = activeBotId;
+          if (activeBotId !== key) {
+            this.connectionReadyAt.set(activeBotId, readyAt);
+          }
 
           // wisnubot2: single owner — always ensure welcome for new bot
           await customerServiceService.ensureDefaultWelcomeForBot(activeBotId);
