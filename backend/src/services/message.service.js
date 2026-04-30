@@ -7,9 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const MESSAGE_DELAY_MIN_MS = 60 * 1000;
 const MESSAGE_DELAY_MAX_MS = 130 * 1000;
-const INCOMING_MESSAGE_READ_DELAY_MS = 1_000;
+const INCOMING_MESSAGE_READ_DELAY_MS = 1000;
 const CUSTOMER_SERVICE_REPLY_DELAY_MIN_MS = 1000;
-const CUSTOMER_SERVICE_REPLY_DELAY_MAX_MS = 1500;
+const CUSTOMER_SERVICE_REPLY_DELAY_MAX_MS = 2000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
