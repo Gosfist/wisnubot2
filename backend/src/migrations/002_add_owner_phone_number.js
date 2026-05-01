@@ -5,6 +5,6 @@ export async function up(pool) {
     pool,
     "bots",
     "owner_phone_number",
-    "VARCHAR(20) NULL AFTER phone_number",
+    "VARCHAR(20) NULL",
   );
 }

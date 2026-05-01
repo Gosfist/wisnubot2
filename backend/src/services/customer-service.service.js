@@ -1,10 +1,7 @@
 import { getPool } from "../config/database.js";
 
-const DEFAULT_WELCOME_VALUE = `🌟 Selamat Datang di Wisnu Store 🌟
-Saya adalah asisten resmi Wisnu Store yang siap membantu memenuhi kebutuhan Anda selama 24 jam penuh, setiap hari.
-
-Ketik start untuk memulai layanan kami atau klik button Start di bawah ini.`;
-const DEFAULT_START_VALUE = "Silakan pilih menu yang tersedia.";
+const DEFAULT_WELCOME_VALUE = "";
+const DEFAULT_START_VALUE = "";
 
 const ENTRIES_TABLE = "customer_service";
 const CONTACTS_TABLE = "customer_service_contacts";
@@ -109,8 +106,9 @@ async function ensureDefaultWelcomeForBot(contextOrBotId) {
 async function ensureDefaultEntriesForUserId(userId) {
   const pool = getPool();
   await pool.execute(
-    `INSERT IGNORE INTO ${ENTRIES_TABLE} (user_id, nama_perintah, value)
-     VALUES (?, 'welcome', ?), (?, 'start', ?)`,
+    `INSERT INTO ${ENTRIES_TABLE} (user_id, nama_perintah, value)
+     VALUES (?, 'welcome', ?), (?, 'start', ?)
+     ON CONFLICT (user_id, nama_perintah) DO NOTHING`,
     [Number(userId), DEFAULT_WELCOME_VALUE, Number(userId), DEFAULT_START_VALUE],
   );
 }
@@ -499,8 +497,9 @@ async function reserveFirstReply(contextOrBotId, contactJid) {
 
   const pool = getPool();
   const [result] = await pool.execute(
-    `INSERT IGNORE INTO ${CONTACTS_TABLE} (user_id, contact_jid)
-     VALUES (?, ?)`,
+    `INSERT INTO ${CONTACTS_TABLE} (user_id, contact_jid)
+     VALUES (?, ?)
+     ON CONFLICT (user_id, contact_jid) DO NOTHING`,
     [context.userId, String(contactJid)],
   );
   if (Number(result.affectedRows || 0) === 1) {
@@ -509,7 +508,7 @@ async function reserveFirstReply(contextOrBotId, contactJid) {
 
   const [rows] = await pool.execute(
     `SELECT first_replied_at,
-            TIMESTAMPDIFF(MINUTE, first_replied_at, CURRENT_TIMESTAMP) AS inactive_minutes
+            EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - first_replied_at)) / 60 AS inactive_minutes
        FROM ${CONTACTS_TABLE}
       WHERE user_id = ? AND contact_jid = ?
       LIMIT 1`,

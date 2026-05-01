@@ -59,9 +59,10 @@ async function upsertForUser(user, payload) {
   await pool.execute(
     `INSERT INTO app_settings (user_id, pakasir_slug, pakasir_api_key)
        VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         pakasir_slug = VALUES(pakasir_slug),
-         pakasir_api_key = VALUES(pakasir_api_key)`,
+       ON CONFLICT (user_id) DO UPDATE SET
+         pakasir_slug = EXCLUDED.pakasir_slug,
+         pakasir_api_key = EXCLUDED.pakasir_api_key,
+         updated_at = CURRENT_TIMESTAMP`,
     [user.id, pakasirSlug || null, apiKey || null],
   );
 

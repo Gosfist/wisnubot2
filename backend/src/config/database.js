@@ -1,9 +1,11 @@
-import mysql from 'mysql2/promise';
+import pg from 'pg';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { config } from './env.js';
 import { logger } from '../utils/logger.js';
+
+const { Pool } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,41 +13,136 @@ const migrationsDir = path.resolve(__dirname, '../migrations');
 
 let pool;
 
-function getBaseConnectionConfig() {
+function convertPlaceholders(sql) {
+  let index = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+
+  return String(sql)
+    .replace(/`/g, '"')
+    .replace(/\?/g, (match, offset, fullSql) => {
+      const previous = fullSql[offset - 1];
+      if (previous === '\\') return match;
+
+      const before = fullSql.slice(0, offset);
+      inSingleQuote = (before.match(/(?<!\\)'/g) || []).length % 2 === 1;
+      inDoubleQuote = (before.match(/(?<!\\)"/g) || []).length % 2 === 1;
+
+      if (inSingleQuote || inDoubleQuote) {
+        return match;
+      }
+
+      index += 1;
+      return `$${index}`;
+    });
+}
+
+function aliasRows(rows, sql) {
+  const aliases = [...String(sql).matchAll(/\sAS\s+([A-Za-z_][A-Za-z0-9_]*)/gi)]
+    .map((match) => match[1])
+    .filter((alias) => alias !== alias.toLowerCase());
+
+  if (aliases.length === 0) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    for (const alias of aliases) {
+      const lowered = alias.toLowerCase();
+      if (row[alias] === undefined && row[lowered] !== undefined) {
+        row[alias] = row[lowered];
+      }
+    }
+    return row;
+  });
+}
+
+function normalizeParams(params) {
+  return params.map((param) => {
+    if (typeof param === 'boolean') {
+      return param ? 1 : 0;
+    }
+    return param;
+  });
+}
+
+function normalizeResult(result, sql) {
+  const rows = aliasRows(result.rows ?? [], sql);
+  const meta = {
+    affectedRows: result.rowCount ?? 0,
+    insertId: rows[0]?.id ?? rows[0]?.insert_id ?? undefined,
+    rowCount: result.rowCount ?? 0,
+    command: result.command,
+  };
+
+  if (result.command === 'SELECT') {
+    return [rows, meta];
+  }
+
+  return [meta];
+}
+
+function shouldAppendReturningId(sql) {
+  const normalized = String(sql).trim().toLowerCase();
+  return (
+    normalized.startsWith('insert into ') &&
+    !normalized.includes(' returning ') &&
+    !normalized.includes(' on conflict ')
+  );
+}
+
+function createCompatPool(pgPool) {
+  function createExecutor(client) {
+    return async (sql, params = []) => {
+      const finalSql = shouldAppendReturningId(sql)
+        ? `${sql} RETURNING id`
+        : sql;
+      const result = await client.query(
+        convertPlaceholders(finalSql),
+        normalizeParams(params),
+      );
+      return normalizeResult(result, finalSql);
+    };
+  }
+
   return {
-    host: config.db.host,
-    port: config.db.port,
-    user: config.db.user,
-    password: config.db.password,
+    execute: createExecutor(pgPool),
+    async query(sql, params = []) {
+      return pgPool.query(convertPlaceholders(sql), normalizeParams(params));
+    },
+    async getConnection() {
+      const client = await pgPool.connect();
+      return {
+        execute: createExecutor(client),
+        async beginTransaction() {
+          await client.query('BEGIN');
+        },
+        async commit() {
+          await client.query('COMMIT');
+        },
+        async rollback() {
+          await client.query('ROLLBACK');
+        },
+        release() {
+          client.release();
+        },
+      };
+    },
+    async end() {
+      await pgPool.end();
+    },
   };
 }
 
-async function ensureDatabaseExists() {
-  const tempConn = await mysql.createConnection(getBaseConnectionConfig());
-  await tempConn.execute(
-    `CREATE DATABASE IF NOT EXISTS \`${config.db.database}\``
-  );
-  await tempConn.end();
-}
-
-export async function resetDatabase() {
-  await closeDatabase();
-
-  const tempConn = await mysql.createConnection(getBaseConnectionConfig());
-  await tempConn.execute(`DROP DATABASE IF EXISTS \`${config.db.database}\``);
-  await tempConn.execute(`CREATE DATABASE \`${config.db.database}\``);
-  await tempConn.end();
-}
-
 async function createPool() {
-  pool = mysql.createPool({
-    ...getBaseConnectionConfig(),
-    database: config.db.database,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
+  const pgPool = new Pool({
+    connectionString: config.db.url,
+    ssl: config.db.ssl ? { rejectUnauthorized: false } : false,
+    max: 10,
   });
 
+  await pgPool.query('SELECT 1');
+  pool = createCompatPool(pgPool);
   return pool;
 }
 
@@ -53,7 +150,7 @@ async function ensureMigrationsTable() {
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name VARCHAR(255) PRIMARY KEY,
-      executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      executed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `);
 }
@@ -98,19 +195,26 @@ export async function runMigrations() {
     logger.info(`Running migration ${filename}`);
     const migration = await loadMigration(filename);
     await migration.up(pool);
-    await pool.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
-      filename,
-    ]);
+    await pool.execute(
+      'INSERT INTO schema_migrations (name) VALUES (?) ON CONFLICT (name) DO NOTHING',
+      [filename],
+    );
   }
 }
 
 export async function initDatabase() {
-  await ensureDatabaseExists();
   await createPool();
   await runMigrations();
 
   logger.info('Database initialized successfully');
   return pool;
+}
+
+export async function resetDatabase() {
+  await closeDatabase();
+  await createPool();
+  await pool.execute('DROP SCHEMA IF EXISTS public CASCADE');
+  await pool.execute('CREATE SCHEMA public');
 }
 
 export async function clearAllUserSessions() {

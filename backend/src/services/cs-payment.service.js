@@ -391,7 +391,7 @@ async function deliverPaidTransaction(sock, transaction) {
     await pool.execute(
       `INSERT INTO cs_relay_sessions (transaction_id, customer_jid, state)
        VALUES (?, ?, 'waiting_customer_input')
-       ON DUPLICATE KEY UPDATE state = VALUES(state)`,
+       ON CONFLICT (transaction_id) DO UPDATE SET state = EXCLUDED.state`,
       [txId, customerJid],
     );
     await pool.execute(

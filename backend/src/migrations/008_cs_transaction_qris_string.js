@@ -5,6 +5,6 @@ export async function up(pool) {
     pool,
     "cs_transactions",
     "qris_string",
-    "TEXT NULL AFTER pakasir_payment_url",
+    "TEXT NULL",
   );
 }
