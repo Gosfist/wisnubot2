@@ -16,6 +16,9 @@ export async function createCustomerService(req, res) {
     const item = await customerServiceService.createEntry(req.user, {
       namaPerintah: req.body?.namaPerintah,
       value: req.body?.value,
+      deliveryMode: req.body?.deliveryMode,
+      price: req.body?.price,
+      relayPrompt: req.body?.relayPrompt,
     });
     res.status(201).json({
       message: "Customer service berhasil dibuat",
@@ -32,6 +35,9 @@ export async function updateCustomerService(req, res) {
     await customerServiceService.updateEntry(req.user, req.params.entryId, {
       namaPerintah: req.body?.namaPerintah,
       value: req.body?.value,
+      deliveryMode: req.body?.deliveryMode,
+      price: req.body?.price,
+      relayPrompt: req.body?.relayPrompt,
     });
     res.json({ message: "Customer service berhasil diupdate" });
   } catch (err) {

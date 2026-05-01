@@ -38,12 +38,58 @@ export interface BroadcastModel {
   createdAt: string;
 }
 
+export type CsDeliveryMode = "none" | "stock" | "relay";
+
+export type CsButtonType = "link" | "buy" | "url" | "reply";
+
+export interface CsButtonModel {
+  id?: number;
+  label: string;
+  buttonType: CsButtonType;
+  targetCommand: string | null;
+  targetUrl: string | null;
+  replyText: string | null;
+  orderIndex: number;
+}
+
 export interface CustomerServiceItemModel {
   id: number;
   commandName: string;
   value: string;
+  deliveryMode: CsDeliveryMode;
+  price: number | null;
+  relayPrompt: string | null;
+  buttons: CsButtonModel[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CsStockModel {
+  id: number;
+  csId: number;
+  content: string;
+  isUsed: boolean;
+  usedByJid: string | null;
+  usedAt: string | null;
+  createdAt: string;
+}
+
+export interface CsStockSummaryModel {
+  csId: number;
+  commandName: string;
+  deliveryMode: CsDeliveryMode;
+  price: number | null;
+  total: number;
+  available: number;
+  used: number;
+}
+
+export interface AppSettingsModel {
+  pakasirSlug: string;
+  pakasirApiKey: string;
+  pakasirApiKeyMasked: string | null;
+  hasApiKey: boolean;
+  updatedAt: string | null;
 }
 
 export interface AdminStatsModel {

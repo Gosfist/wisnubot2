@@ -14,6 +14,10 @@ import botRoutes from './routes/bot.routes.js';
 import groupRoutes from './routes/group.routes.js';
 import broadcastRoutes from './routes/broadcast.routes.js';
 import customerServiceRoutes from './routes/customer-service.routes.js';
+import csButtonRoutes from './routes/cs-button.routes.js';
+import csStockRoutes from './routes/cs-stock.routes.js';
+import csPaymentRoutes from './routes/cs-payment.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 import ownerRoutes from './routes/owner.routes.js';
 
 const app = express();
@@ -67,6 +71,10 @@ app.use('/api/bot', botRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/broadcasts', broadcastRoutes);
 app.use('/api/customer-service', customerServiceRoutes);
+app.use('/api/cs-buttons', csButtonRoutes);
+app.use('/api/cs-stocks', csStockRoutes);
+app.use('/api/cs-payments', csPaymentRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/owner', ownerRoutes);
 
 // Health check

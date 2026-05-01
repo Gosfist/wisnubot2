@@ -5,8 +5,30 @@ const DEFAULT_WELCOME_VALUE = "selamat datang di wisnu store.";
 const ENTRIES_TABLE = "customer_service";
 const CONTACTS_TABLE = "customer_service_contacts";
 
+const VALID_DELIVERY_MODES = new Set(["none", "stock", "relay"]);
+
+function normalizeDeliveryMode(value) {
+  const v = String(value ?? "none").toLowerCase();
+  return VALID_DELIVERY_MODES.has(v) ? v : "none";
+}
+
+function normalizePrice(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.floor(n);
+}
+
+function normalizeRelayPrompt(value) {
+  const s = String(value ?? "").trim();
+  return s.length > 0 ? s : null;
+}
+
 function normalizeCommandName(value = "") {
-  const normalizedValue = String(value).trim().toLowerCase();
+  const normalizedValue = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/^[/.]+/, "");
   if (normalizedValue === "start") {
     return "welcome";
   }
@@ -88,17 +110,53 @@ async function ensureDefaultWelcomeForBot(contextOrBotId) {
 async function listEntriesForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT id, nama_perintah, value, created_at, updated_at
+    `SELECT id, nama_perintah, value, delivery_mode, price, relay_prompt,
+            created_at, updated_at
      FROM ${ENTRIES_TABLE}
      WHERE user_id = ?
      ORDER BY id ASC`,
     [user.id],
   );
 
+  if (rows.length === 0) {
+    return [];
+  }
+
+  // Fetch buttons for these entries in one query.
+  const ids = rows.map((r) => Number(r.id));
+  const placeholders = ids.map(() => "?").join(", ");
+  const [btnRows] = await pool.execute(
+    `SELECT id, cs_id, label, button_type, target_command, target_url,
+            reply_text, order_index
+       FROM cs_buttons
+      WHERE cs_id IN (${placeholders})
+      ORDER BY order_index ASC, id ASC`,
+    ids,
+  );
+
+  const buttonsByCs = new Map();
+  for (const b of btnRows) {
+    const csId = Number(b.cs_id);
+    if (!buttonsByCs.has(csId)) buttonsByCs.set(csId, []);
+    buttonsByCs.get(csId).push({
+      id: Number(b.id),
+      label: String(b.label),
+      buttonType: String(b.button_type),
+      targetCommand: b.target_command ? String(b.target_command) : null,
+      targetUrl: b.target_url ? String(b.target_url) : null,
+      replyText: b.reply_text ? String(b.reply_text) : null,
+      orderIndex: Number(b.order_index ?? 0),
+    });
+  }
+
   return rows.map((row) => ({
     id: Number(row.id),
     nama_perintah: String(row.nama_perintah ?? ""),
     value: String(row.value ?? ""),
+    delivery_mode: String(row.delivery_mode ?? "none"),
+    price: row.price === null ? null : Number(row.price),
+    relay_prompt: row.relay_prompt ? String(row.relay_prompt) : null,
+    buttons: buttonsByCs.get(Number(row.id)) ?? [],
     created_at: row.created_at,
     updated_at: row.updated_at,
   }));
@@ -125,16 +183,25 @@ async function createEntry(user, payload) {
     throw new Error(`Perintah "${commandName}" sudah ada`);
   }
 
+  const deliveryMode = normalizeDeliveryMode(payload.deliveryMode);
+  const price = normalizePrice(payload.price);
+  const relayPrompt = normalizeRelayPrompt(payload.relayPrompt);
+
   const [result] = await pool.execute(
-    `INSERT INTO ${ENTRIES_TABLE} (user_id, nama_perintah, value)
-     VALUES (?, ?, ?)`,
-    [user.id, commandName, value],
+    `INSERT INTO ${ENTRIES_TABLE}
+        (user_id, nama_perintah, value, delivery_mode, price, relay_prompt)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [user.id, commandName, value, deliveryMode, price, relayPrompt],
   );
 
   return {
     id: Number(result.insertId),
     nama_perintah: commandName,
     value,
+    delivery_mode: deliveryMode,
+    price,
+    relay_prompt: relayPrompt,
+    buttons: [],
   };
 }
 
@@ -176,11 +243,15 @@ async function updateEntry(user, entryId, payload) {
     throw new Error(`Perintah "${commandName}" sudah ada`);
   }
 
+  const deliveryMode = normalizeDeliveryMode(payload.deliveryMode);
+  const price = normalizePrice(payload.price);
+  const relayPrompt = normalizeRelayPrompt(payload.relayPrompt);
+
   await pool.execute(
     `UPDATE ${ENTRIES_TABLE}
-     SET nama_perintah = ?, value = ?
+     SET nama_perintah = ?, value = ?, delivery_mode = ?, price = ?, relay_prompt = ?
      WHERE id = ? AND user_id = ?`,
-    [commandName, value, numericEntryId, user.id],
+    [commandName, value, deliveryMode, price, relayPrompt, numericEntryId, user.id],
   );
 }
 
@@ -255,6 +326,92 @@ async function getCommandMessage(contextOrBotId, commandName) {
   return rows[0]?.value ? String(rows[0].value) : null;
 }
 
+async function getCommandEntry(contextOrBotId, commandName) {
+  const context = await resolveContext(contextOrBotId);
+  if (!context) {
+    return null;
+  }
+
+  const normalizedCommandName = normalizeCommandName(commandName);
+  if (!normalizedCommandName) {
+    return null;
+  }
+
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT id, user_id, nama_perintah, value, delivery_mode, price, relay_prompt
+     FROM ${ENTRIES_TABLE}
+     WHERE user_id = ? AND nama_perintah = ?
+     LIMIT 1`,
+    [context.userId, normalizedCommandName],
+  );
+
+  const row = rows[0] ?? null;
+  if (!row) {
+    return null;
+  }
+
+  const [buttons] = await pool.execute(
+    `SELECT id, label, button_type, target_command, target_url, reply_text, order_index
+       FROM cs_buttons
+      WHERE cs_id = ?
+      ORDER BY order_index ASC, id ASC`,
+    [Number(row.id)],
+  );
+
+  return {
+    id: Number(row.id),
+    userId: Number(row.user_id),
+    commandName: String(row.nama_perintah ?? ""),
+    value: String(row.value ?? ""),
+    deliveryMode: String(row.delivery_mode ?? "none"),
+    price: row.price === null ? null : Number(row.price),
+    relayPrompt: row.relay_prompt ? String(row.relay_prompt) : null,
+    buttons: buttons.map((button) => ({
+      id: Number(button.id),
+      label: String(button.label ?? ""),
+      buttonType: String(button.button_type ?? ""),
+      targetCommand: button.target_command ? String(button.target_command) : null,
+      targetUrl: button.target_url ? String(button.target_url) : null,
+      replyText: button.reply_text ? String(button.reply_text) : null,
+      orderIndex: Number(button.order_index ?? 0),
+    })),
+  };
+}
+
+async function getButtonAction(contextOrBotId, buttonId) {
+  const context = await resolveContext(contextOrBotId);
+  if (!context) {
+    return null;
+  }
+
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT b.id, b.cs_id, b.label, b.button_type, b.target_command,
+            b.target_url, b.reply_text, cs.user_id
+       FROM cs_buttons b
+       JOIN customer_service cs ON cs.id = b.cs_id
+      WHERE b.id = ? AND cs.user_id = ?
+      LIMIT 1`,
+    [Number(buttonId), context.userId],
+  );
+
+  const row = rows[0] ?? null;
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: Number(row.id),
+    csId: Number(row.cs_id),
+    label: String(row.label ?? ""),
+    buttonType: String(row.button_type ?? ""),
+    targetCommand: row.target_command ? String(row.target_command) : null,
+    targetUrl: row.target_url ? String(row.target_url) : null,
+    replyText: row.reply_text ? String(row.reply_text) : null,
+  };
+}
+
 async function getAllCommands(contextOrBotId) {
   const context = await resolveContext(contextOrBotId);
   if (!context) {
@@ -315,6 +472,8 @@ export const customerServiceService = {
   deleteEntry,
   getWelcomeMessage,
   getCommandMessage,
+  getCommandEntry,
+  getButtonAction,
   getAllCommands,
   reserveFirstReply,
   releaseFirstReply,

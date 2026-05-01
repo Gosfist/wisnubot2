@@ -14,6 +14,7 @@ import { mkdirSync, rmSync } from "fs";
 import { config } from "../config/env.js";
 import { getPool } from "../config/database.js";
 import { customerServiceService } from "./customer-service.service.js";
+import { csPaymentService } from "./cs-payment.service.js";
 import { messageService } from "./message.service.js";
 
 import { logger } from "../utils/logger.js";
@@ -88,6 +89,92 @@ function extractIncomingTextContent(message) {
   }
 
   return "";
+}
+
+function extractQuotedMessageId(message) {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+
+  return (
+    message.extendedTextMessage?.contextInfo?.stanzaId ||
+    message.imageMessage?.contextInfo?.stanzaId ||
+    message.videoMessage?.contextInfo?.stanzaId ||
+    message.interactiveResponseMessage?.contextInfo?.stanzaId ||
+    ""
+  );
+}
+
+function buildCommandInteractiveMessage(remoteJid, entry) {
+  const buttons = [];
+  for (const button of entry.buttons ?? []) {
+    const label = String(button.label ?? "").trim();
+    if (!label) continue;
+
+    if (button.buttonType === "url" && button.targetUrl) {
+      buttons.push({
+        name: "cta_url",
+        buttonParamsJson: JSON.stringify({
+          display_text: label,
+          url: button.targetUrl,
+        }),
+      });
+      continue;
+    }
+
+    let id = "";
+    if (button.buttonType === "link" && button.targetCommand) {
+      id = String(button.targetCommand).replace(/^[/.]+/, "").toLowerCase();
+    } else if (button.buttonType === "buy") {
+      id = `cs_buy:${entry.id}`;
+    } else if (button.buttonType === "reply" && button.replyText) {
+      id = `cs_reply:${button.id}`;
+    }
+
+    if (!id) continue;
+    buttons.push({
+      name: "quick_reply",
+      buttonParamsJson: JSON.stringify({
+        display_text: label,
+        id,
+      }),
+    });
+  }
+
+  if (buttons.length === 0) {
+    return null;
+  }
+
+  return generateWAMessageFromContent(
+    remoteJid,
+    {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 3,
+          },
+          interactiveMessage: proto.Message.InteractiveMessage.create({
+            body: proto.Message.InteractiveMessage.Body.create({
+              text: entry.value,
+            }),
+            footer: proto.Message.InteractiveMessage.Footer.create({
+              text: "By Wisnu Store",
+            }),
+            header: proto.Message.InteractiveMessage.Header.create({
+              title: "",
+              subtitle: "",
+              hasMediaAttachment: false,
+            }),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+              buttons,
+            }),
+          }),
+        },
+      },
+    },
+    {},
+  );
 }
 
 class BaileysManager {
@@ -812,6 +899,74 @@ class BaileysManager {
               continue;
             }
 
+            const quotedMessageId = extractQuotedMessageId(message.message);
+            if (
+              await csPaymentService.handleOwnerDone({
+                userId: customerServiceContext.userId,
+                ownerJid: remoteJid,
+                quotedMessageId,
+                text: incomingText,
+                sock,
+              })
+            ) {
+              continue;
+            }
+
+            if (
+              incomingText &&
+              !incomingText.startsWith("cs_") &&
+              await csPaymentService.handleCustomerRelayInput({
+                userId: customerServiceContext.userId,
+                customerJid: remoteJid,
+                text: extractIncomingTextContent(message.message).trim(),
+                sock,
+              })
+            ) {
+              continue;
+            }
+
+            if (incomingText.startsWith("cs_buy:")) {
+              const csId = Number(incomingText.split(":")[1]);
+              try {
+                const tx = await csPaymentService.createBuyTransaction({
+                  userId: customerServiceContext.userId,
+                  csId,
+                  customerJid: remoteJid,
+                });
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  `Silakan lakukan pembayaran untuk /${tx.commandName}.\n\nNominal: Rp ${tx.amount.toLocaleString("id-ID")}\nOrder ID: ${tx.orderId}\nLink bayar:\n${tx.paymentUrl}\n\nSetelah pembayaran berhasil, pesanan akan diproses otomatis.`,
+                );
+              } catch (err) {
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  err instanceof Error ? err.message : "Gagal membuat link pembayaran.",
+                );
+              }
+              continue;
+            }
+
+            if (incomingText.startsWith("cs_reply:")) {
+              const buttonId = Number(incomingText.split(":")[1]);
+              const action = await customerServiceService.getButtonAction(
+                customerServiceContext,
+                buttonId,
+              );
+              if (action?.replyText) {
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  action.replyText,
+                );
+              }
+              continue;
+            }
+
             const reserved = await customerServiceService.reserveFirstReply(
               customerServiceContext,
               remoteJid,
@@ -999,21 +1154,34 @@ class BaileysManager {
               continue;
             }
 
-            const commandMessage =
-              await customerServiceService.getCommandMessage(
+            const commandEntry =
+              await customerServiceService.getCommandEntry(
                 customerServiceContext,
                 incomingText,
               );
-            if (!commandMessage) {
+            if (!commandEntry) {
               continue;
             }
 
-            await messageService.sendCustomerServiceMessage(
-              sock,
-              null,
+            const interactiveMessage = buildCommandInteractiveMessage(
               remoteJid,
-              commandMessage,
+              commandEntry,
             );
+            if (interactiveMessage) {
+              await messageService.sendCustomerServiceRelayMessage(
+                sock,
+                message.key,
+                remoteJid,
+                interactiveMessage,
+              );
+            } else {
+              await messageService.sendCustomerServiceMessage(
+                sock,
+                null,
+                remoteJid,
+                commandEntry.value,
+              );
+            }
           }
         } catch (err) {
           logger.error(

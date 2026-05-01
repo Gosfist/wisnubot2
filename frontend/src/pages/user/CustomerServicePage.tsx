@@ -149,7 +149,7 @@ export function CustomerServicePage() {
                             {(currentPage - 1) * ITEMS_PER_PAGE + index + 1}
                           </td>
                           <td className="px-5 py-4 text-sm font-semibold text-text-primary">
-                            {item.commandName}
+                            /{isWelcomeCommand ? "start" : item.commandName}
                           </td>
                           <td className="px-5 py-4 text-sm text-text-secondary">
                             {(() => {
