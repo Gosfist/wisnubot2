@@ -1,63 +1,20 @@
 /**
- * 005 — Foundation tables for full-custom Customer Service.
+ * 005 - Foundation tables for full-custom Customer Service.
  *
- * Adds:
- *  - Columns on `customer_service`:
- *      * delivery_mode ('none' | 'stock' | 'relay')
- *      * price          (INT, IDR; nullable)
- *      * relay_prompt   (TEXT, nullable; sent after payment when delivery_mode='relay')
- *  - New table `cs_buttons`        : buttons attached to each CS message
- *  - New table `cs_stocks`         : stock pool per CS (1 row = 1 deliverable item)
- *  - New table `cs_transactions`   : Pakasir payment records
- *  - New table `cs_relay_sessions` : ongoing relay flows (customer <-> owner)
- *  - New table `app_settings`      : per-user Pakasir credentials
+ * Adds product delivery settings, per-entry buttons, stock pools, Pakasir
+ * transactions, relay sessions, and per-user Pakasir credentials.
  *
  * Idempotent: every change checks information_schema first.
  */
 
-async function tableExists(pool, tableName) {
-  const [rows] = await pool.execute(
-    `SELECT COUNT(*) AS cnt
-       FROM information_schema.TABLES
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?`,
-    [tableName],
-  );
-  return Number(rows[0].cnt) > 0;
-}
-
-async function columnExists(pool, tableName, columnName) {
-  const [rows] = await pool.execute(
-    `SELECT COUNT(*) AS cnt
-       FROM information_schema.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND COLUMN_NAME = ?`,
-    [tableName, columnName],
-  );
-  return Number(rows[0].cnt) > 0;
-}
-
-async function addColumnIfMissing(pool, table, column, definition) {
-  if (!(await columnExists(pool, table, column))) {
-    await pool.execute(`ALTER TABLE \`${table}\` ADD COLUMN ${column} ${definition}`);
-  }
-}
-
-async function indexExists(pool, tableName, indexName) {
-  const [rows] = await pool.execute(
-    `SELECT COUNT(*) AS cnt
-       FROM information_schema.STATISTICS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND INDEX_NAME = ?`,
-    [tableName, indexName],
-  );
-  return Number(rows[0].cnt) > 0;
-}
+import {
+  addColumnIfMissing,
+  columnExists,
+  indexExists,
+  tableExists,
+} from "./helpers/schema.js";
 
 export async function up(pool) {
-  // 1. Extend customer_service ----------------------------------------------
   if (await tableExists(pool, "customer_service")) {
     await addColumnIfMissing(
       pool,
@@ -77,9 +34,26 @@ export async function up(pool) {
       "relay_prompt",
       "TEXT NULL AFTER price",
     );
+    await addColumnIfMissing(
+      pool,
+      "customer_service",
+      "relay_waiting_text",
+      "TEXT NULL AFTER relay_prompt",
+    );
+    await addColumnIfMissing(
+      pool,
+      "customer_service",
+      "relay_owner_instruction",
+      "TEXT NULL AFTER relay_waiting_text",
+    );
+    await addColumnIfMissing(
+      pool,
+      "customer_service",
+      "relay_done_text",
+      "TEXT NULL AFTER relay_owner_instruction",
+    );
   }
 
-  // 2. cs_buttons ------------------------------------------------------------
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS cs_buttons (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -97,7 +71,6 @@ export async function up(pool) {
     )
   `);
 
-  // 3. cs_stocks -------------------------------------------------------------
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS cs_stocks (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -113,7 +86,6 @@ export async function up(pool) {
     )
   `);
 
-  // 4. cs_transactions -------------------------------------------------------
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS cs_transactions (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -122,6 +94,7 @@ export async function up(pool) {
       customer_jid VARCHAR(100) NOT NULL,
       pakasir_order_id VARCHAR(120) NOT NULL,
       pakasir_payment_url VARCHAR(500) NULL,
+      qris_string TEXT NULL,
       amount INT NOT NULL,
       status ENUM('pending','paid','failed','expired') NOT NULL DEFAULT 'pending',
       stock_id INT NULL,
@@ -141,7 +114,13 @@ export async function up(pool) {
     )
   `);
 
-  // 5. cs_relay_sessions -----------------------------------------------------
+  await addColumnIfMissing(
+    pool,
+    "cs_transactions",
+    "qris_string",
+    "TEXT NULL AFTER pakasir_payment_url",
+  );
+
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS cs_relay_sessions (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -160,13 +139,13 @@ export async function up(pool) {
         REFERENCES cs_transactions(id) ON DELETE CASCADE
     )
   `);
+
   if (!(await indexExists(pool, "cs_relay_sessions", "ux_cs_relay_tx"))) {
     await pool.execute(
       `ALTER TABLE cs_relay_sessions ADD UNIQUE KEY ux_cs_relay_tx (transaction_id)`,
     );
   }
 
-  // 6. app_settings ----------------------------------------------------------
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS app_settings (
       user_id INT PRIMARY KEY,
@@ -177,6 +156,7 @@ export async function up(pool) {
         REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
   if (await columnExists(pool, "app_settings", "owner_relay_jid")) {
     await pool.execute(`ALTER TABLE app_settings DROP COLUMN owner_relay_jid`);
   }

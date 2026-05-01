@@ -1,13 +1,11 @@
-export async function up(pool) {
-  const [rows] = await pool.execute(`
-    SELECT COUNT(*) AS cnt
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'bots'
-      AND COLUMN_NAME = 'bot_role'
-  `);
+import { columnExists, tableExists } from "./helpers/schema.js";
 
-  if (Number(rows[0].cnt) > 0) {
+export async function up(pool) {
+  const hasBotsTable = await tableExists(pool, "bots");
+  const hasBotRoleColumn =
+    hasBotsTable && (await columnExists(pool, "bots", "bot_role"));
+
+  if (hasBotRoleColumn) {
     await pool.execute(`ALTER TABLE bots DROP COLUMN bot_role`);
   }
 }

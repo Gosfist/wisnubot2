@@ -29,9 +29,9 @@ export async function up(pool) {
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
       phone_number VARCHAR(20) NULL,
+      owner_phone_number VARCHAR(20) NULL,
       session_name VARCHAR(100) NOT NULL,
       is_online TINYINT(1) NOT NULL DEFAULT 0,
-      bot_role ENUM('default', 'broadcast', 'service') NOT NULL DEFAULT 'broadcast',
       expired_at DATETIME NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY ux_bots_session_name (session_name),
@@ -74,25 +74,25 @@ export async function up(pool) {
       CONSTRAINT fk_activity_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
 
-    `CREATE TABLE IF NOT EXISTS customer_service_owner (
+    `CREATE TABLE IF NOT EXISTS customer_service (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      bot_id INT NOT NULL,
+      user_id INT NOT NULL,
       nama_perintah VARCHAR(100) NOT NULL,
       value TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY ux_customer_service_owner_bot_command (bot_id, nama_perintah),
-      CONSTRAINT fk_customer_service_owner_bot FOREIGN KEY (bot_id) REFERENCES bots(id) ON DELETE CASCADE
+      UNIQUE KEY ux_customer_service_user_command (user_id, nama_perintah),
+      CONSTRAINT fk_customer_service_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
 
-    `CREATE TABLE IF NOT EXISTS customer_service_owner_contacts (
+    `CREATE TABLE IF NOT EXISTS customer_service_contacts (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      bot_id INT NOT NULL,
+      user_id INT NOT NULL,
       contact_jid VARCHAR(120) NOT NULL,
       first_replied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE KEY ux_customer_service_owner_contacts_bot_contact (bot_id, contact_jid),
-      CONSTRAINT fk_customer_service_owner_contacts_bot FOREIGN KEY (bot_id) REFERENCES bots(id) ON DELETE CASCADE
+      UNIQUE KEY ux_customer_service_contacts_user_jid (user_id, contact_jid),
+      CONSTRAINT fk_customer_service_contacts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`,
   ];
 
