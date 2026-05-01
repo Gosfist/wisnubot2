@@ -11,6 +11,7 @@ const {
 import { Boom } from "@hapi/boom";
 import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
+import QRCode from "qrcode";
 import { config } from "../config/env.js";
 import { getPool } from "../config/database.js";
 import { customerServiceService } from "./customer-service.service.js";
@@ -25,6 +26,34 @@ const DEFAULT_BROWSER = ["Mac OS", "Desktop", "14.4.1"];
 function extractIncomingTextContent(message) {
   if (!message || typeof message !== "object") {
     return "";
+  }
+
+  const nestedMessage =
+    message.ephemeralMessage?.message ||
+    message.viewOnceMessage?.message ||
+    message.viewOnceMessageV2?.message;
+  if (nestedMessage) {
+    const nestedText = extractIncomingTextContent(nestedMessage);
+    if (nestedText) return nestedText;
+  }
+
+  const nativeFlowParamsJson =
+    message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (nativeFlowParamsJson) {
+    try {
+      const params = JSON.parse(nativeFlowParamsJson);
+      const id =
+        params.id ||
+        params.button_id ||
+        params.selectedId ||
+        params.selectedRowId ||
+        params.payload;
+      if (typeof id === "string" && id.trim()) {
+        return id;
+      }
+    } catch (err) {
+      // ignore parse error
+    }
   }
 
   if (typeof message.conversation === "string") {
@@ -43,16 +72,16 @@ function extractIncomingTextContent(message) {
     return message.videoMessage.caption;
   }
 
-  if (typeof message.buttonsResponseMessage?.selectedDisplayText === "string") {
-    return message.buttonsResponseMessage.selectedDisplayText;
-  }
-
   if (typeof message.buttonsResponseMessage?.selectedButtonId === "string") {
     return message.buttonsResponseMessage.selectedButtonId;
   }
 
-  if (typeof message.listResponseMessage?.title === "string") {
-    return message.listResponseMessage.title;
+  if (typeof message.buttonReplyMessage?.id === "string") {
+    return message.buttonReplyMessage.id;
+  }
+
+  if (typeof message.buttonsResponseMessage?.selectedDisplayText === "string") {
+    return message.buttonsResponseMessage.selectedDisplayText;
   }
 
   if (
@@ -62,30 +91,18 @@ function extractIncomingTextContent(message) {
     return message.listResponseMessage.singleSelectReply.selectedRowId;
   }
 
-  if (
-    typeof message.templateButtonReplyMessage?.selectedDisplayText === "string"
-  ) {
-    return message.templateButtonReplyMessage.selectedDisplayText;
+  if (typeof message.listResponseMessage?.title === "string") {
+    return message.listResponseMessage.title;
   }
 
   if (typeof message.templateButtonReplyMessage?.selectedId === "string") {
     return message.templateButtonReplyMessage.selectedId;
   }
 
-  // ==== EXTRACTION UNTUK INTERACTIVE MESSAGE (NATIVE FLOW/LIST BUTTON) ====
   if (
-    message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson
+    typeof message.templateButtonReplyMessage?.selectedDisplayText === "string"
   ) {
-    try {
-      const params = JSON.parse(
-        message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson,
-      );
-      if (params.id) {
-        return params.id;
-      }
-    } catch (err) {
-      // ignore parse error
-    }
+    return message.templateButtonReplyMessage.selectedDisplayText;
   }
 
   return "";
@@ -111,20 +128,11 @@ function buildCommandInteractiveMessage(remoteJid, entry) {
     const label = String(button.label ?? "").trim();
     if (!label) continue;
 
-    if (button.buttonType === "url" && button.targetUrl) {
-      buttons.push({
-        name: "cta_url",
-        buttonParamsJson: JSON.stringify({
-          display_text: label,
-          url: button.targetUrl,
-        }),
-      });
-      continue;
-    }
-
     let id = "";
     if (button.buttonType === "link" && button.targetCommand) {
-      id = String(button.targetCommand).replace(/^[/.]+/, "").toLowerCase();
+      id = String(button.targetCommand)
+        .replace(/^[/.]+/, "")
+        .toLowerCase();
     } else if (button.buttonType === "buy") {
       id = `cs_buy:${entry.id}`;
     } else if (button.buttonType === "reply" && button.replyText) {
@@ -166,9 +174,128 @@ function buildCommandInteractiveMessage(remoteJid, entry) {
               subtitle: "",
               hasMediaAttachment: false,
             }),
-            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-              buttons,
+            nativeFlowMessage:
+              proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                buttons,
+              }),
+          }),
+        },
+      },
+    },
+    {},
+  );
+}
+
+function buildWelcomeStartButtonMessage(remoteJid, text) {
+  return generateWAMessageFromContent(
+    remoteJid,
+    {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 3,
+          },
+          interactiveMessage: proto.Message.InteractiveMessage.create({
+            body: proto.Message.InteractiveMessage.Body.create({ text }),
+            footer: proto.Message.InteractiveMessage.Footer.create({
+              text: "By Wisnu Store",
             }),
+            header: proto.Message.InteractiveMessage.Header.create({
+              title: "",
+              subtitle: "",
+              hasMediaAttachment: false,
+            }),
+            nativeFlowMessage:
+              proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                buttons: [
+                  {
+                    name: "quick_reply",
+                    buttonParamsJson: JSON.stringify({
+                      display_text: "Start",
+                      id: "start",
+                    }),
+                  },
+                ],
+              }),
+          }),
+        },
+      },
+    },
+    {},
+  );
+}
+
+function buildPaymentCaption(tx) {
+  const priceText = tx.price.toLocaleString("id-ID");
+  const adminFeeText = tx.adminFee.toLocaleString("id-ID");
+  const totalPaymentText = tx.totalPayment.toLocaleString("id-ID");
+  return (
+    `IdOrder: ${tx.orderId}\n` +
+    `Harga: Rp ${priceText}\n` +
+    `Biaya Admin: Rp ${adminFeeText}\n` +
+    `Total Bayar: Rp ${totalPaymentText}`
+  );
+}
+
+function buildPaymentActionContent(tx, qrImage = null, notice = "") {
+  const bodyText = notice
+    ? `${buildPaymentCaption(tx)}\n\n${notice}`
+    : buildPaymentCaption(tx);
+
+  return {
+    interactiveMessage: {
+      title: bodyText,
+      footer: "By Wisnu Store",
+      ...(qrImage ? { image: qrImage } : {}),
+      buttons: [
+        {
+          name: "cta_url",
+          buttonParamsJson: JSON.stringify({
+            display_text: "Bayar Sekarang",
+            url: tx.paymentUrl,
+            merchant_url: tx.paymentUrl,
+          }),
+        },
+        {
+          name: "quick_reply",
+          buttonParamsJson: JSON.stringify({
+            display_text: "Cek Pembayaran",
+            id: `cs_checkpay:${tx.orderId}`,
+          }),
+        },
+      ],
+    },
+  };
+}
+
+function buildPaymentActionMessage(remoteJid, tx, notice = "") {
+  const content = buildPaymentActionContent(tx, null, notice);
+  return generateWAMessageFromContent(
+    remoteJid,
+    {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 3,
+          },
+          interactiveMessage: proto.Message.InteractiveMessage.create({
+            body: proto.Message.InteractiveMessage.Body.create({
+              text: content.interactiveMessage.title,
+            }),
+            footer: proto.Message.InteractiveMessage.Footer.create({
+              text: content.interactiveMessage.footer,
+            }),
+            header: proto.Message.InteractiveMessage.Header.create({
+              title: "",
+              subtitle: "",
+              hasMediaAttachment: false,
+            }),
+            nativeFlowMessage:
+              proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                buttons: content.interactiveMessage.buttons,
+              }),
           }),
         },
       },
@@ -297,7 +424,12 @@ class BaileysManager {
     return Number(botId) < 0;
   }
 
-  async persistConnectedBot(userId, sessionName, phoneNumber, ownerPhoneNumber = null) {
+  async persistConnectedBot(
+    userId,
+    sessionName,
+    phoneNumber,
+    ownerPhoneNumber = null,
+  ) {
     const pool = getPool();
 
     const [result] = await pool.execute(
@@ -356,7 +488,9 @@ class BaileysManager {
     this.removeSessionDirectory(sessionName);
     this.pendingConnections.delete(sessionName);
 
-    const ownerPhoneNumber = this.normalizeWhatsappPhoneNumber(options.ownerPhoneNumber);
+    const ownerPhoneNumber = this.normalizeWhatsappPhoneNumber(
+      options.ownerPhoneNumber,
+    );
 
     this.pendingConnections.set(sessionName, {
       tempBotId,
@@ -428,7 +562,7 @@ class BaileysManager {
 
   async deleteBotRecord(botId, sessionName) {
     const key = Number(botId);
-    
+
     // Gracefully logout socket to stop background processes (creds.update, etc)
     const conn = this.connections.get(key);
     if (conn?.sock) {
@@ -915,36 +1049,122 @@ class BaileysManager {
             if (
               incomingText &&
               !incomingText.startsWith("cs_") &&
-              await csPaymentService.handleCustomerRelayInput({
+              (await csPaymentService.handleCustomerRelayInput({
                 userId: customerServiceContext.userId,
                 customerJid: remoteJid,
                 text: extractIncomingTextContent(message.message).trim(),
                 sock,
-              })
+              }))
             ) {
               continue;
             }
 
             if (incomingText.startsWith("cs_buy:")) {
               const csId = Number(incomingText.split(":")[1]);
+              logger.info(
+                `Customer service buy button clicked: csId=${csId}, customer=${remoteJid}`,
+              );
               try {
                 const tx = await csPaymentService.createBuyTransaction({
                   userId: customerServiceContext.userId,
                   csId,
                   customerJid: remoteJid,
                 });
-                await messageService.sendCustomerServiceMessage(
+                const qrImage = await QRCode.toBuffer(tx.qrisString, {
+                  type: "png",
+                  errorCorrectionLevel: "M",
+                  margin: 2,
+                  width: 720,
+                });
+                const paymentActionContent = buildPaymentActionContent(
+                  tx,
+                  qrImage,
+                );
+                await messageService.sendCustomerServiceInteractiveMessage(
                   sock,
                   message.key,
                   remoteJid,
-                  `Silakan lakukan pembayaran untuk /${tx.commandName}.\n\nNominal: Rp ${tx.amount.toLocaleString("id-ID")}\nOrder ID: ${tx.orderId}\nLink bayar:\n${tx.paymentUrl}\n\nSetelah pembayaran berhasil, pesanan akan diproses otomatis.`,
+                  paymentActionContent,
                 );
               } catch (err) {
                 await messageService.sendCustomerServiceMessage(
                   sock,
                   message.key,
                   remoteJid,
-                  err instanceof Error ? err.message : "Gagal membuat link pembayaran.",
+                  err instanceof Error
+                    ? err.message
+                    : "Gagal membuat link pembayaran.",
+                );
+              }
+              continue;
+            }
+
+            if (incomingText.startsWith("cs_checkpay:")) {
+              const orderId = incomingText.replace(/^cs_checkpay:/, "").trim();
+              logger.info(
+                `Customer service payment check clicked: orderId=${orderId}, customer=${remoteJid}`,
+              );
+              try {
+                const result = await csPaymentService.checkAndDeliverPayment({
+                  userId: customerServiceContext.userId,
+                  orderId,
+                  customerJid: remoteJid,
+                  sock,
+                });
+                if (!result.paid) {
+                  const notice =
+                    result.reason ||
+                    "Pembayaran belum terdeteksi. Jika sudah bayar, tunggu sebentar lalu klik Cek Pembayaran lagi.";
+                  if (result.transaction?.qrisString) {
+                    const qrImage = await QRCode.toBuffer(
+                      result.transaction.qrisString,
+                      {
+                        type: "png",
+                        errorCorrectionLevel: "M",
+                        margin: 2,
+                        width: 720,
+                      },
+                    );
+                    const paymentActionContent = buildPaymentActionContent(
+                      result.transaction,
+                      qrImage,
+                      notice,
+                    );
+                    await messageService.sendCustomerServiceInteractiveMessage(
+                      sock,
+                      message.key,
+                      remoteJid,
+                      paymentActionContent,
+                    );
+                  } else if (result.transaction) {
+                    const paymentActionMessage = buildPaymentActionMessage(
+                      remoteJid,
+                      result.transaction,
+                      notice,
+                    );
+                    await messageService.sendCustomerServiceRelayMessage(
+                      sock,
+                      message.key,
+                      remoteJid,
+                      paymentActionMessage,
+                    );
+                  } else {
+                    await messageService.sendCustomerServiceMessage(
+                      sock,
+                      message.key,
+                      remoteJid,
+                      notice,
+                    );
+                  }
+                }
+              } catch (err) {
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  err instanceof Error
+                    ? err.message
+                    : "Gagal mengecek pembayaran.",
                 );
               }
               continue;
@@ -971,6 +1191,192 @@ class BaileysManager {
               customerServiceContext,
               remoteJid,
             );
+            const isStartTrigger = [
+              "menu",
+              ".menu",
+              "start",
+              ".start",
+            ].includes(incomingText);
+
+            // First-time customer gets /welcome text only. /start is the menu.
+            if (reserved && !isStartTrigger) {
+              const welcomeMessage =
+                await customerServiceService.getWelcomeMessage(
+                  customerServiceContext,
+                );
+              if (!welcomeMessage) {
+                logger.warn(
+                  `Welcome customer service not found for bot ${activeBotId}. Skipping auto-reply.`,
+                );
+                await customerServiceService.releaseFirstReply(
+                  customerServiceContext,
+                  remoteJid,
+                );
+              } else {
+                const welcomeStartMessage = buildWelcomeStartButtonMessage(
+                  remoteJid,
+                  welcomeMessage,
+                );
+                const sent =
+                  await messageService.sendCustomerServiceRelayMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    welcomeStartMessage,
+                  );
+                if (!sent) {
+                  await customerServiceService.releaseFirstReply(
+                    customerServiceContext,
+                    remoteJid,
+                  );
+                }
+              }
+              continue;
+            }
+
+            if (["welcome", ".welcome"].includes(incomingText)) {
+              const welcomeMessage =
+                await customerServiceService.getWelcomeMessage(
+                  customerServiceContext,
+                );
+              if (welcomeMessage) {
+                const welcomeStartMessage = buildWelcomeStartButtonMessage(
+                  remoteJid,
+                  welcomeMessage,
+                );
+                await messageService.sendCustomerServiceRelayMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  welcomeStartMessage,
+                );
+              }
+              continue;
+            }
+
+            if (isStartTrigger) {
+              const startEntry = await customerServiceService.getCommandEntry(
+                customerServiceContext,
+                "start",
+              );
+              if (startEntry) {
+                let finalStartText = startEntry.value;
+                let selectedMenuCommands = null;
+                try {
+                  const parsedObj = JSON.parse(startEntry.value);
+                  if (
+                    parsedObj.text !== undefined &&
+                    Array.isArray(parsedObj.menuList)
+                  ) {
+                    finalStartText = parsedObj.text;
+                    selectedMenuCommands = parsedObj.menuList;
+                  }
+                } catch {
+                  // Plain text start message.
+                }
+
+                const allCommands = await customerServiceService.getAllCommands(
+                  customerServiceContext,
+                );
+                const activeRows = selectedMenuCommands
+                  ? selectedMenuCommands
+                      .map((cmdName) =>
+                        allCommands.find((c) => c.command === cmdName),
+                      )
+                      .filter(Boolean)
+                      .map((cmd) => ({
+                        title: cmd.command.toUpperCase(),
+                        id: cmd.command,
+                      }))
+                  : allCommands.map((cmd) => ({
+                      title: cmd.command.toUpperCase(),
+                      id: cmd.command,
+                    }));
+
+                if (activeRows.length > 0) {
+                  const listData = {
+                    title: "List Menu",
+                    sections: [
+                      {
+                        title: "Daftar Menu Tersedia",
+                        rows: activeRows,
+                      },
+                    ],
+                  };
+
+                  try {
+                    const msg = generateWAMessageFromContent(
+                      remoteJid,
+                      {
+                        viewOnceMessage: {
+                          message: {
+                            messageContextInfo: {
+                              deviceListMetadata: {},
+                              deviceListMetadataVersion: 3,
+                            },
+                            interactiveMessage:
+                              proto.Message.InteractiveMessage.create({
+                                body: proto.Message.InteractiveMessage.Body.create(
+                                  { text: finalStartText },
+                                ),
+                                footer:
+                                  proto.Message.InteractiveMessage.Footer.create(
+                                    { text: "By Wisnu Store" },
+                                  ),
+                                header:
+                                  proto.Message.InteractiveMessage.Header.create(
+                                    {
+                                      title: "",
+                                      subtitle: "",
+                                      hasMediaAttachment: false,
+                                    },
+                                  ),
+                                nativeFlowMessage:
+                                  proto.Message.InteractiveMessage.NativeFlowMessage.create(
+                                    {
+                                      buttons: [
+                                        {
+                                          name: "single_select",
+                                          buttonParamsJson:
+                                            JSON.stringify(listData),
+                                        },
+                                        {
+                                          name: "cta_url",
+                                          buttonParamsJson: JSON.stringify({
+                                            display_text: "Contact Owner",
+                                            url: `https://wa.me/${customerServiceContext.userPhoneNumber}`,
+                                          }),
+                                        },
+                                      ],
+                                    },
+                                  ),
+                              }),
+                          },
+                        },
+                      },
+                      {},
+                    );
+
+                    await messageService.sendCustomerServiceRelayMessage(
+                      sock,
+                      message.key,
+                      remoteJid,
+                      msg,
+                    );
+                  } catch (err) {
+                    logger.error(err, "Failed to send dynamic start menu");
+                  }
+                } else {
+                  await messageService.sendCustomerServiceMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    finalStartText,
+                  );
+                }
+              }
+              continue;
+            }
 
             // ==================== DYNAMIC LIST MENU ====================
             const isWelcomeCommand = [
@@ -1093,7 +1499,7 @@ class BaileysManager {
                                           name: "cta_url",
                                           buttonParamsJson: JSON.stringify({
                                             display_text: "Contact Owner",
-                                            url: `https://wa.me/${customerServiceContext.userPhoneNumber}`
+                                            url: `https://wa.me/${customerServiceContext.userPhoneNumber}`,
                                           }),
                                         },
                                       ],
@@ -1154,11 +1560,10 @@ class BaileysManager {
               continue;
             }
 
-            const commandEntry =
-              await customerServiceService.getCommandEntry(
-                customerServiceContext,
-                incomingText,
-              );
+            const commandEntry = await customerServiceService.getCommandEntry(
+              customerServiceContext,
+              incomingText,
+            );
             if (!commandEntry) {
               continue;
             }

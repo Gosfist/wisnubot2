@@ -1,4 +1,4 @@
-import { Save, ChevronUp, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Save, GripVertical, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
@@ -25,7 +25,6 @@ const DELIVERY_OPTIONS: { value: CsDeliveryMode; label: string; desc: string }[]
 const BUTTON_TYPE_OPTIONS: { value: CsButtonType; label: string }[] = [
   { value: "link", label: "Menu (link ke perintah)" },
   { value: "buy", label: "Beli (payment Pakasir)" },
-  { value: "url", label: "URL (link eksternal)" },
   { value: "reply", label: "Reply (kirim teks)" },
 ];
 
@@ -70,28 +69,53 @@ export function AddCustomerServicePage() {
   const [deliveryMode, setDeliveryMode] = useState<CsDeliveryMode>("none");
   const [price, setPrice] = useState<string>("");
   const [relayPrompt, setRelayPrompt] = useState("");
+  const [relayWaitingText, setRelayWaitingText] = useState("");
+  const [relayOwnerInstruction, setRelayOwnerInstruction] = useState("");
+  const [relayDoneText, setRelayDoneText] = useState("");
   const [buttons, setButtons] = useState<CsButtonModel[]>([]);
   const [selectedMenus, setSelectedMenus] = useState<string[]>([]); // legacy welcome menu list
+  const [draggingMenuIndex, setDraggingMenuIndex] = useState<number | null>(null);
+  const [draggingButtonIndex, setDraggingButtonIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(Boolean(editId));
 
   const isWelcomeCommand =
     existingItem?.commandName.trim().toLowerCase() === "welcome";
+  const isStartCommand =
+    existingItem?.commandName.trim().toLowerCase() === "start";
+  const isDefaultCommand = isWelcomeCommand || isStartCommand;
 
   const availableCommands = useMemo(() => {
     return appData.customerServiceItems.filter(
-      (i) => i.commandName.trim().toLowerCase() !== "welcome",
+      (i) => !["welcome", "start"].includes(i.commandName.trim().toLowerCase()),
     );
   }, [appData.customerServiceItems]);
 
   // -------- legacy welcome menu list helpers --------
-  function moveMenu(index: number, direction: number) {
+  function moveMenuByDrag(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= selectedMenus.length || toIndex >= selectedMenus.length) return;
     const next = [...selectedMenus];
-    const t = index + direction;
-    if (t < 0 || t >= next.length) return;
-    [next[index], next[t]] = [next[t], next[index]];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
     setSelectedMenus(next);
+    setDraggingMenuIndex(toIndex);
   }
+
+  function handleMenuDragStart(index: number, event: React.DragEvent<HTMLButtonElement>) {
+    setDraggingMenuIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function handleMenuDragOver(index: number, event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (draggingMenuIndex !== null && draggingMenuIndex !== index) {
+      moveMenuByDrag(draggingMenuIndex, index);
+    }
+  }
+
   function addMenu() {
     setSelectedMenus([...selectedMenus, ""]);
   }
@@ -115,12 +139,28 @@ export function AddCustomerServicePage() {
   function removeButton(index: number) {
     setButtons(buttons.filter((_, i) => i !== index).map((b, i) => ({ ...b, orderIndex: i })));
   }
-  function moveButton(index: number, direction: number) {
-    const t = index + direction;
-    if (t < 0 || t >= buttons.length) return;
+  function moveButtonByDrag(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= buttons.length || toIndex >= buttons.length) return;
     const next = [...buttons];
-    [next[index], next[t]] = [next[t], next[index]];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
     setButtons(next.map((b, i) => ({ ...b, orderIndex: i })));
+    setDraggingButtonIndex(toIndex);
+  }
+
+  function handleButtonDragStart(index: number, event: React.DragEvent<HTMLButtonElement>) {
+    setDraggingButtonIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function handleButtonDragOver(index: number, event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (draggingButtonIndex !== null && draggingButtonIndex !== index) {
+      moveButtonByDrag(draggingButtonIndex, index);
+    }
   }
 
   const hasBuyButton = useMemo(
@@ -152,13 +192,16 @@ export function AddCustomerServicePage() {
           setDeliveryMode(next.deliveryMode);
           setPrice(next.price === null ? "" : String(next.price));
           setRelayPrompt(next.relayPrompt ?? "");
+          setRelayWaitingText(next.relayWaitingText ?? "");
+          setRelayOwnerInstruction(next.relayOwnerInstruction ?? "");
+          setRelayDoneText(next.relayDoneText ?? "");
           setButtons(
             next.buttons.map((b, i) => ({ ...b, orderIndex: i })),
           );
 
           let parsedText = next.value;
           let activeMenus: string[] = [];
-          if (next.commandName.trim().toLowerCase() === "welcome") {
+          if (next.commandName.trim().toLowerCase() === "start") {
             try {
               const parsedObj = JSON.parse(next.value);
               if (parsedObj.text !== undefined && Array.isArray(parsedObj.menuList)) {
@@ -191,9 +234,6 @@ export function AddCustomerServicePage() {
       if (b.buttonType === "link" && !b.targetCommand?.trim()) {
         return `Button "${label}": pilih target command`;
       }
-      if (b.buttonType === "url" && !b.targetUrl?.trim()) {
-        return `Button "${label}": isi URL`;
-      }
       if (b.buttonType === "reply" && !b.replyText?.trim()) {
         return `Button "${label}": isi teks balasan`;
       }
@@ -221,6 +261,22 @@ export function AddCustomerServicePage() {
     }
 
     if (hasBuyButton) {
+      let settings;
+      try {
+        settings = await appData.fetchSettings();
+      } catch {
+        showToast("Gagal mengecek setting Pakasir.", "danger");
+        return;
+      }
+
+      if (!settings.pakasirSlug.trim() || !settings.hasApiKey) {
+        showToast(
+          "Slug dan API key Pakasir belum diisi, silakan isi terlebih dahulu di Settings.",
+          "danger",
+        );
+        return;
+      }
+
       const priceNum = Number(price);
       if (!Number.isFinite(priceNum) || priceNum <= 0) {
         showToast("Harga wajib diisi (lebih dari 0) untuk button Beli.", "danger");
@@ -232,9 +288,17 @@ export function AddCustomerServicePage() {
       showToast("Prompt untuk customer wajib diisi pada mode Forward ke Owner.", "danger");
       return;
     }
+    if (deliveryMode === "relay" && !relayWaitingText.trim()) {
+      showToast("Pesan setelah data diteruskan ke owner wajib diisi.", "danger");
+      return;
+    }
+    if (deliveryMode === "relay" && !relayDoneText.trim()) {
+      showToast("Pesan customer saat owner reply done wajib diisi.", "danger");
+      return;
+    }
 
     let finalValue = trimmedValue;
-    if (isWelcomeCommand) {
+    if (isStartCommand) {
       const validMenus = selectedMenus.filter((m) => m.trim().length > 0);
       finalValue = JSON.stringify({ text: trimmedValue, menuList: validMenus });
     }
@@ -245,6 +309,9 @@ export function AddCustomerServicePage() {
       deliveryMode,
       price: hasBuyButton && price !== "" ? Number(price) : null,
       relayPrompt: deliveryMode === "relay" ? relayPrompt.trim() : null,
+      relayWaitingText: deliveryMode === "relay" ? relayWaitingText.trim() : null,
+      relayOwnerInstruction: deliveryMode === "relay" ? relayOwnerInstruction.trim() : null,
+      relayDoneText: deliveryMode === "relay" ? relayDoneText.trim() : null,
     };
 
     setIsSaving(true);
@@ -264,7 +331,7 @@ export function AddCustomerServicePage() {
             ...b,
             label: b.label.trim(),
             targetCommand: b.buttonType === "link" ? stripPrefix(b.targetCommand ?? "") : null,
-            targetUrl: b.buttonType === "url" ? b.targetUrl?.trim() ?? null : null,
+            targetUrl: null,
             replyText: b.buttonType === "reply" ? b.replyText?.trim() ?? null : null,
             orderIndex: i,
           })),
@@ -311,15 +378,15 @@ export function AddCustomerServicePage() {
                 <input
                   className={inputBase + " flex-1"}
                   type="text"
-                  value={isWelcomeCommand ? "start" : commandName.replace(/^\/+/, "")}
+                  value={isDefaultCommand ? commandName : commandName.replace(/^\/+/, "")}
                   onChange={(e) => setCommandName(e.target.value.replace(/^\/+/, "").slice(0, 100))}
                   placeholder="contoh: menu, harga, akun-netflix"
-                  disabled={isWelcomeCommand}
+                  disabled={isDefaultCommand}
                 />
               </div>
-              {isWelcomeCommand && (
+              {isDefaultCommand && (
                 <span className="text-xs text-text-secondary">
-                  Perintah <code>/start</code> default dan tidak bisa diubah/dihapus.
+                  Perintah <code>/{commandName}</code> default dan tidak bisa diubah/dihapus.
                 </span>
               )}
             </label>
@@ -327,7 +394,11 @@ export function AddCustomerServicePage() {
             {/* Value */}
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">
-                {isWelcomeCommand ? "Pesan Welcome" : "Pesan Balasan"}
+                {isWelcomeCommand
+                  ? "Pesan Welcome"
+                  : isStartCommand
+                    ? "Pesan Start"
+                    : "Pesan Balasan"}
               </span>
               <textarea
                 className="min-h-[160px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none transition focus:border-[rgba(56,189,248,0.4)]"
@@ -339,24 +410,41 @@ export function AddCustomerServicePage() {
             </label>
 
             {/* Welcome legacy menu (kept for backward compatibility) */}
-            {isWelcomeCommand && (
+            {isStartCommand && (
               <label className="block space-y-2">
                 <span className="text-sm font-semibold text-text-secondary">
-                  List Menu (lama — opsional)
+                  List Menu
                 </span>
                 <div className={cardInner}>
                   {selectedMenus.map((menu, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <div className="flex flex-col -space-y-1">
-                        <button type="button" disabled={index === 0} onClick={() => moveMenu(index, -1)} className="p-1 text-text-secondary hover:text-white disabled:opacity-30">
-                          <ChevronUp size={18} />
-                        </button>
-                        <button type="button" disabled={index === selectedMenus.length - 1} onClick={() => moveMenu(index, 1)} className="p-1 text-text-secondary hover:text-white disabled:opacity-30">
-                          <ChevronDown size={18} />
-                        </button>
-                      </div>
+                    <div
+                      key={index}
+                      className={
+                        "grid grid-cols-[40px_minmax(0,1fr)_40px] items-center gap-2 rounded-[12px] border p-2 transition " +
+                        (draggingMenuIndex === index
+                          ? "border-[rgba(56,189,248,0.48)] bg-[rgba(56,189,248,0.08)]"
+                          : "border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.36)]")
+                      }
+                      onDragOver={(event) => handleMenuDragOver(index, event)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        setDraggingMenuIndex(null);
+                      }}
+                    >
+                      <button
+                        type="button"
+                        draggable={selectedMenus.length > 1}
+                        onDragStart={(event) => handleMenuDragStart(index, event)}
+                        onDragEnd={() => setDraggingMenuIndex(null)}
+                        className="flex h-[46px] w-[40px] cursor-grab items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.52)] text-text-secondary transition hover:border-[rgba(56,189,248,0.32)] hover:text-white active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Geser urutan menu"
+                        title="Tahan lalu geser untuk mengubah urutan"
+                        disabled={selectedMenus.length <= 1}
+                      >
+                        <GripVertical size={18} />
+                      </button>
                       <select
-                        className="flex-1 min-h-[42px] rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-3 py-2 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                        className="min-h-[54px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
                         value={menu}
                         onChange={(e) => updateMenu(index, e.target.value)}
                       >
@@ -371,7 +459,7 @@ export function AddCustomerServicePage() {
                           );
                         })}
                       </select>
-                      <button type="button" onClick={() => removeMenu(index)} className="p-2 text-[rgba(244,63,94,0.7)] hover:text-danger hover:bg-[rgba(244,63,94,0.1)] rounded-xl">
+                      <button type="button" onClick={() => removeMenu(index)} className="flex h-[42px] w-[40px] items-center justify-center rounded-xl text-[rgba(244,63,94,0.7)] hover:bg-[rgba(244,63,94,0.1)] hover:text-danger" aria-label="Hapus menu">
                         <Trash2 size={18} />
                       </button>
                     </div>
@@ -386,7 +474,7 @@ export function AddCustomerServicePage() {
             )}
 
             {/* Buttons builder */}
-            {!isWelcomeCommand && (
+            {!isDefaultCommand && (
               <div className="space-y-2">
                 <span className="text-sm font-semibold text-text-secondary">Button (opsional)</span>
                 <div className={cardInner}>
@@ -396,16 +484,33 @@ export function AddCustomerServicePage() {
                     </span>
                   )}
                   {buttons.map((b, index) => (
-                    <div key={index} className="rounded-[12px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.5)] p-3 space-y-2">
+                    <div
+                      key={index}
+                      className={
+                        "rounded-[12px] border p-3 space-y-2 transition " +
+                        (draggingButtonIndex === index
+                          ? "border-[rgba(56,189,248,0.48)] bg-[rgba(56,189,248,0.08)]"
+                          : "border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.5)]")
+                      }
+                      onDragOver={(event) => handleButtonDragOver(index, event)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        setDraggingButtonIndex(null);
+                      }}
+                    >
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_40px] items-start gap-3">
-                        <div className="mt-[18px] flex h-[54px] flex-col items-center justify-center -space-y-1 rounded-[12px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.52)]">
-                          <button type="button" disabled={index === 0} onClick={() => moveButton(index, -1)} className="p-1 text-text-secondary hover:text-white disabled:opacity-30" aria-label="Naikkan button">
-                            <ChevronUp size={18} />
-                          </button>
-                          <button type="button" disabled={index === buttons.length - 1} onClick={() => moveButton(index, 1)} className="p-1 text-text-secondary hover:text-white disabled:opacity-30" aria-label="Turunkan button">
-                            <ChevronDown size={18} />
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          draggable={buttons.length > 1}
+                          onDragStart={(event) => handleButtonDragStart(index, event)}
+                          onDragEnd={() => setDraggingButtonIndex(null)}
+                          className="mt-[18px] flex h-[54px] w-[40px] cursor-grab items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.52)] text-text-secondary transition hover:border-[rgba(56,189,248,0.32)] hover:text-white active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label="Geser urutan button"
+                          title="Tahan lalu geser untuk mengubah urutan"
+                          disabled={buttons.length <= 1}
+                        >
+                          <GripVertical size={18} />
+                        </button>
                         <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(240px,1fr)_minmax(320px,360px)]">
                           <label className="grid min-w-0 gap-2">
                             <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">Label Button</span>
@@ -449,15 +554,6 @@ export function AddCustomerServicePage() {
                         </select>
                       )}
 
-                      {b.buttonType === "url" && (
-                        <input
-                          className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
-                          placeholder="https://contoh.com atau https://wa.me/62..."
-                          value={b.targetUrl ?? ""}
-                          onChange={(e) => updateButton(index, { targetUrl: e.target.value })}
-                        />
-                      )}
-
                       {b.buttonType === "reply" && (
                         <textarea
                           className="min-h-[86px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
@@ -483,7 +579,7 @@ export function AddCustomerServicePage() {
             )}
 
             {/* Delivery & Price (when buy button exists) */}
-            {!isWelcomeCommand && hasBuyButton && (
+            {!isDefaultCommand && hasBuyButton && (
               <>
                 <label className="block space-y-2">
                   <span className="text-sm font-semibold text-text-secondary">Harga (Rp)</span>
@@ -523,19 +619,51 @@ export function AddCustomerServicePage() {
                 </div>
 
                 {deliveryMode === "relay" && (
-                  <label className="block space-y-2">
-                    <span className="text-sm font-semibold text-text-secondary">Prompt ke Customer Setelah Bayar</span>
-                    <textarea
-                      className="min-h-[100px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
-                      value={relayPrompt}
-                      onChange={(e) => setRelayPrompt(e.target.value.slice(0, 500))}
-                      placeholder="contoh: Silakan kirim email yang akan diisi"
-                      rows={3}
-                    />
-                    <span className="text-xs text-text-secondary">
-                      Setelah customer balas, isi pesan akan diteruskan ke owner. Owner reply dengan kata <code>done</code> untuk menyelesaikan trx.
-                    </span>
-                  </label>
+                  <div className="space-y-3">
+                    <label className="block space-y-2">
+                      <span className="text-sm font-semibold text-text-secondary">Prompt ke Customer Setelah Bayar</span>
+                      <textarea
+                        className="min-h-[100px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
+                        value={relayPrompt}
+                        onChange={(e) => setRelayPrompt(e.target.value.slice(0, 500))}
+                        placeholder="contoh: Silakan kirim email yang akan diisi"
+                        rows={3}
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-semibold text-text-secondary">Pesan Setelah Data Diteruskan ke Owner</span>
+                      <textarea
+                        className="min-h-[92px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
+                        value={relayWaitingText}
+                        onChange={(e) => setRelayWaitingText(e.target.value.slice(0, 500))}
+                        placeholder="contoh: Data sudah diterima dan diteruskan ke owner. Mohon tunggu konfirmasi."
+                        rows={3}
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-semibold text-text-secondary">Instruksi ke Owner</span>
+                      <textarea
+                        className="min-h-[92px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
+                        value={relayOwnerInstruction}
+                        onChange={(e) => setRelayOwnerInstruction(e.target.value.slice(0, 500))}
+                        placeholder="contoh: Reply pesan ini dengan jawaban done jika selesai."
+                        rows={3}
+                      />
+                    </label>
+
+                    <label className="block space-y-2">
+                      <span className="text-sm font-semibold text-text-secondary">Text Customer Saat Owner Reply Done</span>
+                      <textarea
+                        className="min-h-[92px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
+                        value={relayDoneText}
+                        onChange={(e) => setRelayDoneText(e.target.value.slice(0, 500))}
+                        placeholder="contoh: Silakan cek Gmail, pesanan sudah selesai."
+                        rows={3}
+                      />
+                    </label>
+                  </div>
                 )}
 
                 {deliveryMode === "stock" && existingItem && (

@@ -1,6 +1,10 @@
 import { getPool } from "../config/database.js";
 
-const DEFAULT_WELCOME_VALUE = "selamat datang di wisnu store.";
+const DEFAULT_WELCOME_VALUE = `🌟 Selamat Datang di Wisnu Store 🌟
+Saya adalah asisten resmi Wisnu Store yang siap membantu memenuhi kebutuhan Anda selama 24 jam penuh, setiap hari.
+
+Ketik start untuk memulai layanan kami atau klik button Start di bawah ini.`;
+const DEFAULT_START_VALUE = "Silakan pilih menu yang tersedia.";
 
 const ENTRIES_TABLE = "customer_service";
 const CONTACTS_TABLE = "customer_service_contacts";
@@ -24,16 +28,16 @@ function normalizeRelayPrompt(value) {
   return s.length > 0 ? s : null;
 }
 
+function normalizeOptionalText(value) {
+  const s = String(value ?? "").trim();
+  return s.length > 0 ? s : null;
+}
+
 function normalizeCommandName(value = "") {
-  const normalizedValue = String(value)
+  return String(value)
     .trim()
     .toLowerCase()
     .replace(/^[/.]+/, "");
-  if (normalizedValue === "start") {
-    return "welcome";
-  }
-
-  return normalizedValue;
 }
 
 function isResolvedContext(value) {
@@ -97,24 +101,37 @@ async function ensureDefaultWelcomeForBot(contextOrBotId) {
     return false;
   }
 
-  const pool = getPool();
-  await pool.execute(
-    `INSERT IGNORE INTO ${ENTRIES_TABLE} (user_id, nama_perintah, value)
-     VALUES (?, 'welcome', ?)`,
-    [context.userId, DEFAULT_WELCOME_VALUE],
-  );
+  await ensureDefaultEntriesForUserId(context.userId);
 
   return true;
 }
 
+async function ensureDefaultEntriesForUserId(userId) {
+  const pool = getPool();
+  await pool.execute(
+    `INSERT IGNORE INTO ${ENTRIES_TABLE} (user_id, nama_perintah, value)
+     VALUES (?, 'welcome', ?), (?, 'start', ?)`,
+    [Number(userId), DEFAULT_WELCOME_VALUE, Number(userId), DEFAULT_START_VALUE],
+  );
+}
+
 async function listEntriesForUser(user) {
   const pool = getPool();
+  await ensureDefaultEntriesForUserId(user.id);
   const [rows] = await pool.execute(
     `SELECT id, nama_perintah, value, delivery_mode, price, relay_prompt,
+            relay_waiting_text, relay_owner_instruction, relay_done_text,
             created_at, updated_at
      FROM ${ENTRIES_TABLE}
      WHERE user_id = ?
-     ORDER BY id ASC`,
+     ORDER BY
+       CASE nama_perintah
+         WHEN 'welcome' THEN 0
+         WHEN 'start' THEN 1
+         ELSE 2
+       END,
+       nama_perintah ASC,
+       id ASC`,
     [user.id],
   );
 
@@ -156,6 +173,9 @@ async function listEntriesForUser(user) {
     delivery_mode: String(row.delivery_mode ?? "none"),
     price: row.price === null ? null : Number(row.price),
     relay_prompt: row.relay_prompt ? String(row.relay_prompt) : null,
+    relay_waiting_text: row.relay_waiting_text ? String(row.relay_waiting_text) : null,
+    relay_owner_instruction: row.relay_owner_instruction ? String(row.relay_owner_instruction) : null,
+    relay_done_text: row.relay_done_text ? String(row.relay_done_text) : null,
     buttons: buttonsByCs.get(Number(row.id)) ?? [],
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -186,12 +206,26 @@ async function createEntry(user, payload) {
   const deliveryMode = normalizeDeliveryMode(payload.deliveryMode);
   const price = normalizePrice(payload.price);
   const relayPrompt = normalizeRelayPrompt(payload.relayPrompt);
+  const relayWaitingText = normalizeOptionalText(payload.relayWaitingText);
+  const relayOwnerInstruction = normalizeOptionalText(payload.relayOwnerInstruction);
+  const relayDoneText = normalizeOptionalText(payload.relayDoneText);
 
   const [result] = await pool.execute(
     `INSERT INTO ${ENTRIES_TABLE}
-        (user_id, nama_perintah, value, delivery_mode, price, relay_prompt)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [user.id, commandName, value, deliveryMode, price, relayPrompt],
+        (user_id, nama_perintah, value, delivery_mode, price, relay_prompt,
+         relay_waiting_text, relay_owner_instruction, relay_done_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      user.id,
+      commandName,
+      value,
+      deliveryMode,
+      price,
+      relayPrompt,
+      relayWaitingText,
+      relayOwnerInstruction,
+      relayDoneText,
+    ],
   );
 
   return {
@@ -201,6 +235,9 @@ async function createEntry(user, payload) {
     delivery_mode: deliveryMode,
     price,
     relay_prompt: relayPrompt,
+    relay_waiting_text: relayWaitingText,
+    relay_owner_instruction: relayOwnerInstruction,
+    relay_done_text: relayDoneText,
     buttons: [],
   };
 }
@@ -246,12 +283,27 @@ async function updateEntry(user, entryId, payload) {
   const deliveryMode = normalizeDeliveryMode(payload.deliveryMode);
   const price = normalizePrice(payload.price);
   const relayPrompt = normalizeRelayPrompt(payload.relayPrompt);
+  const relayWaitingText = normalizeOptionalText(payload.relayWaitingText);
+  const relayOwnerInstruction = normalizeOptionalText(payload.relayOwnerInstruction);
+  const relayDoneText = normalizeOptionalText(payload.relayDoneText);
 
   await pool.execute(
     `UPDATE ${ENTRIES_TABLE}
-     SET nama_perintah = ?, value = ?, delivery_mode = ?, price = ?, relay_prompt = ?
+     SET nama_perintah = ?, value = ?, delivery_mode = ?, price = ?, relay_prompt = ?,
+         relay_waiting_text = ?, relay_owner_instruction = ?, relay_done_text = ?
      WHERE id = ? AND user_id = ?`,
-    [commandName, value, deliveryMode, price, relayPrompt, numericEntryId, user.id],
+    [
+      commandName,
+      value,
+      deliveryMode,
+      price,
+      relayPrompt,
+      relayWaitingText,
+      relayOwnerInstruction,
+      relayDoneText,
+      numericEntryId,
+      user.id,
+    ],
   );
 }
 
@@ -274,8 +326,9 @@ async function deleteEntry(user, entryId) {
     return false;
   }
 
-  if (normalizeCommandName(row.nama_perintah) === "welcome") {
-    throw new Error('Perintah "welcome" tidak bisa dihapus');
+  const normalizedCommand = normalizeCommandName(row.nama_perintah);
+  if (normalizedCommand === "welcome" || normalizedCommand === "start") {
+    throw new Error(`Perintah "${normalizedCommand}" tidak bisa dihapus`);
   }
 
   const [result] = await pool.execute(
@@ -339,7 +392,8 @@ async function getCommandEntry(contextOrBotId, commandName) {
 
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT id, user_id, nama_perintah, value, delivery_mode, price, relay_prompt
+    `SELECT id, user_id, nama_perintah, value, delivery_mode, price, relay_prompt,
+            relay_waiting_text, relay_owner_instruction, relay_done_text
      FROM ${ENTRIES_TABLE}
      WHERE user_id = ? AND nama_perintah = ?
      LIMIT 1`,
@@ -367,6 +421,9 @@ async function getCommandEntry(contextOrBotId, commandName) {
     deliveryMode: String(row.delivery_mode ?? "none"),
     price: row.price === null ? null : Number(row.price),
     relayPrompt: row.relay_prompt ? String(row.relay_prompt) : null,
+    relayWaitingText: row.relay_waiting_text ? String(row.relay_waiting_text) : null,
+    relayOwnerInstruction: row.relay_owner_instruction ? String(row.relay_owner_instruction) : null,
+    relayDoneText: row.relay_done_text ? String(row.relay_done_text) : null,
     buttons: buttons.map((button) => ({
       id: Number(button.id),
       label: String(button.label ?? ""),
@@ -421,7 +478,7 @@ async function getAllCommands(contextOrBotId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT nama_perintah, value FROM ${ENTRIES_TABLE}
-     WHERE user_id = ? AND nama_perintah != 'welcome'`,
+     WHERE user_id = ? AND nama_perintah NOT IN ('welcome', 'start')`,
     [context.userId],
   );
 
@@ -446,7 +503,28 @@ async function reserveFirstReply(contextOrBotId, contactJid) {
      VALUES (?, ?)`,
     [context.userId, String(contactJid)],
   );
-  return Number(result.affectedRows || 0) === 1;
+  if (Number(result.affectedRows || 0) === 1) {
+    return true;
+  }
+
+  const [rows] = await pool.execute(
+    `SELECT first_replied_at,
+            TIMESTAMPDIFF(MINUTE, first_replied_at, CURRENT_TIMESTAMP) AS inactive_minutes
+       FROM ${CONTACTS_TABLE}
+      WHERE user_id = ? AND contact_jid = ?
+      LIMIT 1`,
+    [context.userId, String(contactJid)],
+  );
+  const inactiveMinutes = Number(rows[0]?.inactive_minutes ?? 0);
+
+  await pool.execute(
+    `UPDATE ${CONTACTS_TABLE}
+        SET first_replied_at = CURRENT_TIMESTAMP
+      WHERE user_id = ? AND contact_jid = ?`,
+    [context.userId, String(contactJid)],
+  );
+
+  return inactiveMinutes >= 30;
 }
 
 async function releaseFirstReply(contextOrBotId, contactJid) {
@@ -464,6 +542,7 @@ async function releaseFirstReply(contextOrBotId, contactJid) {
 
 export const customerServiceService = {
   DEFAULT_WELCOME_VALUE,
+  DEFAULT_START_VALUE,
   resolveInboundContext,
   ensureDefaultWelcomeForBot,
   listEntriesForUser,

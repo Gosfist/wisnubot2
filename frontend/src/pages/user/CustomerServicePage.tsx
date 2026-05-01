@@ -61,8 +61,9 @@ export function CustomerServicePage() {
   }, [items, currentPage]);
 
   async function handleDelete(item: CustomerServiceItemModel) {
-    if (item.commandName.trim().toLowerCase() === "welcome") {
-      showToast('Perintah "welcome" tidak bisa dihapus.', "danger");
+    const normalizedCommand = item.commandName.trim().toLowerCase();
+    if (normalizedCommand === "welcome" || normalizedCommand === "start") {
+      showToast(`Perintah "${normalizedCommand}" tidak bisa dihapus.`, "danger");
       return;
     }
 
@@ -116,14 +117,14 @@ export function CustomerServicePage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px]">
+            <div className="overflow-hidden">
+              <table className="w-full table-fixed">
                 <thead>
                   <tr className="border-b border-glass-border bg-[rgba(15,23,42,0.42)] text-left">
-                    <th className="w-[3ch] pl-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase whitespace-nowrap">
+                    <th className="w-[52px] pl-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase whitespace-nowrap">
                       No
                     </th>
-                    <th className="px-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase">
+                    <th className="w-[168px] px-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase whitespace-nowrap">
                       Nama Perintah
                     </th>
                     <th className="px-5 py-3 text-xs font-bold tracking-[0.12em] text-text-muted uppercase">
@@ -139,36 +140,49 @@ export function CustomerServicePage() {
                     (() => {
                       const isWelcomeCommand =
                         item.commandName.trim().toLowerCase() === "welcome";
+                      const isStartCommand =
+                        item.commandName.trim().toLowerCase() === "start";
+                      const isDefaultCommand = isWelcomeCommand || isStartCommand;
 
                       return (
                         <tr
                           key={item.id}
                           className="border-b border-[rgba(148,163,184,0.08)] last:border-b-0"
                         >
-                          <td className="w-[3ch] pl-5 py-4 text-sm text-text-secondary whitespace-nowrap">
+                          <td className="w-[52px] pl-5 py-4 text-sm text-text-secondary whitespace-nowrap">
                             {(currentPage - 1) * ITEMS_PER_PAGE + index + 1}
                           </td>
-                          <td className="px-5 py-4 text-sm font-semibold text-text-primary">
-                            /{isWelcomeCommand ? "start" : item.commandName}
+                          <td className="w-[168px] px-5 py-4 text-sm font-semibold text-text-primary whitespace-nowrap">
+                            /{item.commandName}
                           </td>
-                          <td className="px-5 py-4 text-sm text-text-secondary">
-                            {(() => {
-                              if (isWelcomeCommand) {
+                          <td className="min-w-0 px-5 py-4 text-sm text-text-secondary">
+                            <div className="block w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" title={(() => {
+                              if (isStartCommand) {
                                 try {
                                   const parsedObj = JSON.parse(item.value);
                                   if (parsedObj.text !== undefined && Array.isArray(parsedObj.menuList)) {
-                                    return (
-                                      <div>
-                                        <div className="whitespace-pre-wrap">{parsedObj.text}</div>
-                                      </div>
-                                    );
+                                    return String(parsedObj.text ?? "");
                                   }
-                                } catch (e) {
+                                } catch {
                                   // is plain text
                                 }
                               }
-                              return <div className="whitespace-pre-wrap">{item.value}</div>;
-                            })()}
+                              return item.value;
+                            })()}>
+                              {(() => {
+                                if (isStartCommand) {
+                                  try {
+                                    const parsedObj = JSON.parse(item.value);
+                                    if (parsedObj.text !== undefined && Array.isArray(parsedObj.menuList)) {
+                                      return String(parsedObj.text ?? "");
+                                    }
+                                  } catch {
+                                    // is plain text
+                                  }
+                                }
+                                return item.value;
+                              })()}
+                            </div>
                           </td>
                           <td className="w-[132px] px-5 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -187,11 +201,11 @@ export function CustomerServicePage() {
                                 onClick={() => handleDelete(item)}
                                 aria-label="Hapus customer service"
                                 title="Hapus"
-                                disabled={isWelcomeCommand}
+                                disabled={isDefaultCommand}
                               >
                                 <Trash2
                                   size={18}
-                                  className={isWelcomeCommand ? "opacity-40" : undefined}
+                                  className={isDefaultCommand ? "opacity-40" : undefined}
                                 />
                               </button>
                             </div>

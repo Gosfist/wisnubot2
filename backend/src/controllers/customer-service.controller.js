@@ -19,6 +19,9 @@ export async function createCustomerService(req, res) {
       deliveryMode: req.body?.deliveryMode,
       price: req.body?.price,
       relayPrompt: req.body?.relayPrompt,
+      relayWaitingText: req.body?.relayWaitingText,
+      relayOwnerInstruction: req.body?.relayOwnerInstruction,
+      relayDoneText: req.body?.relayDoneText,
     });
     res.status(201).json({
       message: "Customer service berhasil dibuat",
@@ -38,6 +41,9 @@ export async function updateCustomerService(req, res) {
       deliveryMode: req.body?.deliveryMode,
       price: req.body?.price,
       relayPrompt: req.body?.relayPrompt,
+      relayWaitingText: req.body?.relayWaitingText,
+      relayOwnerInstruction: req.body?.relayOwnerInstruction,
+      relayDoneText: req.body?.relayDoneText,
     });
     res.json({ message: "Customer service berhasil diupdate" });
   } catch (err) {

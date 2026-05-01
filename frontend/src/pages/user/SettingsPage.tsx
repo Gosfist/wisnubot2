@@ -177,6 +177,9 @@ export function SettingsPage() {
             <label className="block space-y-2">
               <span className="text-xs font-bold tracking-[0.22em] text-text-muted">SLUG PAKASIR</span>
               <input
+                autoComplete="off"
+                data-lpignore="true"
+                name="pakasir_project_slug"
                 value={pakasirSlug}
                 onChange={(event) => setPakasirSlug(event.target.value)}
                 placeholder="wisnubot"
@@ -187,6 +190,9 @@ export function SettingsPage() {
               <span className="text-xs font-bold tracking-[0.22em] text-text-muted">API KEY PAKASIR</span>
               <input
                 type="password"
+                autoComplete="new-password"
+                data-lpignore="true"
+                name="pakasir_secret_key"
                 value={pakasirApiKey}
                 onChange={(event) => setPakasirApiKey(event.target.value)}
                 placeholder={pakasirApiKeyMasked ? `Tersimpan: ${pakasirApiKeyMasked}` : "Masukkan API key Pakasir"}

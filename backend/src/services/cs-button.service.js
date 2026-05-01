@@ -1,11 +1,11 @@
 import { getPool } from "../config/database.js";
 
-const VALID_TYPES = new Set(["link", "buy", "url", "reply"]);
+const VALID_TYPES = new Set(["link", "buy", "reply"]);
 
 function normalizeButton(payload) {
   const type = String(payload?.buttonType ?? "").toLowerCase();
   if (!VALID_TYPES.has(type)) {
-    throw new Error("Tipe button tidak valid (link|buy|url|reply)");
+    throw new Error("Tipe button tidak valid (link|buy|reply)");
   }
 
   const label = String(payload?.label ?? "").trim();
@@ -21,12 +21,6 @@ function normalizeButton(payload) {
     throw new Error("Button link wajib punya target command");
   }
 
-  const targetUrl =
-    type === "url" ? String(payload?.targetUrl ?? "").trim() : null;
-  if (type === "url" && !targetUrl) {
-    throw new Error("Button URL wajib punya target URL");
-  }
-
   const replyText =
     type === "reply" ? String(payload?.replyText ?? "").trim() : null;
   if (type === "reply" && !replyText) {
@@ -37,7 +31,7 @@ function normalizeButton(payload) {
     label,
     type,
     targetCommand,
-    targetUrl,
+    targetUrl: null,
     replyText,
     orderIndex: Number.isFinite(Number(payload?.orderIndex))
       ? Number(payload.orderIndex)

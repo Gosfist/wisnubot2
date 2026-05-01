@@ -40,7 +40,7 @@ export interface BroadcastModel {
 
 export type CsDeliveryMode = "none" | "stock" | "relay";
 
-export type CsButtonType = "link" | "buy" | "url" | "reply";
+export type CsButtonType = "link" | "buy" | "reply";
 
 export interface CsButtonModel {
   id?: number;
@@ -59,6 +59,9 @@ export interface CustomerServiceItemModel {
   deliveryMode: CsDeliveryMode;
   price: number | null;
   relayPrompt: string | null;
+  relayWaitingText: string | null;
+  relayOwnerInstruction: string | null;
+  relayDoneText: string | null;
   buttons: CsButtonModel[];
   createdAt: string;
   updatedAt: string;

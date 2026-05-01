@@ -160,6 +160,65 @@ class MessageService {
     }
   }
 
+  async sendCustomerServiceImageMessage(sock, messageKey, jid, imageBuffer, caption) {
+    const replyDelayMs = getRandomCustomerServiceReplyDelayMs();
+    await this.markIncomingMessageAsRead(sock, messageKey, jid);
+
+    try {
+      await sock.sendPresenceUpdate("composing", jid);
+    } catch (err) {
+      logger.warn(err, `Failed to send composing presence for ${jid}`);
+    }
+
+    await sleep(replyDelayMs);
+
+    try {
+      await sock.sendMessage(jid, {
+        image: imageBuffer,
+        caption,
+      });
+      logger.info(`Customer service image message sent to ${jid}`);
+      return true;
+    } catch (err) {
+      logger.error(err, `Failed to send customer service image message to ${jid}`);
+      return false;
+    } finally {
+      try {
+        await sock.sendPresenceUpdate("paused", jid);
+      } catch (err) {
+        logger.warn(err, `Failed to send paused presence for ${jid}`);
+      }
+    }
+  }
+
+  async sendCustomerServiceInteractiveMessage(sock, messageKey, jid, content) {
+    const replyDelayMs = getRandomCustomerServiceReplyDelayMs();
+    await this.markIncomingMessageAsRead(sock, messageKey, jid);
+
+    try {
+      await sock.sendPresenceUpdate("composing", jid);
+    } catch (err) {
+      logger.warn(err, `Failed to send composing presence for ${jid}`);
+    }
+
+    await sleep(replyDelayMs);
+
+    try {
+      await sock.sendMessage(jid, content);
+      logger.info(`Customer service interactive message sent to ${jid}`);
+      return true;
+    } catch (err) {
+      logger.error(err, `Failed to send customer service interactive message to ${jid}`);
+      return false;
+    } finally {
+      try {
+        await sock.sendPresenceUpdate("paused", jid);
+      } catch (err) {
+        logger.warn(err, `Failed to send paused presence for ${jid}`);
+      }
+    }
+  }
+
   async sendBulkMessages(sock, userId, groupJids, text, imageUrl = null) {
     const results = [];
 

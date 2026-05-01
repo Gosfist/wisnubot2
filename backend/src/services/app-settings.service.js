@@ -53,27 +53,16 @@ async function getRawForUserId(userId) {
 
 async function upsertForUser(user, payload) {
   const pakasirSlug = String(payload?.pakasirSlug ?? "").trim();
-  // Treat blank api key as "do not change"; only update when non-empty.
-  const incomingApiKey = String(payload?.pakasirApiKey ?? "").trim();
+  const apiKey = String(payload?.pakasirApiKey ?? "").trim();
 
   const pool = getPool();
-  const [existing] = await pool.execute(
-    `SELECT pakasir_api_key FROM app_settings WHERE user_id = ? LIMIT 1`,
-    [user.id],
-  );
-
-  const apiKey =
-    incomingApiKey.length > 0
-      ? incomingApiKey
-      : existing[0]?.pakasir_api_key ?? null;
-
   await pool.execute(
     `INSERT INTO app_settings (user_id, pakasir_slug, pakasir_api_key)
        VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE
          pakasir_slug = VALUES(pakasir_slug),
          pakasir_api_key = VALUES(pakasir_api_key)`,
-    [user.id, pakasirSlug || null, apiKey],
+    [user.id, pakasirSlug || null, apiKey || null],
   );
 
   return getForUser(user);
