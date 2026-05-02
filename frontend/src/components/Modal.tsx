@@ -9,7 +9,8 @@ export function Modal({
   onClose,
   children,
   wide = false,
-  closeButtonVariant = "text",
+  closeButtonVariant = "icon",
+  bodyClassName,
 }: {
   open: boolean;
   title: string;
@@ -17,6 +18,7 @@ export function Modal({
   children: ReactNode;
   wide?: boolean;
   closeButtonVariant?: "text" | "icon";
+  bodyClassName?: string;
 }) {
   useEffect(() => {
     if (!open) {
@@ -67,7 +69,7 @@ export function Modal({
             {closeButtonVariant === "icon" ? <X size={18} /> : "Tutup"}
           </button>
         </div>
-        {children}
+        <div className={bodyClassName}>{children}</div>
       </div>
     </div>
   );

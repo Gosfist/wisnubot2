@@ -423,7 +423,6 @@ export async function createBroadcast(req, res) {
           : normalizedTargetExcludedGroupIds;
       const groupClauses = [
         `g.id IN (${groupIdsToValidate.map(() => "?").join(",")})`,
-        "g.is_active = 1",
         "b.user_id = ?",
       ];
       const groupParams = [...groupIdsToValidate, userId];
@@ -441,7 +440,7 @@ export async function createBroadcast(req, res) {
           res,
           req,
           400,
-          "Group yang dipilih harus aktif dan milik Anda",
+          "Group yang dipilih harus milik Anda",
         );
       }
     }
@@ -614,7 +613,6 @@ export async function updateBroadcast(req, res) {
     if (groupIdsToValidate && groupIdsToValidate.length > 0) {
       const groupClauses = [
         `g.id IN (${groupIdsToValidate.map(() => "?").join(",")})`,
-        "g.is_active = 1",
         "b.user_id = ?",
       ];
       const groupParams = [...groupIdsToValidate, req.user.id];
@@ -632,7 +630,7 @@ export async function updateBroadcast(req, res) {
           res,
           req,
           400,
-          "Group yang dipilih harus aktif dan milik Anda",
+          "Group yang dipilih harus milik Anda",
         );
       }
     }

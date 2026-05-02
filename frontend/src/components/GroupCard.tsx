@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { Settings, Trash2 } from "lucide-react";
 import { cn } from "../lib/cn";
 
 export function GroupCard({
@@ -7,12 +7,14 @@ export function GroupCard({
   isBusy,
   onToggle,
   onDelete,
+  onSettings,
 }: {
   name: string;
   isActive: boolean;
   isBusy: boolean;
   onToggle: (nextValue: boolean) => void;
   onDelete: () => void;
+  onSettings?: () => void;
 }) {
   return (
     <article className="relative overflow-hidden rounded-[18px] border border-glass-border bg-[rgba(30,41,59,0.9)]">
@@ -36,6 +38,18 @@ export function GroupCard({
               />
               <span className="relative h-[26px] w-[46px] rounded-full bg-[rgba(100,116,139,0.42)] transition peer-checked:bg-[rgba(37,99,235,0.6)] after:absolute after:top-[3px] after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-[18px]" />
             </label>
+            {onSettings ? (
+              <button
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(148,163,184,0.08)] text-text-secondary transition hover:bg-[rgba(148,163,184,0.14)] hover:text-accent"
+                type="button"
+                onClick={onSettings}
+                disabled={isBusy}
+                aria-label="Pengaturan push kontak"
+                title="Pengaturan push kontak"
+              >
+                <Settings size={18} />
+              </button>
+            ) : null}
             <button
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(148,163,184,0.08)] text-danger transition hover:bg-[rgba(148,163,184,0.14)]"
               type="button"

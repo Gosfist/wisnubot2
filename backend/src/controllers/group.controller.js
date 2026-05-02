@@ -1,5 +1,6 @@
 import { getPool } from "../config/database.js";
 import { baileysManager } from "../services/baileys.service.js";
+import { pushContactService } from "../services/push-contact.service.js";
 import { logger } from "../utils/logger.js";
 
 function extractInviteCode(inviteLink = "") {
@@ -217,5 +218,50 @@ export async function deleteGroup(req, res) {
   } catch (err) {
     logger.error(err, "Delete group error");
     res.status(500).json({ error: "Gagal keluar dari group" });
+  }
+}
+
+export async function listPushExclusions(req, res) {
+  try {
+    const items = await pushContactService.listExclusions(req.user, req.params.groupId);
+    res.json({ items });
+  } catch (err) {
+    logger.error(err, "List push exclusions error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Request tidak valid" });
+  }
+}
+
+export async function listPushMembers(req, res) {
+  try {
+    const items = await pushContactService.listMembers(req.user, req.params.groupId);
+    res.json({ items });
+  } catch (err) {
+    logger.error(err, "List push members error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Request tidak valid" });
+  }
+}
+
+export async function addPushExclusion(req, res) {
+  try {
+    const item = await pushContactService.addExclusion(req.user, req.params.groupId, req.body);
+    res.json({ message: "Pengecualian berhasil disimpan", item });
+  } catch (err) {
+    logger.error(err, "Add push exclusion error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Request tidak valid" });
+  }
+}
+
+export async function deletePushExclusion(req, res) {
+  try {
+    const ok = await pushContactService.deleteExclusion(
+      req.user,
+      req.params.groupId,
+      req.params.exclusionId,
+    );
+    if (!ok) return res.status(404).json({ error: "Pengecualian tidak ditemukan" });
+    res.json({ message: "Pengecualian dihapus" });
+  } catch (err) {
+    logger.error(err, "Delete push exclusion error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Request tidak valid" });
   }
 }

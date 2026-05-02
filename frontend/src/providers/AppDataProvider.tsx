@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import type {
   AdminStatsModel,
   AppSettingsModel,
+  ActivityLogModel,
   BotModel,
   BroadcastModel,
   CsButtonModel,
@@ -13,6 +14,10 @@ import type {
   CsStockSummaryModel,
   CustomerServiceItemModel,
   GroupModel,
+  GroupPushExclusionModel,
+  GroupPushMemberModel,
+  PushContactRunModel,
+  PushContactTemplateModel,
   TransactionModel,
   UserModel,
 } from "../types/models";
@@ -33,6 +38,7 @@ interface AppDataContextValue {
   refreshCustomerService: () => Promise<CustomerServiceItemModel[]>;
   clear: () => void;
   getAdminStats: () => Promise<AdminStatsModel>;
+  fetchActivityLogs: () => Promise<ActivityLogModel[]>;
   testBroadcastBot: () => Promise<string>;
   testUserBot: () => Promise<string>;
   createBroadcast: (data: Record<string, unknown>) => Promise<void>;
@@ -47,6 +53,16 @@ interface AppDataContextValue {
   addStocks: (csId: number, contents: string | string[]) => Promise<{ added: number; message: string }>;
   deleteStock: (stockId: number) => Promise<string>;
   clearStocks: (csId: number) => Promise<string>;
+  fetchPushTemplates: () => Promise<PushContactTemplateModel[]>;
+  createPushTemplate: (payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
+  updatePushTemplate: (templateId: number, payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
+  deletePushTemplate: (templateId: number) => Promise<string>;
+  fetchPushStatus: () => Promise<{ isRunning: boolean; running: PushContactRunModel | null }>;
+  startPushContact: (payload: { templateId: number; groupId: number }) => Promise<{ message: string; totalTargets: number; isRunning: boolean; running: PushContactRunModel | null }>;
+  fetchGroupPushMembers: (groupId: string) => Promise<GroupPushMemberModel[]>;
+  fetchGroupPushExclusions: (groupId: string) => Promise<GroupPushExclusionModel[]>;
+  addGroupPushExclusion: (groupId: string, payload: { phoneNumber: string; label?: string }) => Promise<GroupPushExclusionModel>;
+  deleteGroupPushExclusion: (groupId: string, exclusionId: number) => Promise<string>;
   fetchTransactions: () => Promise<TransactionModel[]>;
   fetchSettings: () => Promise<AppSettingsModel>;
   updateSettings: (payload: Partial<AppSettingsModel>) => Promise<AppSettingsModel>;
@@ -86,6 +102,62 @@ function parseGroup(payload: Record<string, unknown>): GroupModel {
     name: String(payload.name ?? ""),
     memberCount: Number(payload.member_count ?? 0),
     isActive: Boolean(payload.is_active ?? true),
+  };
+}
+
+function parseActivityLog(payload: Record<string, unknown>): ActivityLogModel {
+  return {
+    id: Number(payload.id ?? 0),
+    action: String(payload.action ?? ""),
+    detail: String(payload.detail ?? ""),
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
+  };
+}
+
+function parsePushTemplate(payload: Record<string, unknown>): PushContactTemplateModel {
+  return {
+    id: Number(payload.id ?? 0),
+    title: String(payload.title ?? ""),
+    messageText: String(payload.messageText ?? payload.message_text ?? ""),
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
+    updatedAt: payload.updatedAt ?? payload.updated_at ? String(payload.updatedAt ?? payload.updated_at) : null,
+  };
+}
+
+function parsePushRun(payload: Record<string, unknown>): PushContactRunModel {
+  return {
+    id: Number(payload.id ?? 0),
+    status: String(payload.status ?? ""),
+    totalTargets: Number(payload.totalTargets ?? payload.total_targets ?? 0),
+    successCount: Number(payload.successCount ?? payload.success_count ?? 0),
+    failedCount: Number(payload.failedCount ?? payload.failed_count ?? 0),
+    startedAt: payload.startedAt ?? payload.started_at ? String(payload.startedAt ?? payload.started_at) : null,
+    finishedAt: payload.finishedAt ?? payload.finished_at ? String(payload.finishedAt ?? payload.finished_at) : null,
+  };
+}
+
+function parseGroupPushExclusion(payload: Record<string, unknown>): GroupPushExclusionModel {
+  return {
+    id: Number(payload.id ?? 0),
+    groupId: Number(payload.groupId ?? payload.group_id ?? 0),
+    phoneNumber: String(payload.phoneNumber ?? payload.phone_number ?? ""),
+    label: payload.label ? String(payload.label) : null,
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
+  };
+}
+
+function parseGroupPushMember(payload: Record<string, unknown>): GroupPushMemberModel {
+  const rawPhoneNumber = String(payload.phoneNumber ?? payload.phone_number ?? "").replace(/\D/g, "");
+  const phoneNumber = /^62\d{8,15}$/.test(rawPhoneNumber) ? rawPhoneNumber : "";
+  return {
+    jid: String(payload.jid ?? ""),
+    phoneNumber,
+    displayName: String(payload.displayName ?? payload.display_name ?? phoneNumber ?? ""),
+    isAdmin: Boolean(payload.isAdmin ?? payload.is_admin ?? false),
+    isBot: Boolean(payload.isBot ?? payload.is_bot ?? false),
+    isExcluded: Boolean(payload.isExcluded ?? payload.is_excluded ?? false),
+    exclusionId: payload.exclusionId ?? payload.exclusion_id ? Number(payload.exclusionId ?? payload.exclusion_id) : null,
+    exclusionLabel: payload.exclusionLabel ?? payload.exclusion_label ? String(payload.exclusionLabel ?? payload.exclusion_label) : null,
   };
 }
 
@@ -325,6 +397,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     };
   }
 
+  async function fetchActivityLogs(): Promise<ActivityLogModel[]> {
+    const data = await apiFetch("/app/activity");
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseActivityLog);
+  }
+
   async function testBroadcastBot(): Promise<string> {
     const data = await apiFetch("/owner/testing/broadcast", { method: "POST" });
     return String((data as { message: string }).message ?? "OK");
@@ -419,6 +496,66 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return String((data as { message: string }).message ?? "Stock dikosongkan");
   }
 
+  async function fetchPushTemplates(): Promise<PushContactTemplateModel[]> {
+    const data = await apiFetch("/push-contact/templates");
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parsePushTemplate);
+  }
+
+  async function createPushTemplate(payload: { title: string; messageText: string }): Promise<PushContactTemplateModel> {
+    const data = await apiFetch("/push-contact/templates", withJsonBody(payload));
+    return parsePushTemplate((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function updatePushTemplate(templateId: number, payload: { title: string; messageText: string }): Promise<PushContactTemplateModel> {
+    const data = await apiFetch(`/push-contact/templates/${templateId}`, withJsonBody(payload, "PUT"));
+    return parsePushTemplate((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function deletePushTemplate(templateId: number): Promise<string> {
+    const data = await apiFetch(`/push-contact/templates/${templateId}`, { method: "DELETE" });
+    return String((data as { message: string }).message ?? "Template dihapus");
+  }
+
+  async function fetchPushStatus(): Promise<{ isRunning: boolean; running: PushContactRunModel | null }> {
+    const data = await apiFetch("/push-contact/status");
+    const runningRaw = (data as { running?: Record<string, unknown> | null }).running ?? null;
+    return {
+      isRunning: Boolean((data as { isRunning?: boolean }).isRunning ?? runningRaw),
+      running: runningRaw ? parsePushRun(runningRaw) : null,
+    };
+  }
+
+  async function startPushContact(payload: { templateId: number; groupId: number }): Promise<{ message: string; totalTargets: number; isRunning: boolean; running: PushContactRunModel | null }> {
+    const data = await apiFetch("/push-contact/run", withJsonBody(payload));
+    const runningRaw = (data as { running?: Record<string, unknown> | null }).running ?? null;
+    return {
+      message: String((data as { message: string }).message ?? "Push kontak dimulai"),
+      totalTargets: Number((data as { totalTargets: number }).totalTargets ?? 0),
+      isRunning: Boolean((data as { isRunning?: boolean }).isRunning ?? runningRaw),
+      running: runningRaw ? parsePushRun(runningRaw) : null,
+    };
+  }
+
+  async function fetchGroupPushExclusions(groupId: string): Promise<GroupPushExclusionModel[]> {
+    const data = await apiFetch(`/groups/${groupId}/push-exclusions`);
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGroupPushExclusion);
+  }
+
+  async function fetchGroupPushMembers(groupId: string): Promise<GroupPushMemberModel[]> {
+    const data = await apiFetch(`/groups/${groupId}/push-members`);
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGroupPushMember);
+  }
+
+  async function addGroupPushExclusion(groupId: string, payload: { phoneNumber: string; label?: string }): Promise<GroupPushExclusionModel> {
+    const data = await apiFetch(`/groups/${groupId}/push-exclusions`, withJsonBody(payload));
+    return parseGroupPushExclusion((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function deleteGroupPushExclusion(groupId: string, exclusionId: number): Promise<string> {
+    const data = await apiFetch(`/groups/${groupId}/push-exclusions/${exclusionId}`, { method: "DELETE" });
+    return String((data as { message: string }).message ?? "Pengecualian dihapus");
+  }
+
   async function fetchTransactions(): Promise<TransactionModel[]> {
     const data = await apiFetch("/cs-payments/transactions");
     return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseTransaction);
@@ -490,6 +627,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       refreshCustomerService,
       clear,
       getAdminStats,
+      fetchActivityLogs,
       testBroadcastBot,
       testUserBot,
       createBroadcast,
@@ -504,6 +642,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       addStocks,
       deleteStock,
       clearStocks,
+      fetchPushTemplates,
+      createPushTemplate,
+      updatePushTemplate,
+      deletePushTemplate,
+      fetchPushStatus,
+      startPushContact,
+      fetchGroupPushMembers,
+      fetchGroupPushExclusions,
+      addGroupPushExclusion,
+      deleteGroupPushExclusion,
       fetchTransactions,
       fetchSettings,
       updateSettings,

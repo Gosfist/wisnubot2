@@ -1787,14 +1787,32 @@ class BaileysManager {
 
           this.connectingBots.delete(key);
           this.connections.delete(key);
+          let disconnectPhoneNumber = "";
           if (!isPendingPairing) {
             const pool = getPool();
+            const [botRows] = await pool.execute(
+              "SELECT phone_number FROM bots WHERE id = ? LIMIT 1",
+              [botId],
+            );
+            disconnectPhoneNumber = String(botRows[0]?.phone_number ?? "");
             await pool.execute("UPDATE bots SET is_online = 0 WHERE id = ?", [
               botId,
             ]);
           }
 
           logger.warn(`Bot disconnected for user ${userId}, reason: ${reason}`);
+
+          if (!isRestartRequired) {
+            const pool = getPool();
+            await pool.execute(
+              "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+              [
+                userId,
+                "bot_disconnected",
+                `Bot disconnect: ${disconnectPhoneNumber || sessionName || botId}`,
+              ],
+            );
+          }
 
           if (isManualDisconnect) {
             logger.info(

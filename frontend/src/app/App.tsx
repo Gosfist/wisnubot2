@@ -15,6 +15,7 @@ import { CustomerServicePage } from "../pages/user/CustomerServicePage";
 import { DashboardPage } from "../pages/user/DashboardPage";
 import { GroupsPage } from "../pages/user/GroupsPage";
 import { ManageBotsPage } from "../pages/user/ManageBotsPage";
+import { PushContactsPage } from "../pages/user/PushContactsPage";
 import { SettingsPage } from "../pages/user/SettingsPage";
 import { StockPage } from "../pages/user/StockPage";
 import { TransactionsPage } from "../pages/user/TransactionsPage";
@@ -107,15 +108,7 @@ export function App() {
         <Route path="/groups" element={<GroupsPage />} />
         <Route path="/broadcasts" element={<BroadcastsPage />} />
         <Route path="/broadcasts/add" element={<AddBroadcastPage />} />
-        <Route
-          path="/push-kontak"
-          element={
-            <PlaceholderPage
-              title="Push Kontak"
-              description="Fitur Push Kontak sedang dalam pengembangan."
-            />
-          }
-        />
+        <Route path="/push-kontak" element={<PushContactsPage />} />
         <Route path="/customer-service" element={<CustomerServicePage />} />
         <Route path="/customer-service/add" element={<AddCustomerServicePage />} />
         <Route path="/customer-service/:id" element={<AddCustomerServicePage />} />

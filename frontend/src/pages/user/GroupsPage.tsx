@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { CheckCircle2, Plus, RefreshCw, UserX } from "lucide-react";
 import { GroupCard } from "../../components/GroupCard";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
@@ -8,6 +8,7 @@ import { useAppData } from "../../hooks/useAppData";
 import { useAuth } from "../../hooks/useAuth";
 import { useToast } from "../../hooks/useToast";
 import { apiFetch } from "../../lib/http";
+import type { GroupPushMemberModel } from "../../types/models";
 
 export function GroupsPage() {
   const appData = useAppData();
@@ -19,6 +20,11 @@ export function GroupsPage() {
   const [inviteLink, setInviteLink] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [togglingGroupIds, setTogglingGroupIds] = useState<string[]>([]);
+  const [settingsGroup, setSettingsGroup] = useState<{ id: string; name: string } | null>(null);
+  const [members, setMembers] = useState<GroupPushMemberModel[]>([]);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [updatingMemberKey, setUpdatingMemberKey] = useState<string | null>(null);
   const [listMaxHeight, setListMaxHeight] = useState<number | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const isOwner = true;
@@ -132,6 +138,61 @@ export function GroupsPage() {
     }
   }
 
+  async function openSettings(group: { id: string; name: string }) {
+    setSettingsGroup(group);
+    setMemberSearch("");
+    await loadPushMembers(group.id);
+  }
+
+  async function loadPushMembers(groupId = settingsGroup?.id) {
+    if (!groupId) return;
+    setIsLoadingMembers(true);
+    try {
+      const items = await appData.fetchGroupPushMembers(groupId);
+      setMembers(items);
+    } catch (nextError) {
+      showToast(nextError instanceof Error ? nextError.message : "Gagal memuat anggota group.", "danger");
+    } finally {
+      setIsLoadingMembers(false);
+    }
+  }
+
+  async function handleToggleMemberExclusion(member: GroupPushMemberModel) {
+    if (!settingsGroup) return;
+    if (member.isAdmin || member.isBot || !member.phoneNumber) {
+      if (!member.phoneNumber && !member.isAdmin && !member.isBot) {
+        showToast("Nomor WA anggota ini tidak tersedia dari WhatsApp.", "danger");
+      }
+      return;
+    }
+    setUpdatingMemberKey(member.jid);
+    try {
+      if (member.isExcluded && member.exclusionId) {
+        await appData.deleteGroupPushExclusion(settingsGroup.id, member.exclusionId);
+      } else {
+        await appData.addGroupPushExclusion(settingsGroup.id, {
+          phoneNumber: member.phoneNumber,
+          label: member.displayName !== member.phoneNumber ? member.displayName : undefined,
+        });
+      }
+      await loadPushMembers(settingsGroup.id);
+    } catch (nextError) {
+      showToast(nextError instanceof Error ? nextError.message : "Gagal mengubah pengecualian.", "danger");
+    } finally {
+      setUpdatingMemberKey(null);
+    }
+  }
+
+  const filteredMembers = members.filter((member) => {
+    const keyword = memberSearch.trim().toLowerCase();
+    if (!keyword) return true;
+    return (
+      member.phoneNumber.toLowerCase().includes(keyword) ||
+      member.displayName.toLowerCase().includes(keyword) ||
+      member.jid.toLowerCase().includes(keyword)
+    );
+  });
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -179,6 +240,7 @@ export function GroupsPage() {
                 isBusy={togglingGroupIds.includes(group.id)}
                 onDelete={() => handleDelete(group.id)}
                 onToggle={(nextValue) => handleToggle(group.id, nextValue, group.isActive)}
+                onSettings={() => openSettings({ id: group.id, name: group.name })}
               />
             ))}
           </div>
@@ -204,6 +266,118 @@ export function GroupsPage() {
             {isJoining ? "MEMPROSES..." : "JOIN GROUP"}
           </button>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(settingsGroup)}
+        title={`Pengecualian Push - ${settingsGroup?.name ?? ""}`}
+        onClose={() => {
+          setSettingsGroup(null);
+          setMembers([]);
+        }}
+        wide
+        bodyClassName="overflow-hidden"
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <p className="text-sm text-text-secondary">
+              Data anggota diambil langsung dari WhatsApp group saat modal dibuka. Admin otomatis dilewati.
+            </p>
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.2)] px-4 py-2.5 text-sm font-bold text-accent hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-60"
+              type="button"
+              onClick={() => void loadPushMembers()}
+              disabled={isLoadingMembers}
+            >
+              <RefreshCw size={15} className={isLoadingMembers ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+
+          <div className="grid gap-3 text-xs text-text-secondary sm:grid-cols-3">
+            <div className="rounded-[14px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.45)] px-4 py-3">
+              Total: <strong className="text-white">{members.length}</strong>
+            </div>
+            <div className="rounded-[14px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.45)] px-4 py-3">
+              Admin: <strong className="text-white">{members.filter((member) => member.isAdmin).length}</strong>
+            </div>
+            <div className="rounded-[14px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.45)] px-4 py-3">
+              Dikecualikan: <strong className="text-white">{members.filter((member) => member.isExcluded).length}</strong>
+            </div>
+          </div>
+
+          <input
+            value={memberSearch}
+            onChange={(event) => setMemberSearch(event.target.value)}
+            placeholder="Cari nomor atau nama"
+          />
+
+          <div className="clean-scrollbar max-h-[48vh] space-y-2 overflow-y-auto pr-2">
+            {isLoadingMembers ? (
+              <div className="flex min-h-32 items-center justify-center">
+                <div className="size-9 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
+              </div>
+            ) : members.length === 0 ? (
+              <div className="rounded-[14px] border border-[rgba(56,189,248,0.12)] px-4 py-3 text-sm text-text-secondary">
+                Anggota group tidak tersedia. Pastikan bot masih berada di group dan online.
+              </div>
+            ) : filteredMembers.length === 0 ? (
+              <div className="rounded-[14px] border border-[rgba(56,189,248,0.12)] px-4 py-3 text-sm text-text-secondary">
+                Tidak ada anggota yang cocok.
+              </div>
+            ) : (
+              filteredMembers.map((member) => (
+                <div
+                  key={member.jid}
+                  className="flex flex-col gap-3 rounded-[14px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.5)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-bold text-white">{member.phoneNumber || "Nomor tidak tersedia"}</span>
+                      {member.isAdmin ? (
+                        <span className="rounded-full bg-[rgba(37,99,235,0.16)] px-2.5 py-1 text-xs font-bold text-accent">
+                          ADMIN
+                        </span>
+                      ) : null}
+                      {member.isBot ? (
+                        <span className="rounded-full bg-[rgba(148,163,184,0.12)] px-2.5 py-1 text-xs font-bold text-text-secondary">
+                          BOT
+                        </span>
+                      ) : null}
+                      {member.isExcluded ? (
+                        <span className="rounded-full bg-[rgba(244,63,94,0.12)] px-2.5 py-1 text-xs font-bold text-danger">
+                          TIDAK DIPUSH
+                        </span>
+                      ) : null}
+                    </div>
+                    {member.displayName && member.displayName !== member.phoneNumber ? (
+                      <div className="mt-1 truncate text-xs text-text-secondary">{member.displayName}</div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className={
+                      member.isExcluded
+                        ? "inline-flex items-center justify-center gap-2 rounded-[14px] border border-[rgba(34,197,94,0.18)] px-4 py-2.5 text-sm font-bold text-success hover:bg-[rgba(34,197,94,0.08)] disabled:opacity-60"
+                        : "inline-flex items-center justify-center gap-2 rounded-[14px] border border-[rgba(244,63,94,0.18)] px-4 py-2.5 text-sm font-bold text-danger hover:bg-[rgba(244,63,94,0.08)] disabled:opacity-60"
+                    }
+                    onClick={() => void handleToggleMemberExclusion(member)}
+                    disabled={member.isAdmin || member.isBot || !member.phoneNumber || updatingMemberKey === member.jid}
+                  >
+                    {member.isExcluded ? <CheckCircle2 size={16} /> : <UserX size={16} />}
+                    {member.isAdmin || member.isBot
+                      ? "Otomatis Lewat"
+                      : !member.phoneNumber
+                        ? "Nomor Tidak Ada"
+                        : member.isExcluded
+                          ? "Izinkan Push"
+                          : "Jangan Push"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </Modal>
     </div>
   );

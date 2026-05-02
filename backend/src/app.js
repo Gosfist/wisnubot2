@@ -19,6 +19,7 @@ import csStockRoutes from './routes/cs-stock.routes.js';
 import csPaymentRoutes from './routes/cs-payment.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import ownerRoutes from './routes/owner.routes.js';
+import pushContactRoutes from './routes/push-contact.routes.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -76,6 +77,7 @@ app.use('/api/cs-stocks', csStockRoutes);
 app.use('/api/cs-payments', csPaymentRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/owner', ownerRoutes);
+app.use('/api/push-contact', pushContactRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

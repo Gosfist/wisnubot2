@@ -159,6 +159,7 @@ class SchedulerService {
         .map((id) => parseInt(id, 10))
         .filter((id) => !Number.isNaN(id));
       let groups = [];
+      let closedGroups = [];
       if (targetGroupIds.length === 0) {
         const clauses = ["b.user_id = ?", "g.is_active = 1"];
         const params = [userId];
@@ -173,7 +174,7 @@ class SchedulerService {
           params.push(...targetExcludedGroupIds);
         }
         const [allActiveGroups] = await pool.execute(
-          `SELECT g.id, g.group_jid FROM \`groups\` g
+          `SELECT g.id, g.group_jid, g.name FROM \`groups\` g
            JOIN bots b ON b.id = g.bot_id
            WHERE ${clauses.join(" AND ")}`,
           params,
@@ -182,7 +183,6 @@ class SchedulerService {
       } else {
         const selectedClauses = [
           `g.id IN (${targetGroupIds.map(() => "?").join(",")})`,
-          "g.is_active = 1",
           "b.user_id = ?",
         ];
         const selectedParams = [...targetGroupIds, userId];
@@ -195,13 +195,26 @@ class SchedulerService {
         }
 
         const [selectedGroups] = await pool.execute(
-          `SELECT g.id, g.group_jid
+          `SELECT g.id, g.group_jid, g.name, g.is_active
            FROM \`groups\` g
            JOIN bots b ON b.id = g.bot_id
            WHERE ${selectedClauses.join(" AND ")}`,
           selectedParams,
         );
-        groups = selectedGroups;
+        groups = selectedGroups.filter((group) => Number(group.is_active) === 1);
+        closedGroups = selectedGroups.filter((group) => Number(group.is_active) !== 1);
+      }
+
+      for (const group of closedGroups) {
+        const groupName = String(group.name ?? group.group_jid ?? "-");
+        await pool.execute(
+          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+          [
+            userId,
+            "broadcast_group_closed",
+            `Group ${groupName} status group close jam ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`,
+          ],
+        );
       }
 
       const groupJids = groups.map((g) => g.group_jid);
@@ -229,6 +242,21 @@ class SchedulerService {
       );
 
       const sentCount = results.filter((r) => r.status === "sent").length;
+      const groupNameByJid = new Map(
+        groups.map((group) => [String(group.group_jid), String(group.name ?? group.group_jid)]),
+      );
+      for (const result of results) {
+        if (result.status !== "sent") continue;
+        const groupName = groupNameByJid.get(String(result.jid)) ?? String(result.jid);
+        await pool.execute(
+          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+          [
+            userId,
+            "broadcast_group_sent",
+            `Group ${groupName} berhasil di broadcast jam ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`,
+          ],
+        );
+      }
       await pool.execute(
         "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
         [

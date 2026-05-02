@@ -20,6 +20,43 @@ export interface GroupModel {
   isActive: boolean;
 }
 
+export interface PushContactTemplateModel {
+  id: number;
+  title: string;
+  messageText: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PushContactRunModel {
+  id: number;
+  status: string;
+  totalTargets: number;
+  successCount: number;
+  failedCount: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface GroupPushExclusionModel {
+  id: number;
+  groupId: number;
+  phoneNumber: string;
+  label: string | null;
+  createdAt: string | null;
+}
+
+export interface GroupPushMemberModel {
+  jid: string;
+  phoneNumber: string;
+  displayName: string;
+  isAdmin: boolean;
+  isBot: boolean;
+  isExcluded: boolean;
+  exclusionId: number | null;
+  exclusionLabel: string | null;
+}
+
 export interface BroadcastScheduleEntry {
   time: string; // "HH:MM"
   days: string[]; // normalized lowercase day keys: senin, selasa, ...
@@ -112,4 +149,11 @@ export interface AppSettingsModel {
 export interface AdminStatsModel {
   totalBots: number;
   totalBroadcasts: number;
+}
+
+export interface ActivityLogModel {
+  id: number;
+  action: string;
+  detail: string;
+  createdAt: string | null;
 }
