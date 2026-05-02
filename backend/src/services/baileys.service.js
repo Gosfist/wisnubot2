@@ -135,6 +135,26 @@ function extractQuotedMessageId(message) {
   );
 }
 
+function buildSingleSelectButton(label, id, sectionTitle = "Pilih Menu") {
+  return {
+    name: "single_select",
+    buttonParamsJson: JSON.stringify({
+      title: label,
+      sections: [
+        {
+          title: sectionTitle,
+          rows: [
+            {
+              title: label,
+              id,
+            },
+          ],
+        },
+      ],
+    }),
+  };
+}
+
 function buildCommandInteractiveMessage(remoteJid, entry) {
   const buttons = [];
   for (const button of entry.buttons ?? []) {
@@ -154,13 +174,7 @@ function buildCommandInteractiveMessage(remoteJid, entry) {
     }
 
     if (!id) continue;
-    buttons.push({
-      name: "quick_reply",
-      buttonParamsJson: JSON.stringify({
-        display_text: label,
-        id,
-      }),
-    });
+    buttons.push(buildSingleSelectButton(label, id));
   }
 
   if (buttons.length === 0) {
@@ -223,13 +237,7 @@ function buildWelcomeStartButtonMessage(remoteJid, text) {
             nativeFlowMessage:
               proto.Message.InteractiveMessage.NativeFlowMessage.create({
                 buttons: [
-                  {
-                    name: "quick_reply",
-                    buttonParamsJson: JSON.stringify({
-                      display_text: "Start",
-                      id: "start",
-                    }),
-                  },
+                  buildSingleSelectButton("Start", "start"),
                 ],
               }),
           }),
