@@ -49,6 +49,7 @@ export interface CsButtonModel {
   targetCommand: string | null;
   targetUrl: string | null;
   replyText: string | null;
+  price: number | null;
   orderIndex: number;
 }
 

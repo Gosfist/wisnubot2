@@ -10,7 +10,7 @@ const {
 } = pkg;
 import { Boom } from "@hapi/boom";
 import { join } from "path";
-import { mkdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
 import QRCode from "qrcode";
 import { config } from "../config/env.js";
 import { getPool } from "../config/database.js";
@@ -22,6 +22,19 @@ import { logger } from "../utils/logger.js";
 
 const PAIRING_BROWSER = ["Ubuntu", "Chrome", "22.04.4"];
 const DEFAULT_BROWSER = ["Mac OS", "Desktop", "14.4.1"];
+const PAYMENT_SUCCESS_IMAGE_PATH = new URL("../../uploads/asset/sukses.png", import.meta.url);
+const PAYMENT_FAILED_IMAGE_PATH = new URL("../../uploads/asset/gagal.png", import.meta.url);
+const PAYMENT_FAILED_TEXT =
+  "Pembayaran gagal atau belum terdeteksi. Silakan hubungi owner jika merasa sudah melakukan transaksi.";
+
+function getPaymentStatusImageBuffer(status) {
+  const assetUrl = status === "success" ? PAYMENT_SUCCESS_IMAGE_PATH : PAYMENT_FAILED_IMAGE_PATH;
+  if (!existsSync(assetUrl)) {
+    logger.warn(`Payment status image not found: ${assetUrl.pathname}`);
+    return null;
+  }
+  return readFileSync(assetUrl);
+}
 
 function extractIncomingTextContent(message) {
   if (!message || typeof message !== "object") {
@@ -134,7 +147,8 @@ function buildCommandInteractiveMessage(remoteJid, entry) {
         .replace(/^[/.]+/, "")
         .toLowerCase();
     } else if (button.buttonType === "buy") {
-      id = `cs_buy:${entry.id}`;
+      if (!button.id) continue;
+      id = `cs_buy:${entry.id}:${button.id}`;
     } else if (button.buttonType === "reply" && button.replyText) {
       id = `cs_reply:${button.id}`;
     }
@@ -230,8 +244,9 @@ function buildPaymentCaption(tx) {
   const priceText = tx.price.toLocaleString("id-ID");
   const adminFeeText = tx.adminFee.toLocaleString("id-ID");
   const totalPaymentText = tx.totalPayment.toLocaleString("id-ID");
+  const idTrx = tx.idTrx ?? tx.orderId;
   return (
-    `IdOrder: ${tx.orderId}\n` +
+    `idTrx: ${idTrx}\n` +
     `Harga: Rp ${priceText}\n` +
     `Biaya Admin: Rp ${adminFeeText}\n` +
     `Total Bayar: Rp ${totalPaymentText}`
@@ -258,10 +273,21 @@ function buildPaymentActionContent(tx, qrImage = null, notice = "") {
           }),
         },
         {
-          name: "quick_reply",
+          name: "single_select",
           buttonParamsJson: JSON.stringify({
-            display_text: "Cek Pembayaran",
-            id: `cs_checkpay:${tx.orderId}`,
+            title: "Cek Pembayaran",
+            sections: [
+              {
+                title: "Status Transaksi",
+                rows: [
+                  {
+                    title: "Cek Pembayaran",
+                    description: "Tekan untuk cek status pembayaran terbaru.",
+                    id: `cs_checktrx:${tx.idTrx ?? tx.orderId}`,
+                  },
+                ],
+              },
+            ],
           }),
         },
       ],
@@ -1060,14 +1086,17 @@ class BaileysManager {
             }
 
             if (incomingText.startsWith("cs_buy:")) {
-              const csId = Number(incomingText.split(":")[1]);
+              const [, csIdRaw, buttonIdRaw] = incomingText.split(":");
+              const csId = Number(csIdRaw);
+              const buttonId = Number(buttonIdRaw);
               logger.info(
-                `Customer service buy button clicked: csId=${csId}, customer=${remoteJid}`,
+                `Customer service buy button clicked: csId=${csId}, buttonId=${buttonId || "-"}, customer=${remoteJid}`,
               );
               try {
                 const tx = await csPaymentService.createBuyTransaction({
                   userId: customerServiceContext.userId,
                   csId,
+                  buttonId: Number.isFinite(buttonId) ? buttonId : null,
                   customerJid: remoteJid,
                 });
                 const qrImage = await QRCode.toBuffer(tx.qrisString, {
@@ -1099,73 +1128,59 @@ class BaileysManager {
               continue;
             }
 
-            if (incomingText.startsWith("cs_checkpay:")) {
-              const orderId = incomingText.replace(/^cs_checkpay:/, "").trim();
+            if (
+              incomingText.startsWith("cs_checktrx:") ||
+              incomingText.startsWith("cs_checkpay:")
+            ) {
+              const idTrx = incomingText.replace(/^cs_check(?:trx|pay):/, "").trim();
               logger.info(
-                `Customer service payment check clicked: orderId=${orderId}, customer=${remoteJid}`,
+                `Customer service payment check clicked: idTrx=${idTrx}, customer=${remoteJid}`,
               );
               try {
                 const result = await csPaymentService.checkAndDeliverPayment({
                   userId: customerServiceContext.userId,
-                  orderId,
+                  idTrx,
                   customerJid: remoteJid,
                   sock,
                 });
                 if (!result.paid) {
-                  const notice =
-                    result.reason ||
-                    "Pembayaran belum terdeteksi. Jika sudah bayar, tunggu sebentar lalu klik Cek Pembayaran lagi.";
-                  if (result.transaction?.qrisString) {
-                    const qrImage = await QRCode.toBuffer(
-                      result.transaction.qrisString,
-                      {
-                        type: "png",
-                        errorCorrectionLevel: "M",
-                        margin: 2,
-                        width: 720,
-                      },
-                    );
-                    const paymentActionContent = buildPaymentActionContent(
-                      result.transaction,
-                      qrImage,
-                      notice,
-                    );
-                    await messageService.sendCustomerServiceInteractiveMessage(
+                  const failedImage = getPaymentStatusImageBuffer("failed");
+                  if (failedImage) {
+                    await messageService.sendCustomerServiceImageMessage(
                       sock,
                       message.key,
                       remoteJid,
-                      paymentActionContent,
-                    );
-                  } else if (result.transaction) {
-                    const paymentActionMessage = buildPaymentActionMessage(
-                      remoteJid,
-                      result.transaction,
-                      notice,
-                    );
-                    await messageService.sendCustomerServiceRelayMessage(
-                      sock,
-                      message.key,
-                      remoteJid,
-                      paymentActionMessage,
+                      failedImage,
+                      PAYMENT_FAILED_TEXT,
                     );
                   } else {
                     await messageService.sendCustomerServiceMessage(
                       sock,
                       message.key,
                       remoteJid,
-                      notice,
+                      PAYMENT_FAILED_TEXT,
                     );
                   }
                 }
               } catch (err) {
-                await messageService.sendCustomerServiceMessage(
-                  sock,
-                  message.key,
-                  remoteJid,
-                  err instanceof Error
-                    ? err.message
-                    : "Gagal mengecek pembayaran.",
-                );
+                logger.warn(err, "Customer service payment check failed");
+                const failedImage = getPaymentStatusImageBuffer("failed");
+                if (failedImage) {
+                  await messageService.sendCustomerServiceImageMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    failedImage,
+                    PAYMENT_FAILED_TEXT,
+                  );
+                } else {
+                  await messageService.sendCustomerServiceMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    PAYMENT_FAILED_TEXT,
+                  );
+                }
               }
               continue;
             }

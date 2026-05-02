@@ -3,6 +3,7 @@ import { appSettingsService } from "./app-settings.service.js";
 import { csStockService } from "./cs-stock.service.js";
 import { messageService } from "./message.service.js";
 import { logger } from "../utils/logger.js";
+import { existsSync, readFileSync } from "fs";
 
 const PAKASIR_BASE_URL = "https://app.pakasir.com";
 const PAID_STATUSES = new Set(["completed", "paid", "success"]);
@@ -10,6 +11,15 @@ const QRIS_ADMIN_FIXED_FEE = 310;
 const QRIS_ADMIN_PERCENT = 0.007;
 const QRIS_ADMIN_HIGH_AMOUNT_PERCENT = 0.01;
 const QRIS_ADMIN_HIGH_AMOUNT_THRESHOLD = 105000;
+const PAYMENT_SUCCESS_IMAGE_PATH = new URL("../../uploads/asset/sukses.png", import.meta.url);
+
+function getPaymentSuccessImageBuffer() {
+  if (!existsSync(PAYMENT_SUCCESS_IMAGE_PATH)) {
+    logger.warn(`Payment success image not found: ${PAYMENT_SUCCESS_IMAGE_PATH.pathname}`);
+    return null;
+  }
+  return readFileSync(PAYMENT_SUCCESS_IMAGE_PATH);
+}
 
 function normalizeJid(value) {
   const raw = String(value ?? "").trim();
@@ -55,8 +65,10 @@ function buildPaymentView(row) {
     ? Number(row.total_payment)
     : price + adminFee;
 
+  const idTrx = String(row.pakasir_order_id ?? row.idTrx ?? row.id_trx ?? row.orderId ?? row.order_id ?? "");
   return {
-    orderId: String(row.pakasir_order_id ?? row.orderId ?? row.order_id ?? ""),
+    idTrx,
+    orderId: idTrx,
     paymentUrl: String(row.pakasir_payment_url ?? row.paymentUrl ?? ""),
     qrisString: row.qris_string ? String(row.qris_string) : null,
     amount: price,
@@ -102,20 +114,31 @@ async function createPakasirQrisPayment({ slug, apiKey, orderId, amount }) {
   return payment;
 }
 
-async function getEntryForUser(userId, csId) {
+async function getEntryForUser(userId, csId, buttonId = null) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT id, user_id, nama_perintah, value, delivery_mode, price, relay_prompt
-       FROM customer_service
-      WHERE id = ? AND user_id = ?
+    `SELECT cs.id, cs.user_id, cs.nama_perintah, cs.value, cs.delivery_mode,
+            COALESCE(btn.price, cs.price) AS price,
+            cs.relay_prompt,
+            btn.id AS button_id
+       FROM customer_service cs
+       LEFT JOIN cs_buttons btn
+         ON btn.cs_id = cs.id
+        AND btn.id = ?
+        AND btn.button_type = 'buy'
+      WHERE cs.id = ? AND cs.user_id = ?
       LIMIT 1`,
-    [Number(csId), Number(userId)],
+    [buttonId ? Number(buttonId) : null, Number(csId), Number(userId)],
   );
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  if (row && buttonId && !row.button_id) {
+    throw new Error("Button beli tidak ditemukan");
+  }
+  return row;
 }
 
-async function createBuyTransaction({ userId, csId, customerJid }) {
-  const entry = await getEntryForUser(userId, csId);
+async function createBuyTransaction({ userId, csId, buttonId = null, customerJid }) {
+  const entry = await getEntryForUser(userId, csId, buttonId);
   if (!entry) {
     throw new Error("Produk customer service tidak ditemukan");
   }
@@ -165,6 +188,7 @@ async function createBuyTransaction({ userId, csId, customerJid }) {
   );
 
   return {
+    idTrx: orderId,
     orderId,
     paymentUrl,
     amount: price,
@@ -292,8 +316,9 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
   };
 }
 
-async function checkAndDeliverPayment({ userId, orderId, customerJid, sock }) {
-  const tx = await findTransactionByOrderForUser(userId, orderId);
+async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, sock }) {
+  const trxId = idTrx ?? orderId;
+  const tx = await findTransactionByOrderForUser(userId, trxId);
   if (!tx) {
     return {
       paid: false,
@@ -311,6 +336,16 @@ async function checkAndDeliverPayment({ userId, orderId, customerJid, sock }) {
   }
 
   if (tx.status === "paid") {
+    if (tx.delivered_at) {
+      await sendPaymentSuccessMessage(
+        sock,
+        null,
+        String(tx.customer_jid),
+        tx.relay_prompt ||
+          "Pembayaran berhasil. Pesanan kamu sudah diproses.",
+      );
+      return { paid: true, reason: null, transaction: buildPaymentView(tx) };
+    }
     await deliverPaidTransaction(sock, tx);
     return { paid: true, reason: null, transaction: buildPaymentView(tx) };
   }
@@ -360,7 +395,7 @@ async function deliverPaidTransaction(sock, transaction) {
   if (mode === "stock") {
     const stock = await csStockService.reserveOne(csId, customerJid);
     if (!stock) {
-      await messageService.sendCustomerServiceMessage(
+      await sendPaymentSuccessMessage(
         sock,
         null,
         customerJid,
@@ -375,7 +410,7 @@ async function deliverPaidTransaction(sock, transaction) {
         WHERE id = ?`,
       [stock.id, txId],
     );
-    await messageService.sendCustomerServiceMessage(
+    await sendPaymentSuccessMessage(
       sock,
       null,
       customerJid,
@@ -398,7 +433,7 @@ async function deliverPaidTransaction(sock, transaction) {
       `UPDATE cs_transactions SET delivered_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [txId],
     );
-    await messageService.sendCustomerServiceMessage(
+    await sendPaymentSuccessMessage(
       sock,
       null,
       customerJid,
@@ -411,13 +446,28 @@ async function deliverPaidTransaction(sock, transaction) {
     `UPDATE cs_transactions SET delivered_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [txId],
   );
-  await messageService.sendCustomerServiceMessage(
+  await sendPaymentSuccessMessage(
     sock,
     null,
     customerJid,
     "Pembayaran berhasil. Pesanan kamu sedang diproses.",
   );
   return true;
+}
+
+async function sendPaymentSuccessMessage(sock, messageKey, jid, text) {
+  const successImage = getPaymentSuccessImageBuffer();
+  if (successImage) {
+    return messageService.sendCustomerServiceImageMessage(
+      sock,
+      messageKey,
+      jid,
+      successImage,
+      text,
+    );
+  }
+
+  return messageService.sendCustomerServiceMessage(sock, messageKey, jid, text);
 }
 
 async function getWaitingRelayForCustomer(userId, customerJid) {
@@ -472,7 +522,7 @@ async function handleCustomerRelayInput({ userId, customerJid, text, sock }) {
     "Reply pesan ini dengan jawaban done jika selesai.";
   const ownerMessage =
     `Transaksi customer service perlu diproses.\n\n` +
-    `IdOrder: ${session.pakasir_order_id}\n` +
+    `idTrx: ${session.pakasir_order_id}\n` +
     `Produk: /${session.nama_perintah ?? "-"}\n` +
     `Nomor WA: ${buyerNumber}\n` +
     `Nominal: Rp ${Number(session.amount ?? 0).toLocaleString("id-ID")}\n\n` +
@@ -558,7 +608,7 @@ async function handleOwnerDone({
     sock,
     null,
     String(session.customer_jid),
-    `IdOrder: ${session.pakasir_order_id}\n` +
+    `idTrx: ${session.pakasir_order_id}\n` +
       `Produk: /${session.nama_perintah ?? "-"}\n` +
       `Status: Done\n` +
       `\nText: ${

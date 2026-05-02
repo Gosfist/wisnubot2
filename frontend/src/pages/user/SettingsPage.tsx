@@ -11,6 +11,7 @@ export function SettingsPage() {
   const auth = useAuth();
   const appData = useAppData();
   const { showToast } = useToast();
+  const currentUser = appData.user ?? auth.user;
 
   const [showEditUsernameModal, setShowEditUsernameModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -137,13 +138,13 @@ export function SettingsPage() {
             className="flex w-full items-center justify-between gap-4 rounded-[20px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.56)] px-4 py-4 text-left transition hover:border-[rgba(56,189,248,0.28)] hover:bg-[rgba(15,23,42,0.72)]"
             type="button"
             onClick={() => {
-              setNewUsername(appData.user?.username ?? "");
+              setNewUsername(currentUser?.username ?? "");
               setShowEditUsernameModal(true);
             }}
           >
             <div>
               <span className="block text-xs font-bold tracking-[0.2em] text-text-muted">USERNAME</span>
-              <strong className="mt-2 block text-sm font-semibold">{appData.user?.username ?? "-"}</strong>
+              <strong className="mt-2 block text-sm font-semibold">{currentUser?.username ?? "-"}</strong>
             </div>
             <PencilLine size={16} className="text-accent" />
           </button>

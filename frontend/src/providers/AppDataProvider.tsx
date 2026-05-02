@@ -1,5 +1,6 @@
 ﻿import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import type {
   AdminStatsModel,
   AppSettingsModel,
@@ -175,6 +176,7 @@ function parseCsButton(payload: Record<string, unknown>): CsButtonModel {
     targetCommand: payload.targetCommand ?? payload.target_command ? String(payload.targetCommand ?? payload.target_command) : null,
     targetUrl: payload.targetUrl ?? payload.target_url ? String(payload.targetUrl ?? payload.target_url) : null,
     replyText: payload.replyText ?? payload.reply_text ? String(payload.replyText ?? payload.reply_text) : null,
+    price: payload.price === null || payload.price === undefined ? null : Number(payload.price),
     orderIndex: Number(payload.orderIndex ?? payload.order_index ?? 0),
   };
 }
@@ -238,6 +240,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [groups, setGroups] = useState<GroupModel[]>([]);
   const [broadcasts, setBroadcasts] = useState<BroadcastModel[]>([]);
   const [customerServiceItems, setCustomerServiceItems] = useState<CustomerServiceItemModel[]>([]);
+
+  useEffect(() => {
+    setUser(auth.user);
+  }, [auth.user]);
 
   async function refreshUser(): Promise<UserModel> {
     const data = await apiFetch("/auth/me");

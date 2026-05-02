@@ -142,7 +142,7 @@ async function listEntriesForUser(user) {
   const placeholders = ids.map(() => "?").join(", ");
   const [btnRows] = await pool.execute(
     `SELECT id, cs_id, label, button_type, target_command, target_url,
-            reply_text, order_index
+            reply_text, price, order_index
        FROM cs_buttons
       WHERE cs_id IN (${placeholders})
       ORDER BY order_index ASC, id ASC`,
@@ -160,6 +160,7 @@ async function listEntriesForUser(user) {
       targetCommand: b.target_command ? String(b.target_command) : null,
       targetUrl: b.target_url ? String(b.target_url) : null,
       replyText: b.reply_text ? String(b.reply_text) : null,
+      price: b.price === null ? null : Number(b.price),
       orderIndex: Number(b.order_index ?? 0),
     });
   }
@@ -404,7 +405,7 @@ async function getCommandEntry(contextOrBotId, commandName) {
   }
 
   const [buttons] = await pool.execute(
-    `SELECT id, label, button_type, target_command, target_url, reply_text, order_index
+    `SELECT id, label, button_type, target_command, target_url, reply_text, price, order_index
        FROM cs_buttons
       WHERE cs_id = ?
       ORDER BY order_index ASC, id ASC`,
@@ -429,6 +430,7 @@ async function getCommandEntry(contextOrBotId, commandName) {
       targetCommand: button.target_command ? String(button.target_command) : null,
       targetUrl: button.target_url ? String(button.target_url) : null,
       replyText: button.reply_text ? String(button.reply_text) : null,
+      price: button.price === null ? null : Number(button.price),
       orderIndex: Number(button.order_index ?? 0),
     })),
   };
@@ -443,7 +445,7 @@ async function getButtonAction(contextOrBotId, buttonId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT b.id, b.cs_id, b.label, b.button_type, b.target_command,
-            b.target_url, b.reply_text, cs.user_id
+            b.target_url, b.reply_text, b.price, cs.user_id
        FROM cs_buttons b
        JOIN customer_service cs ON cs.id = b.cs_id
       WHERE b.id = ? AND cs.user_id = ?
@@ -464,6 +466,7 @@ async function getButtonAction(contextOrBotId, buttonId) {
     targetCommand: row.target_command ? String(row.target_command) : null,
     targetUrl: row.target_url ? String(row.target_url) : null,
     replyText: row.reply_text ? String(row.reply_text) : null,
+    price: row.price === null ? null : Number(row.price),
   };
 }
 

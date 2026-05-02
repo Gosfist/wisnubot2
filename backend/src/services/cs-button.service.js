@@ -27,12 +27,21 @@ function normalizeButton(payload) {
     throw new Error("Button reply wajib punya teks balasan");
   }
 
+  const price =
+    type === "buy" && payload?.price !== null && payload?.price !== undefined
+      ? Math.floor(Number(payload.price))
+      : null;
+  if (type === "buy" && (!Number.isFinite(price) || price <= 0)) {
+    throw new Error("Button beli wajib punya harga lebih dari 0");
+  }
+
   return {
     label,
     type,
     targetCommand,
     targetUrl: null,
     replyText,
+    price,
     orderIndex: Number.isFinite(Number(payload?.orderIndex))
       ? Number(payload.orderIndex)
       : 0,
@@ -54,7 +63,7 @@ async function listForCs(csId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT id, cs_id, label, button_type, target_command, target_url,
-            reply_text, order_index, created_at
+            reply_text, price, order_index, created_at
        FROM cs_buttons
       WHERE cs_id = ?
       ORDER BY order_index ASC, id ASC`,
@@ -68,6 +77,7 @@ async function listForCs(csId) {
     targetCommand: row.target_command ? String(row.target_command) : null,
     targetUrl: row.target_url ? String(row.target_url) : null,
     replyText: row.reply_text ? String(row.reply_text) : null,
+    price: row.price === null ? null : Number(row.price),
     orderIndex: Number(row.order_index ?? 0),
     createdAt: row.created_at,
   }));
@@ -92,8 +102,8 @@ async function replaceForCs(user, csId, buttonsRaw) {
     for (const btn of normalized) {
       await conn.execute(
         `INSERT INTO cs_buttons
-           (cs_id, label, button_type, target_command, target_url, reply_text, order_index)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (cs_id, label, button_type, target_command, target_url, reply_text, price, order_index)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           Number(csId),
           btn.label,
@@ -101,6 +111,7 @@ async function replaceForCs(user, csId, buttonsRaw) {
           btn.targetCommand,
           btn.targetUrl,
           btn.replyText,
+          btn.price,
           btn.orderIndex,
         ],
       );

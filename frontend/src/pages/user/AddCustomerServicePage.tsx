@@ -35,6 +35,7 @@ function makeEmptyButton(): CsButtonModel {
     targetCommand: "",
     targetUrl: null,
     replyText: null,
+    price: null,
     orderIndex: 0,
   };
 }
@@ -67,7 +68,6 @@ export function AddCustomerServicePage() {
   const [commandName, setCommandName] = useState("");
   const [value, setValue] = useState("");
   const [deliveryMode, setDeliveryMode] = useState<CsDeliveryMode>("none");
-  const [price, setPrice] = useState<string>("");
   const [relayPrompt, setRelayPrompt] = useState("");
   const [relayWaitingText, setRelayWaitingText] = useState("");
   const [relayOwnerInstruction, setRelayOwnerInstruction] = useState("");
@@ -190,13 +190,16 @@ export function AddCustomerServicePage() {
         if (next) {
           setCommandName(next.commandName || "");
           setDeliveryMode(next.deliveryMode);
-          setPrice(next.price === null ? "" : String(next.price));
           setRelayPrompt(next.relayPrompt ?? "");
           setRelayWaitingText(next.relayWaitingText ?? "");
           setRelayOwnerInstruction(next.relayOwnerInstruction ?? "");
           setRelayDoneText(next.relayDoneText ?? "");
           setButtons(
-            next.buttons.map((b, i) => ({ ...b, orderIndex: i })),
+            next.buttons.map((b, i) => ({
+              ...b,
+              price: b.price ?? (b.buttonType === "buy" ? next.price : null),
+              orderIndex: i,
+            })),
           );
 
           let parsedText = next.value;
@@ -236,6 +239,12 @@ export function AddCustomerServicePage() {
       }
       if (b.buttonType === "reply" && !b.replyText?.trim()) {
         return `Button "${label}": isi teks balasan`;
+      }
+      if (b.buttonType === "buy") {
+        const priceNum = Number(b.price ?? 0);
+        if (!Number.isFinite(priceNum) || priceNum <= 0) {
+          return `Button "${label}": harga wajib diisi lebih dari 0`;
+        }
       }
     }
     return null;
@@ -277,11 +286,6 @@ export function AddCustomerServicePage() {
         return;
       }
 
-      const priceNum = Number(price);
-      if (!Number.isFinite(priceNum) || priceNum <= 0) {
-        showToast("Harga wajib diisi (lebih dari 0) untuk button Beli.", "danger");
-        return;
-      }
     }
 
     if (deliveryMode === "relay" && !relayPrompt.trim()) {
@@ -307,7 +311,7 @@ export function AddCustomerServicePage() {
       namaPerintah: trimmedCommand,
       value: finalValue,
       deliveryMode,
-      price: hasBuyButton && price !== "" ? Number(price) : null,
+      price: null,
       relayPrompt: deliveryMode === "relay" ? relayPrompt.trim() : null,
       relayWaitingText: deliveryMode === "relay" ? relayWaitingText.trim() : null,
       relayOwnerInstruction: deliveryMode === "relay" ? relayOwnerInstruction.trim() : null,
@@ -333,6 +337,7 @@ export function AddCustomerServicePage() {
             targetCommand: b.buttonType === "link" ? stripPrefix(b.targetCommand ?? "") : null,
             targetUrl: null,
             replyText: b.buttonType === "reply" ? b.replyText?.trim() ?? null : null,
+            price: b.buttonType === "buy" ? Number(b.price) : null,
             orderIndex: i,
           })),
         );
@@ -565,9 +570,26 @@ export function AddCustomerServicePage() {
                       )}
 
                       {b.buttonType === "buy" && (
-                        <span className="block text-xs text-text-secondary">
-                          Button Beli akan generate link pembayaran Pakasir saat ditekan. Pastikan harga & mode pengiriman di-set di bawah, dan kredensial Pakasir sudah dikonfigurasi di Pengaturan.
-                        </span>
+                        <div className="grid gap-2">
+                          <label className="grid min-w-0 gap-2">
+                            <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">Harga Button (Rp)</span>
+                            <input
+                              className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                              type="number"
+                              min={1}
+                              value={b.price ?? ""}
+                              onChange={(e) =>
+                                updateButton(index, {
+                                  price: e.target.value === "" ? null : Number(e.target.value),
+                                })
+                              }
+                              placeholder="contoh: 25000"
+                            />
+                          </label>
+                          <span className="block text-xs text-text-secondary">
+                            Button Beli akan generate link pembayaran Pakasir memakai harga button ini.
+                          </span>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -578,21 +600,9 @@ export function AddCustomerServicePage() {
               </div>
             )}
 
-            {/* Delivery & Price (when buy button exists) */}
+            {/* Delivery mode (when buy button exists) */}
             {!isDefaultCommand && hasBuyButton && (
               <>
-                <label className="block space-y-2">
-                  <span className="text-sm font-semibold text-text-secondary">Harga (Rp)</span>
-                  <input
-                    className={inputBase}
-                    type="number"
-                    min={1}
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="contoh: 25000"
-                  />
-                </label>
-
                 <div className="space-y-2">
                   <span className="text-sm font-semibold text-text-secondary">Mode Pengiriman Setelah Bayar</span>
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
