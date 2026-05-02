@@ -13,6 +13,7 @@ import type {
   CsStockSummaryModel,
   CustomerServiceItemModel,
   GroupModel,
+  TransactionModel,
   UserModel,
 } from "../types/models";
 import { apiFetch, withJsonBody } from "../lib/http";
@@ -46,6 +47,7 @@ interface AppDataContextValue {
   addStocks: (csId: number, contents: string | string[]) => Promise<{ added: number; message: string }>;
   deleteStock: (stockId: number) => Promise<string>;
   clearStocks: (csId: number) => Promise<string>;
+  fetchTransactions: () => Promise<TransactionModel[]>;
   fetchSettings: () => Promise<AppSettingsModel>;
   updateSettings: (payload: Partial<AppSettingsModel>) => Promise<AppSettingsModel>;
   connectBot: (data?: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -220,6 +222,21 @@ function parseStockSummary(payload: Record<string, unknown>): CsStockSummaryMode
     total: Number(payload.total ?? 0),
     available: Number(payload.available ?? 0),
     used: Number(payload.used ?? 0),
+  };
+}
+
+function parseTransaction(payload: Record<string, unknown>): TransactionModel {
+  return {
+    id: Number(payload.id ?? 0),
+    idTrx: String(payload.idTrx ?? payload.id_trx ?? ""),
+    customerJid: String(payload.customerJid ?? payload.customer_jid ?? ""),
+    amount: Number(payload.amount ?? 0),
+    status: String(payload.status ?? ""),
+    commandName: payload.commandName ?? payload.command_name ? String(payload.commandName ?? payload.command_name) : null,
+    stockContent: payload.stockContent ?? payload.stock_content ? String(payload.stockContent ?? payload.stock_content) : null,
+    paidAt: payload.paidAt ?? payload.paid_at ? String(payload.paidAt ?? payload.paid_at) : null,
+    deliveredAt: payload.deliveredAt ?? payload.delivered_at ? String(payload.deliveredAt ?? payload.delivered_at) : null,
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
   };
 }
 
@@ -402,6 +419,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return String((data as { message: string }).message ?? "Stock dikosongkan");
   }
 
+  async function fetchTransactions(): Promise<TransactionModel[]> {
+    const data = await apiFetch("/cs-payments/transactions");
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseTransaction);
+  }
+
   async function fetchSettings(): Promise<AppSettingsModel> {
     const data = await apiFetch("/settings");
     return parseAppSettings((data as { settings: Record<string, unknown> }).settings ?? {});
@@ -482,6 +504,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       addStocks,
       deleteStock,
       clearStocks,
+      fetchTransactions,
       fetchSettings,
       updateSettings,
       connectBot,

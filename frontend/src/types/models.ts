@@ -88,6 +88,19 @@ export interface CsStockSummaryModel {
   used: number;
 }
 
+export interface TransactionModel {
+  id: number;
+  idTrx: string;
+  customerJid: string;
+  amount: number;
+  status: string;
+  commandName: string | null;
+  stockContent: string | null;
+  paidAt: string | null;
+  deliveredAt: string | null;
+  createdAt: string | null;
+}
+
 export interface AppSettingsModel {
   pakasirSlug: string;
   pakasirApiKey: string;

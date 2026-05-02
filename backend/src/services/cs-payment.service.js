@@ -11,6 +11,8 @@ const QRIS_ADMIN_FIXED_FEE = 310;
 const QRIS_ADMIN_PERCENT = 0.007;
 const QRIS_ADMIN_HIGH_AMOUNT_PERCENT = 0.01;
 const QRIS_ADMIN_HIGH_AMOUNT_THRESHOLD = 105000;
+const PAYMENT_EXPIRY_MINUTES = 5;
+const PAYMENT_EXPIRY_MS = PAYMENT_EXPIRY_MINUTES * 60 * 1000;
 const PAYMENT_SUCCESS_IMAGE_PATH = new URL("../../uploads/asset/sukses.png", import.meta.url);
 
 function getPaymentSuccessImageBuffer() {
@@ -66,6 +68,11 @@ function buildPaymentView(row) {
     : price + adminFee;
 
   const idTrx = String(row.pakasir_order_id ?? row.idTrx ?? row.id_trx ?? row.orderId ?? row.order_id ?? "");
+  const createdAt = row.created_at ?? row.createdAt ?? null;
+  const createdMs = createdAt ? new Date(createdAt).getTime() : NaN;
+  const expiresAt = Number.isNaN(createdMs)
+    ? null
+    : new Date(createdMs + PAYMENT_EXPIRY_MS).toISOString();
   return {
     idTrx,
     orderId: idTrx,
@@ -77,6 +84,8 @@ function buildPaymentView(row) {
     totalPayment,
     paymentMethod: "qris",
     commandName: String(row.nama_perintah ?? row.commandName ?? ""),
+    expiresAt,
+    expiryMinutes: PAYMENT_EXPIRY_MINUTES,
   };
 }
 
@@ -112,6 +121,123 @@ async function createPakasirQrisPayment({ slug, apiKey, orderId, amount }) {
   }
 
   return payment;
+}
+
+async function cancelPakasirTransaction({ slug, apiKey, orderId, amount }) {
+  if (!slug || !apiKey || !orderId || !amount) {
+    return false;
+  }
+
+  const response = await fetch(`${PAKASIR_BASE_URL}/api/transactioncancel`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      project: slug,
+      order_id: orderId,
+      amount: Number(amount),
+      api_key: apiKey,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Pakasir cancel gagal: HTTP ${response.status}`);
+  }
+
+  return true;
+}
+
+function isPaymentExpired(transaction) {
+  const createdAt = transaction?.created_at ?? transaction?.createdAt;
+  if (!createdAt) return false;
+  const createdMs = new Date(createdAt).getTime();
+  if (Number.isNaN(createdMs)) return false;
+  return Date.now() - createdMs >= PAYMENT_EXPIRY_MS;
+}
+
+async function closePendingTransaction(transaction, status) {
+  if (!transaction || transaction.status !== "pending") {
+    return false;
+  }
+
+  const pool = getPool();
+  const [currentRows] = await pool.execute(
+    "SELECT status FROM cs_transactions WHERE id = ? LIMIT 1",
+    [Number(transaction.id)],
+  );
+  if (currentRows[0]?.status !== "pending") {
+    return false;
+  }
+
+  try {
+    await cancelPakasirTransaction({
+      slug: transaction.pakasir_slug,
+      apiKey: transaction.pakasir_api_key,
+      orderId: transaction.pakasir_order_id,
+      amount: transaction.amount,
+    });
+  } catch (err) {
+    logger.warn(err, `Pakasir cancel failed for ${transaction.pakasir_order_id}`);
+  }
+
+  await pool.execute(
+    "UPDATE cs_transactions SET status = ? WHERE id = ? AND status = 'pending'",
+    [status, Number(transaction.id)],
+  );
+  return true;
+}
+
+function schedulePendingExpiry(transaction) {
+  const createdAt = transaction?.created_at ?? transaction?.createdAt ?? Date.now();
+  const createdMs = new Date(createdAt).getTime();
+  const delayMs = Math.max(
+    0,
+    (Number.isNaN(createdMs) ? Date.now() : createdMs) + PAYMENT_EXPIRY_MS - Date.now(),
+  );
+
+  const timer = setTimeout(() => {
+    closePendingTransaction(transaction, "expired").catch((err) => {
+      logger.warn(err, `Failed to expire transaction ${transaction?.pakasir_order_id ?? "-"}`);
+    });
+  }, delayMs);
+
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+}
+
+async function findPendingTransactionsForCustomer(userId, customerJid) {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+            tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.created_at,
+            cs.nama_perintah,
+            s.pakasir_slug, s.pakasir_api_key
+       FROM cs_transactions tx
+       LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+       LEFT JOIN app_settings s ON s.user_id = tx.user_id
+      WHERE tx.user_id = ?
+        AND tx.customer_jid = ?
+        AND tx.status = 'pending'
+      ORDER BY tx.created_at DESC`,
+    [Number(userId), String(customerJid)],
+  );
+  return rows;
+}
+
+async function enforcePendingTransactionLock(userId, customerJid) {
+  const pendingRows = await findPendingTransactionsForCustomer(userId, customerJid);
+  for (const row of pendingRows) {
+    if (isPaymentExpired(row)) {
+      await closePendingTransaction(row, "expired");
+      continue;
+    }
+
+    throw new Error(
+      `Masih ada transaksi belum selesai (${row.pakasir_order_id}). Silakan klik Batal dulu atau tunggu Exp ${PAYMENT_EXPIRY_MINUTES} menit.`,
+    );
+  }
 }
 
 async function getEntryForUser(userId, csId, buttonId = null) {
@@ -155,6 +281,8 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
     );
   }
 
+  await enforcePendingTransactionLock(userId, customerJid);
+
   const orderId = buildOrderId(csId);
   const pakasirPayment = await createPakasirQrisPayment({
     slug: settings.pakasirSlug,
@@ -171,10 +299,10 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
   const paymentUrl = buildPaymentUrl(settings.pakasirSlug, price, orderId);
 
   const pool = getPool();
-  await pool.execute(
+  const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
-        qris_string, amount)
+         qris_string, amount)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(userId),
@@ -186,6 +314,19 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
       price,
     ],
   );
+  if (insertResult.insertId) {
+    schedulePendingExpiry({
+      id: insertResult.insertId,
+      user_id: Number(userId),
+      customer_jid: String(customerJid),
+      pakasir_order_id: orderId,
+      amount: price,
+      status: "pending",
+      created_at: new Date(),
+      pakasir_slug: settings.pakasirSlug,
+      pakasir_api_key: settings.pakasirApiKey,
+    });
+  }
 
   return {
     idTrx: orderId,
@@ -198,6 +339,8 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
     paymentMethod: "qris",
     qrisString: String(pakasirPayment.payment_number),
     commandName: String(entry.nama_perintah ?? ""),
+    expiresAt: new Date(Date.now() + PAYMENT_EXPIRY_MS).toISOString(),
+    expiryMinutes: PAYMENT_EXPIRY_MINUTES,
   };
 }
 
@@ -225,7 +368,7 @@ async function findTransaction(orderId, amount) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
-            tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at,
+            tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
             cs.relay_waiting_text, cs.relay_owner_instruction, cs.relay_done_text,
             s.pakasir_slug, s.pakasir_api_key
@@ -244,7 +387,7 @@ async function findTransactionByOrderForUser(userId, orderId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
-            tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at,
+            tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
             s.pakasir_slug, s.pakasir_api_key
        FROM cs_transactions tx
@@ -277,6 +420,23 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
       paid: false,
       transaction: tx,
       reason: "Project Pakasir tidak cocok",
+    };
+  }
+
+  if (tx.status !== "pending" && tx.status !== "paid") {
+    return {
+      paid: false,
+      transaction: tx,
+      reason: `Transaksi sudah ${tx.status}`,
+    };
+  }
+
+  if (tx.status === "pending" && isPaymentExpired(tx)) {
+    await closePendingTransaction(tx, "expired");
+    return {
+      paid: false,
+      transaction: tx,
+      reason: `Transaksi expired setelah ${PAYMENT_EXPIRY_MINUTES} menit`,
     };
   }
 
@@ -335,6 +495,14 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
     };
   }
 
+  if (tx.status === "expired" || tx.status === "failed") {
+    return {
+      paid: false,
+      reason: `Transaksi sudah ${tx.status === "expired" ? "expired" : "dibatalkan"}`,
+      transaction: buildPaymentView(tx),
+    };
+  }
+
   if (tx.status === "paid") {
     if (tx.delivered_at) {
       await sendPaymentSuccessMessage(
@@ -348,6 +516,15 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
     }
     await deliverPaidTransaction(sock, tx);
     return { paid: true, reason: null, transaction: buildPaymentView(tx) };
+  }
+
+  if (isPaymentExpired(tx)) {
+    await closePendingTransaction(tx, "expired");
+    return {
+      paid: false,
+      reason: `Transaksi expired setelah ${PAYMENT_EXPIRY_MINUTES} menit`,
+      transaction: buildPaymentView(tx),
+    };
   }
 
   const detail = await fetchPakasirStatus({
@@ -375,6 +552,55 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
 
   await deliverPaidTransaction(sock, { ...tx, status: "paid" });
   return { paid: true, reason: null, transaction: buildPaymentView(tx) };
+}
+
+async function cancelTransactionForCustomer({ userId, idTrx, customerJid }) {
+  const tx = await findTransactionByOrderForUser(userId, idTrx);
+  if (!tx) {
+    return {
+      cancelled: false,
+      paid: false,
+      message: "Transaksi tidak ditemukan",
+      transaction: null,
+    };
+  }
+
+  if (customerJid && String(tx.customer_jid) !== String(customerJid)) {
+    return {
+      cancelled: false,
+      paid: false,
+      message: "Transaksi ini bukan milik nomor kamu",
+      transaction: null,
+    };
+  }
+
+  if (tx.status === "paid") {
+    return {
+      cancelled: false,
+      paid: true,
+      message: "Transaksi sudah sukses dan tidak bisa dibatalkan.",
+      transaction: buildPaymentView(tx),
+    };
+  }
+
+  if (tx.status === "failed" || tx.status === "expired") {
+    return {
+      cancelled: true,
+      paid: false,
+      message: tx.status === "expired" ? "Transaksi sudah expired." : "Transaksi sudah dibatalkan.",
+      transaction: buildPaymentView(tx),
+    };
+  }
+
+  await closePendingTransaction(tx, isPaymentExpired(tx) ? "expired" : "failed");
+  return {
+    cancelled: true,
+    paid: false,
+    message: isPaymentExpired(tx)
+      ? "Transaksi sudah expired dan dibatalkan."
+      : "Transaksi berhasil dibatalkan. Kamu bisa membuat transaksi baru.",
+    transaction: buildPaymentView(tx),
+  };
 }
 
 async function deliverPaidTransaction(sock, transaction) {
@@ -642,12 +868,43 @@ async function handleWebhookAndDeliver(payload, sockResolver) {
   return result;
 }
 
+async function listPaidTransactionsForUser(user) {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.amount,
+            tx.status, tx.paid_at, tx.delivered_at, tx.created_at,
+            cs.nama_perintah, st.content AS stock_content
+       FROM cs_transactions tx
+       LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+       LEFT JOIN cs_stocks st ON st.id = tx.stock_id
+      WHERE tx.user_id = ?
+        AND tx.status = 'paid'
+      ORDER BY COALESCE(tx.paid_at, tx.created_at) DESC`,
+    [Number(user.id)],
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    idTrx: String(row.pakasir_order_id ?? ""),
+    customerJid: String(row.customer_jid ?? ""),
+    amount: Number(row.amount ?? 0),
+    status: String(row.status ?? ""),
+    commandName: row.nama_perintah ? String(row.nama_perintah) : null,
+    stockContent: row.stock_content ? String(row.stock_content) : null,
+    paidAt: row.paid_at ? String(row.paid_at) : null,
+    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
+    createdAt: row.created_at ? String(row.created_at) : null,
+  }));
+}
+
 export const csPaymentService = {
   createBuyTransaction,
   markPaidFromPakasir,
   deliverPaidTransaction,
   checkAndDeliverPayment,
+  cancelTransactionForCustomer,
   handleCustomerRelayInput,
   handleOwnerDone,
   handleWebhookAndDeliver,
+  listPaidTransactionsForUser,
 };

@@ -53,3 +53,13 @@ export async function pakasirWebhook(req, res) {
     });
   }
 }
+
+export async function listPaidTransactions(req, res) {
+  try {
+    const items = await csPaymentService.listPaidTransactionsForUser(req.user);
+    res.json({ items });
+  } catch (err) {
+    logger.error(err, "List paid transactions error");
+    res.status(500).json({ error: "Gagal memuat transaksi" });
+  }
+}

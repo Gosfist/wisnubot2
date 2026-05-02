@@ -257,7 +257,8 @@ function buildPaymentCaption(tx) {
     `idTrx: ${idTrx}\n` +
     `Harga: Rp ${priceText}\n` +
     `Biaya Admin: Rp ${adminFeeText}\n` +
-    `Total Bayar: Rp ${totalPaymentText}`
+    `Total Bayar: Rp ${totalPaymentText}\n` +
+    `Exp: ${tx.expiryMinutes ?? 5} menit`
   );
 }
 
@@ -292,6 +293,24 @@ function buildPaymentActionContent(tx, qrImage = null, notice = "") {
                     title: "Cek Pembayaran",
                     description: "Tekan untuk cek status pembayaran terbaru.",
                     id: `cs_checktrx:${tx.idTrx ?? tx.orderId}`,
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+        {
+          name: "single_select",
+          buttonParamsJson: JSON.stringify({
+            title: "Batal",
+            sections: [
+              {
+                title: "Batalkan Transaksi",
+                rows: [
+                  {
+                    title: "Batal",
+                    description: "Tekan untuk membatalkan transaksi ini.",
+                    id: `cs_canceltrx:${tx.idTrx ?? tx.orderId}`,
                   },
                 ],
               },
@@ -645,10 +664,9 @@ class BaileysManager {
 
     if (currentAttempt > maxAttempts) {
       logger.warn(
-        `Reconnect limit reached for user ${userId}, bot ${botId}. Last reason: ${reason}`,
+        `Reconnect limit reached for user ${userId}, bot ${botId}. Keeping bot record and session. Last reason: ${reason}`,
       );
       this.clearReconnectState(key);
-      await this.deleteBotRecord(botId, sessionName);
       if (this.io) {
         this.io.to(`user_${userId}`).emit("disconnected", {
           reason: "reconnect_limit",
@@ -1189,6 +1207,35 @@ class BaileysManager {
                     PAYMENT_FAILED_TEXT,
                   );
                 }
+              }
+              continue;
+            }
+
+            if (incomingText.startsWith("cs_canceltrx:")) {
+              const idTrx = incomingText.replace(/^cs_canceltrx:/, "").trim();
+              logger.info(
+                `Customer service payment cancel clicked: idTrx=${idTrx}, customer=${remoteJid}`,
+              );
+              try {
+                const result = await csPaymentService.cancelTransactionForCustomer({
+                  userId: customerServiceContext.userId,
+                  idTrx,
+                  customerJid: remoteJid,
+                });
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  result.message || "Transaksi dibatalkan.",
+                );
+              } catch (err) {
+                logger.warn(err, "Customer service payment cancel failed");
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  err instanceof Error ? err.message : "Gagal membatalkan transaksi.",
+                );
               }
               continue;
             }
@@ -1848,17 +1895,18 @@ class BaileysManager {
             }
           } else {
             logger.warn(
-              `Bot offline for user ${userId}, bot ${botId}. Removing session and database record.`,
+              `Bot offline for user ${userId}, bot ${botId}. Keeping bot record and session for reconnect.`,
             );
             this.lastQr.delete(userId);
-            await this.deleteBotRecord(botId, sessionName);
             if (isPendingPairing) {
               this.pendingConnections.delete(sessionName);
+            } else {
+              await this.scheduleReconnect(userId, botId, sessionName, reason);
             }
 
             if (this.io) {
               this.io.to(`user_${userId}`).emit("disconnected", {
-                reason: "offline_removed",
+                reason: "offline_reconnecting",
                 botId,
               });
             }

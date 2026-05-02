@@ -17,6 +17,7 @@ import { GroupsPage } from "../pages/user/GroupsPage";
 import { ManageBotsPage } from "../pages/user/ManageBotsPage";
 import { SettingsPage } from "../pages/user/SettingsPage";
 import { StockPage } from "../pages/user/StockPage";
+import { TransactionsPage } from "../pages/user/TransactionsPage";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", end: true },
@@ -26,9 +27,10 @@ const navItems = [
       { to: "/broadcasts", label: "Broadcast" },
       { to: "/push-kontak", label: "Push Kontak", end: true },
       { to: "/customer-service", label: "Customer Service", end: true },
-      { to: "/stock", label: "Stock", end: true },
     ],
   },
+  { to: "/stock", label: "Stock", end: true },
+  { to: "/transactions", label: "Transaksi", end: true },
   { to: "/groups", label: "Kelola Group", end: true },
   { to: "/settings", label: "Settings", end: true },
 ];
@@ -118,6 +120,7 @@ export function App() {
         <Route path="/customer-service/add" element={<AddCustomerServicePage />} />
         <Route path="/customer-service/:id" element={<AddCustomerServicePage />} />
         <Route path="/stock" element={<StockPage />} />
+        <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/bot/manage" element={<ManageBotsPage />} />
       </Route>
