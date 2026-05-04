@@ -87,6 +87,8 @@ export interface CsButtonModel {
   targetUrl: string | null;
   replyText: string | null;
   price: number | null;
+  activeDurationDays: number | null;
+  warrantyDurationDays: number | null;
   orderIndex: number;
 }
 
@@ -133,6 +135,15 @@ export interface TransactionModel {
   status: string;
   commandName: string | null;
   stockContent: string | null;
+  platform: string;
+  isManual: boolean;
+  activeDurationDays: number | null;
+  warrantyDurationDays: number | null;
+  completedAt: string | null;
+  activeStartAt: string | null;
+  activeExpiresAt: string | null;
+  warrantyStartAt: string | null;
+  warrantyExpiresAt: string | null;
   paidAt: string | null;
   deliveredAt: string | null;
   createdAt: string | null;

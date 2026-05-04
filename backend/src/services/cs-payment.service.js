@@ -50,6 +50,97 @@ function buildPaymentUrl(slug, amount, orderId) {
   return url.toString();
 }
 
+function normalizeDurationDays(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const days = Math.floor(Number(value));
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+function normalizePlatform(value) {
+  const platform = String(value ?? "").trim().toLowerCase();
+  return platform || "whatsapp";
+}
+
+function addInclusiveDays(startDate, durationDays) {
+  const days = normalizeDurationDays(durationDays);
+  if (!days) return null;
+  const result = new Date(startDate);
+  result.setDate(result.getDate() + days - 1);
+  return result;
+}
+
+function formatDateId(value, withTime = false) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+  }).format(date);
+}
+
+function buildLifecyclePatch(startValue, activeDays, warrantyDays) {
+  const start = startValue ? new Date(startValue) : new Date();
+  const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
+  const activeExpiresAt = addInclusiveDays(safeStart, activeDays);
+  const warrantyExpiresAt = addInclusiveDays(safeStart, warrantyDays);
+  return {
+    completedAt: safeStart,
+    activeStartAt: activeExpiresAt ? safeStart : null,
+    activeExpiresAt,
+    warrantyStartAt: warrantyExpiresAt ? safeStart : null,
+    warrantyExpiresAt,
+  };
+}
+
+function buildTemplateData(row) {
+  const idTrx = String(row.pakasir_order_id ?? row.idTrx ?? row.id_trx ?? "");
+  const activeStartAt = row.active_start_at ?? row.activeStartAt ?? row.completed_at ?? row.completedAt ?? null;
+  const warrantyStartAt = row.warranty_start_at ?? row.warrantyStartAt ?? row.completed_at ?? row.completedAt ?? null;
+  const activeExpiresAt = row.active_expires_at ?? row.activeExpiresAt ?? null;
+  const warrantyExpiresAt = row.warranty_expires_at ?? row.warrantyExpiresAt ?? null;
+  const completedAt = row.completed_at ?? row.completedAt ?? row.delivered_at ?? row.deliveredAt ?? null;
+  const now = new Date();
+
+  return {
+    idTrx,
+    idtrx: idTrx,
+    orderId: idTrx,
+    produk: String(row.nama_perintah ?? row.commandName ?? ""),
+    commandName: String(row.nama_perintah ?? row.commandName ?? ""),
+    nomorWa: String(row.customer_jid ?? row.customerJid ?? "").replace("@s.whatsapp.net", ""),
+    customerJid: String(row.customer_jid ?? row.customerJid ?? ""),
+    nominal: Number(row.amount ?? 0).toLocaleString("id-ID"),
+    amount: String(row.amount ?? 0),
+    platform: String(row.platform ?? "whatsapp"),
+    status: String(row.status ?? ""),
+    jam: new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(now),
+    tanggal: formatDateId(now),
+    doneAt: formatDateId(completedAt, true),
+    activeStart: formatDateId(activeStartAt),
+    activeExp: formatDateId(activeExpiresAt),
+    activeExpiresAt: formatDateId(activeExpiresAt),
+    garansiStart: formatDateId(warrantyStartAt),
+    garansiExp: formatDateId(warrantyExpiresAt),
+    warrantyStart: formatDateId(warrantyStartAt),
+    warrantyExp: formatDateId(warrantyExpiresAt),
+    masaAktif: row.active_duration_days ? `${Number(row.active_duration_days)} hari` : "-",
+    masaGaransi: row.warranty_duration_days ? `${Number(row.warranty_duration_days)} hari` : "-",
+  };
+}
+
+function applyTemplate(text, row) {
+  const source = String(text ?? "");
+  if (!source) return "";
+  const data = buildTemplateData(row);
+  return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_match, a, b) => {
+    const key = a || b;
+    return data[key] ?? data[key?.toLowerCase?.()] ?? "";
+  });
+}
+
 function calculateQrisAdminFee(amount) {
   if (amount > QRIS_ADMIN_HIGH_AMOUNT_THRESHOLD) {
     return Math.ceil(amount * QRIS_ADMIN_HIGH_AMOUNT_PERCENT);
@@ -212,6 +303,7 @@ async function findPendingTransactionsForCustomer(userId, customerJid) {
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.created_at,
+            tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             cs.nama_perintah,
             s.pakasir_slug, s.pakasir_api_key
        FROM cs_transactions tx
@@ -246,6 +338,7 @@ async function getEntryForUser(userId, csId, buttonId = null) {
     `SELECT cs.id, cs.user_id, cs.nama_perintah, cs.value, cs.delivery_mode,
             COALESCE(btn.price, cs.price) AS price,
             cs.relay_prompt,
+            btn.active_duration_days, btn.warranty_duration_days,
             btn.id AS button_id
        FROM customer_service cs
        LEFT JOIN cs_buttons btn
@@ -302,8 +395,8 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
-         qris_string, amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         qris_string, amount, platform, active_duration_days, warranty_duration_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(userId),
       Number(csId),
@@ -312,6 +405,9 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
       paymentUrl,
       String(pakasirPayment.payment_number),
       price,
+      "whatsapp",
+      normalizeDurationDays(entry.active_duration_days),
+      normalizeDurationDays(entry.warranty_duration_days),
     ],
   );
   if (insertResult.insertId) {
@@ -344,6 +440,72 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
   };
 }
 
+async function createOwnerManualTransaction({
+  userId,
+  csId,
+  buttonId = null,
+  ownerJid,
+  customerJid = null,
+  platform,
+}) {
+  const entry = await getEntryForUser(userId, csId, buttonId);
+  if (!entry) {
+    throw new Error("Produk customer service tidak ditemukan");
+  }
+
+  const price = Number(entry.price ?? 0);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error("Harga produk belum diatur");
+  }
+
+  const orderId = buildOrderId(csId);
+  const completedAt = new Date();
+  const lifecycle = buildLifecyclePatch(
+    completedAt,
+    entry.active_duration_days,
+    entry.warranty_duration_days,
+  );
+  const targetJid = normalizeJid(customerJid) || String(ownerJid);
+
+  const pool = getPool();
+  await pool.execute(
+    `INSERT INTO cs_transactions
+       (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
+        qris_string, amount, status, paid_at, delivered_at, platform, is_manual,
+        active_duration_days, warranty_duration_days, completed_at, active_start_at,
+        active_expires_at, warranty_start_at, warranty_expires_at)
+     VALUES (?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      Number(userId),
+      Number(csId),
+      targetJid,
+      orderId,
+      price,
+      completedAt,
+      completedAt,
+      normalizePlatform(platform),
+      normalizeDurationDays(entry.active_duration_days),
+      normalizeDurationDays(entry.warranty_duration_days),
+      lifecycle.completedAt,
+      lifecycle.activeStartAt,
+      lifecycle.activeExpiresAt,
+      lifecycle.warrantyStartAt,
+      lifecycle.warrantyExpiresAt,
+    ],
+  );
+
+  return {
+    idTrx: orderId,
+    orderId,
+    amount: price,
+    price,
+    platform: normalizePlatform(platform),
+    commandName: String(entry.nama_perintah ?? ""),
+    activeExpiresAt: lifecycle.activeExpiresAt ? lifecycle.activeExpiresAt.toISOString() : null,
+    warrantyExpiresAt: lifecycle.warrantyExpiresAt ? lifecycle.warrantyExpiresAt.toISOString() : null,
+  };
+}
+
 async function fetchPakasirStatus({ slug, apiKey, orderId, amount }) {
   if (!slug || !apiKey) {
     return null;
@@ -369,6 +531,9 @@ async function findTransaction(orderId, amount) {
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
+            tx.platform, tx.active_duration_days, tx.warranty_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
             cs.relay_waiting_text, cs.relay_owner_instruction, cs.relay_done_text,
             s.pakasir_slug, s.pakasir_api_key
@@ -388,6 +553,9 @@ async function findTransactionByOrderForUser(userId, orderId) {
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
+            tx.platform, tx.active_duration_days, tx.warranty_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
             s.pakasir_slug, s.pakasir_api_key
        FROM cs_transactions tx
@@ -617,6 +785,11 @@ async function deliverPaidTransaction(sock, transaction) {
   const csId = Number(transaction.cs_id);
   const customerJid = String(transaction.customer_jid);
   const mode = String(transaction.delivery_mode ?? "none");
+  const deliveryLifecycle = buildLifecyclePatch(
+    new Date(),
+    transaction.active_duration_days,
+    transaction.warranty_duration_days,
+  );
 
   if (mode === "stock") {
     const stock = await csStockService.reserveOne(csId, customerJid);
@@ -632,9 +805,22 @@ async function deliverPaidTransaction(sock, transaction) {
 
     await pool.execute(
       `UPDATE cs_transactions
-          SET stock_id = ?, delivered_at = CURRENT_TIMESTAMP
+          SET stock_id = ?, delivered_at = CURRENT_TIMESTAMP,
+              completed_at = COALESCE(completed_at, ?),
+              active_start_at = COALESCE(active_start_at, ?),
+              active_expires_at = COALESCE(active_expires_at, ?),
+              warranty_start_at = COALESCE(warranty_start_at, ?),
+              warranty_expires_at = COALESCE(warranty_expires_at, ?)
         WHERE id = ?`,
-      [stock.id, txId],
+      [
+        stock.id,
+        deliveryLifecycle.completedAt,
+        deliveryLifecycle.activeStartAt,
+        deliveryLifecycle.activeExpiresAt,
+        deliveryLifecycle.warrantyStartAt,
+        deliveryLifecycle.warrantyExpiresAt,
+        txId,
+      ],
     );
     await sendPaymentSuccessMessage(
       sock,
@@ -663,14 +849,28 @@ async function deliverPaidTransaction(sock, transaction) {
       sock,
       null,
       customerJid,
-      prompt,
+      applyTemplate(prompt, transaction),
     );
     return true;
   }
 
   await pool.execute(
-    `UPDATE cs_transactions SET delivered_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [txId],
+    `UPDATE cs_transactions
+        SET delivered_at = CURRENT_TIMESTAMP,
+            completed_at = COALESCE(completed_at, ?),
+            active_start_at = COALESCE(active_start_at, ?),
+            active_expires_at = COALESCE(active_expires_at, ?),
+            warranty_start_at = COALESCE(warranty_start_at, ?),
+            warranty_expires_at = COALESCE(warranty_expires_at, ?)
+      WHERE id = ?`,
+    [
+      deliveryLifecycle.completedAt,
+      deliveryLifecycle.activeStartAt,
+      deliveryLifecycle.activeExpiresAt,
+      deliveryLifecycle.warrantyStartAt,
+      deliveryLifecycle.warrantyExpiresAt,
+      txId,
+    ],
   );
   await sendPaymentSuccessMessage(
     sock,
@@ -700,7 +900,8 @@ async function getWaitingRelayForCustomer(userId, customerJid) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT rs.id, rs.transaction_id, rs.customer_jid, rs.state,
-            tx.user_id, tx.pakasir_order_id, tx.amount,
+            tx.user_id, tx.pakasir_order_id, tx.amount, tx.status, tx.platform,
+            tx.active_duration_days, tx.warranty_duration_days,
             cs.nama_perintah, cs.relay_waiting_text,
             cs.relay_owner_instruction, cs.relay_done_text,
             COALESCE(b.owner_phone_number, b.phone_number) AS owner_phone_number
@@ -747,14 +948,18 @@ async function handleCustomerRelayInput({ userId, customerJid, text, sock }) {
     session.relay_owner_instruction ||
     "Reply pesan ini dengan jawaban done jika selesai.";
   const ownerMessage =
-    `Transaksi customer service perlu diproses.\n\n` +
-    `idTrx: ${session.pakasir_order_id}\n` +
-    `Produk: /${session.nama_perintah ?? "-"}\n` +
-    `Nomor WA: ${buyerNumber}\n` +
-    `Nominal: Rp ${Number(session.amount ?? 0).toLocaleString("id-ID")}\n\n` +
-    `Status Pembayaran: Paid\n\n` +
-    `Text: ${text}\n\n` +
-    ownerInstruction;
+    applyTemplate(
+      `Transaksi customer service perlu diproses.\n\n` +
+        `idTrx: {idTrx}\n` +
+        `Produk: /{produk}\n` +
+        `Nomor WA: {nomorWa}\n` +
+        `Platform: {platform}\n` +
+        `Nominal: Rp {nominal}\n\n` +
+        `Status Pembayaran: Paid\n\n` +
+        `Text: ${text}\n\n` +
+        ownerInstruction,
+      session,
+    );
 
   const sent = await sock.sendMessage(ownerJid, { text: ownerMessage });
   const ownerMsgId = sent?.key?.id ?? null;
@@ -773,8 +978,11 @@ async function handleCustomerRelayInput({ userId, customerJid, text, sock }) {
     sock,
     null,
     customerJid,
-    session.relay_waiting_text ||
-      "Data sudah diterima dan diteruskan ke owner. Mohon tunggu konfirmasi.",
+    applyTemplate(
+      session.relay_waiting_text ||
+        "Data sudah diterima dan diteruskan ke owner. Mohon tunggu konfirmasi.",
+      session,
+    ),
   );
   return true;
 }
@@ -794,7 +1002,10 @@ async function handleOwnerDone({
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT rs.id, rs.customer_jid, rs.customer_input,
-            tx.pakasir_order_id, tx.amount,
+            tx.id AS transaction_id, tx.pakasir_order_id, tx.amount, tx.status,
+            tx.platform, tx.active_duration_days, tx.warranty_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.relay_done_text,
             COALESCE(b.owner_phone_number, b.phone_number) AS owner_phone_number
        FROM cs_relay_sessions rs
@@ -830,16 +1041,55 @@ async function handleOwnerDone({
     `UPDATE cs_relay_sessions SET state = 'done' WHERE id = ?`,
     [Number(session.id)],
   );
+  const lifecycle = buildLifecyclePatch(
+    new Date(),
+    session.active_duration_days,
+    session.warranty_duration_days,
+  );
+  await pool.execute(
+    `UPDATE cs_transactions
+        SET completed_at = COALESCE(completed_at, ?),
+            active_start_at = COALESCE(active_start_at, ?),
+            active_expires_at = COALESCE(active_expires_at, ?),
+            warranty_start_at = COALESCE(warranty_start_at, ?),
+            warranty_expires_at = COALESCE(warranty_expires_at, ?)
+      WHERE id = ?`,
+    [
+      lifecycle.completedAt,
+      lifecycle.activeStartAt,
+      lifecycle.activeExpiresAt,
+      lifecycle.warrantyStartAt,
+      lifecycle.warrantyExpiresAt,
+      Number(session.transaction_id),
+    ],
+  );
+  const completedSession = {
+    ...session,
+    completed_at: lifecycle.completedAt,
+    active_start_at: lifecycle.activeStartAt,
+    active_expires_at: lifecycle.activeExpiresAt,
+    warranty_start_at: lifecycle.warrantyStartAt,
+    warranty_expires_at: lifecycle.warrantyExpiresAt,
+  };
+  const doneText = applyTemplate(
+    session.relay_done_text || "Pesanan kamu sudah selesai diproses.",
+    completedSession,
+  );
   await messageService.sendCustomerServiceMessage(
     sock,
     null,
     String(session.customer_jid),
-    `idTrx: ${session.pakasir_order_id}\n` +
-      `Produk: /${session.nama_perintah ?? "-"}\n` +
+    applyTemplate(
+      `idTrx: {idTrx}\n` +
+      `Produk: /{produk}\n` +
       `Status: Done\n` +
-      `\nText: ${
-        session.relay_done_text || "Pesanan kamu sudah selesai diproses."
-      }`,
+      `Masa Aktif: {masaAktif}\n` +
+      `Exp Aktif: {activeExp}\n` +
+      `Masa Garansi: {masaGaransi}\n` +
+      `Exp Garansi: {garansiExp}\n` +
+      `\nText: ${doneText}`,
+      completedSession,
+    ),
   );
   return true;
 }
@@ -873,6 +1123,9 @@ async function listPaidTransactionsForUser(user) {
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.amount,
             tx.status, tx.paid_at, tx.delivered_at, tx.created_at,
+            tx.platform, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, st.content AS stock_content
        FROM cs_transactions tx
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
@@ -891,6 +1144,15 @@ async function listPaidTransactionsForUser(user) {
     status: String(row.status ?? ""),
     commandName: row.nama_perintah ? String(row.nama_perintah) : null,
     stockContent: row.stock_content ? String(row.stock_content) : null,
+    platform: String(row.platform ?? "whatsapp"),
+    isManual: Boolean(Number(row.is_manual ?? 0)),
+    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
+    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
+    completedAt: row.completed_at ? String(row.completed_at) : null,
+    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
+    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
+    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
+    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
     paidAt: row.paid_at ? String(row.paid_at) : null,
     deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
     createdAt: row.created_at ? String(row.created_at) : null,
@@ -899,6 +1161,7 @@ async function listPaidTransactionsForUser(user) {
 
 export const csPaymentService = {
   createBuyTransaction,
+  createOwnerManualTransaction,
   markPaidFromPakasir,
   deliverPaidTransaction,
   checkAndDeliverPayment,

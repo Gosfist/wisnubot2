@@ -35,6 +35,30 @@ function normalizeButton(payload) {
     throw new Error("Button beli wajib punya harga lebih dari 0");
   }
 
+  const activeDurationDays =
+    type === "buy" && payload?.activeDurationDays !== null && payload?.activeDurationDays !== undefined && payload?.activeDurationDays !== ""
+      ? Math.floor(Number(payload.activeDurationDays))
+      : null;
+  if (
+    type === "buy" &&
+    activeDurationDays !== null &&
+    (!Number.isFinite(activeDurationDays) || activeDurationDays <= 0)
+  ) {
+    throw new Error("Masa aktif wajib berupa jumlah hari lebih dari 0");
+  }
+
+  const warrantyDurationDays =
+    type === "buy" && payload?.warrantyDurationDays !== null && payload?.warrantyDurationDays !== undefined && payload?.warrantyDurationDays !== ""
+      ? Math.floor(Number(payload.warrantyDurationDays))
+      : null;
+  if (
+    type === "buy" &&
+    warrantyDurationDays !== null &&
+    (!Number.isFinite(warrantyDurationDays) || warrantyDurationDays <= 0)
+  ) {
+    throw new Error("Masa garansi wajib berupa jumlah hari lebih dari 0");
+  }
+
   return {
     label,
     type,
@@ -42,6 +66,8 @@ function normalizeButton(payload) {
     targetUrl: null,
     replyText,
     price,
+    activeDurationDays,
+    warrantyDurationDays,
     orderIndex: Number.isFinite(Number(payload?.orderIndex))
       ? Number(payload.orderIndex)
       : 0,
@@ -63,7 +89,8 @@ async function listForCs(csId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT id, cs_id, label, button_type, target_command, target_url,
-            reply_text, price, order_index, created_at
+            reply_text, price, active_duration_days, warranty_duration_days,
+            order_index, created_at
        FROM cs_buttons
       WHERE cs_id = ?
       ORDER BY order_index ASC, id ASC`,
@@ -78,6 +105,8 @@ async function listForCs(csId) {
     targetUrl: row.target_url ? String(row.target_url) : null,
     replyText: row.reply_text ? String(row.reply_text) : null,
     price: row.price === null ? null : Number(row.price),
+    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
+    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
     orderIndex: Number(row.order_index ?? 0),
     createdAt: row.created_at,
   }));
@@ -102,8 +131,9 @@ async function replaceForCs(user, csId, buttonsRaw) {
     for (const btn of normalized) {
       await conn.execute(
         `INSERT INTO cs_buttons
-           (cs_id, label, button_type, target_command, target_url, reply_text, price, order_index)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (cs_id, label, button_type, target_command, target_url, reply_text,
+            price, active_duration_days, warranty_duration_days, order_index)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           Number(csId),
           btn.label,
@@ -112,6 +142,8 @@ async function replaceForCs(user, csId, buttonsRaw) {
           btn.targetUrl,
           btn.replyText,
           btn.price,
+          btn.activeDurationDays,
+          btn.warrantyDurationDays,
           btn.orderIndex,
         ],
       );

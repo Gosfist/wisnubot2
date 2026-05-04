@@ -36,6 +36,8 @@ function makeEmptyButton(): CsButtonModel {
     targetUrl: null,
     replyText: null,
     price: null,
+    activeDurationDays: null,
+    warrantyDurationDays: null,
     orderIndex: 0,
   };
 }
@@ -245,6 +247,16 @@ export function AddCustomerServicePage() {
         if (!Number.isFinite(priceNum) || priceNum <= 0) {
           return `Button "${label}": harga wajib diisi lebih dari 0`;
         }
+        for (const [fieldLabel, fieldValue] of [
+          ["masa aktif", b.activeDurationDays],
+          ["masa garansi", b.warrantyDurationDays],
+        ] as const) {
+          if (fieldValue === null || fieldValue === undefined) continue;
+          const duration = Number(fieldValue);
+          if (!Number.isFinite(duration) || duration <= 0) {
+            return `Button "${label}": ${fieldLabel} wajib lebih dari 0 hari`;
+          }
+        }
       }
     }
     return null;
@@ -338,6 +350,8 @@ export function AddCustomerServicePage() {
             targetUrl: null,
             replyText: b.buttonType === "reply" ? b.replyText?.trim() ?? null : null,
             price: b.buttonType === "buy" ? Number(b.price) : null,
+            activeDurationDays: b.buttonType === "buy" ? b.activeDurationDays : null,
+            warrantyDurationDays: b.buttonType === "buy" ? b.warrantyDurationDays : null,
             orderIndex: i,
           })),
         );
@@ -571,23 +585,55 @@ export function AddCustomerServicePage() {
 
                       {b.buttonType === "buy" && (
                         <div className="grid gap-2">
-                          <label className="grid min-w-0 gap-2">
-                            <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">Harga Button (Rp)</span>
-                            <input
-                              className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
-                              type="number"
-                              min={1}
-                              value={b.price ?? ""}
-                              onChange={(e) =>
-                                updateButton(index, {
-                                  price: e.target.value === "" ? null : Number(e.target.value),
-                                })
-                              }
-                              placeholder="contoh: 25000"
-                            />
-                          </label>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <label className="grid min-w-0 gap-2">
+                              <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">Harga Button (Rp)</span>
+                              <input
+                                className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                                type="number"
+                                min={1}
+                                value={b.price ?? ""}
+                                onChange={(e) =>
+                                  updateButton(index, {
+                                    price: e.target.value === "" ? null : Number(e.target.value),
+                                  })
+                                }
+                                placeholder="contoh: 25000"
+                              />
+                            </label>
+                            <label className="grid min-w-0 gap-2">
+                              <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">Masa Aktif (hari)</span>
+                              <input
+                                className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                                type="number"
+                                min={1}
+                                value={b.activeDurationDays ?? ""}
+                                onChange={(e) =>
+                                  updateButton(index, {
+                                    activeDurationDays: e.target.value === "" ? null : Number(e.target.value),
+                                  })
+                                }
+                                placeholder="30"
+                              />
+                            </label>
+                            <label className="grid min-w-0 gap-2">
+                              <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">Masa Garansi (hari)</span>
+                              <input
+                                className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                                type="number"
+                                min={1}
+                                value={b.warrantyDurationDays ?? ""}
+                                onChange={(e) =>
+                                  updateButton(index, {
+                                    warrantyDurationDays: e.target.value === "" ? null : Number(e.target.value),
+                                  })
+                                }
+                                placeholder="7"
+                              />
+                            </label>
+                          </div>
                           <span className="block text-xs text-text-secondary">
-                            Button Beli akan generate link pembayaran Pakasir memakai harga button ini.
+                            Untuk 1 bulan isi 30 hari. Jika done tanggal 1, exp 30 hari jatuh pada tanggal 30.
                           </span>
                         </div>
                       )}

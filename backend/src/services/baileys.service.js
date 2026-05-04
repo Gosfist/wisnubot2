@@ -135,6 +135,23 @@ function extractQuotedMessageId(message) {
   );
 }
 
+function normalizeJid(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.includes("@")) return raw;
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("62")) return `${digits}@s.whatsapp.net`;
+  if (digits.startsWith("0")) return `62${digits.slice(1)}@s.whatsapp.net`;
+  if (digits.startsWith("8")) return `62${digits}@s.whatsapp.net`;
+  return `${digits}@s.whatsapp.net`;
+}
+
+function isOwnerMessage(context, remoteJid) {
+  const ownerJid = normalizeJid(context?.userPhoneNumber);
+  return Boolean(ownerJid && ownerJid === String(remoteJid));
+}
+
 function buildSingleSelectButton(label, id, sectionTitle = "Pilih Menu") {
   return {
     name: "single_select",
@@ -371,6 +388,7 @@ class BaileysManager {
     this.connectionReadyAt = new Map();
     this.mismatchDisconnectPayloads = new Map();
     this.pendingConnections = new Map();
+    this.pendingOwnerManualTransactions = new Map();
     this.nextPendingBotId = -1;
     this.io = null;
   }
@@ -1085,6 +1103,53 @@ class BaileysManager {
               continue;
             }
 
+            const pendingOwnerManual = this.pendingOwnerManualTransactions.get(remoteJid);
+            if (
+              pendingOwnerManual &&
+              Number(pendingOwnerManual.userId) === Number(customerServiceContext.userId) &&
+              incomingText &&
+              !incomingText.startsWith("cs_")
+            ) {
+              try {
+                const rawText = extractIncomingTextContent(message.message).trim();
+                const [platformRaw, customerRaw] = rawText.split("|").map((part) => part.trim());
+                if (!platformRaw) {
+                  await messageService.sendCustomerServiceMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    "Platform wajib diisi. Contoh: shopee | 628xxxxxxxxxx",
+                  );
+                  continue;
+                }
+
+                const tx = await csPaymentService.createOwnerManualTransaction({
+                  userId: customerServiceContext.userId,
+                  csId: pendingOwnerManual.csId,
+                  buttonId: pendingOwnerManual.buttonId,
+                  ownerJid: remoteJid,
+                  customerJid: customerRaw || remoteJid,
+                  platform: platformRaw,
+                });
+                this.pendingOwnerManualTransactions.delete(remoteJid);
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  `Transaksi manual berhasil dicatat.\n\nidTrx: ${tx.idTrx}\nProduk: /${tx.commandName}\nPlatform: ${tx.platform}\nNominal: Rp ${tx.amount.toLocaleString("id-ID")}`,
+                );
+              } catch (err) {
+                this.pendingOwnerManualTransactions.delete(remoteJid);
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  err instanceof Error ? err.message : "Gagal mencatat transaksi manual.",
+                );
+              }
+              continue;
+            }
+
             const quotedMessageId = extractQuotedMessageId(message.message);
             if (
               await csPaymentService.handleOwnerDone({
@@ -1119,6 +1184,21 @@ class BaileysManager {
                 `Customer service buy button clicked: csId=${csId}, buttonId=${buttonId || "-"}, customer=${remoteJid}`,
               );
               try {
+                if (isOwnerMessage(customerServiceContext, remoteJid)) {
+                  this.pendingOwnerManualTransactions.set(remoteJid, {
+                    userId: customerServiceContext.userId,
+                    csId,
+                    buttonId: Number.isFinite(buttonId) ? buttonId : null,
+                  });
+                  await messageService.sendCustomerServiceMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    "Owner terdeteksi. Transaksi akan dicatat tanpa payment gateway.\n\nKetik platform dan nomor customer dengan format:\nplatform | nomor customer\n\nContoh: shopee | 6281234567890",
+                  );
+                  continue;
+                }
+
                 const tx = await csPaymentService.createBuyTransaction({
                   userId: customerServiceContext.userId,
                   csId,

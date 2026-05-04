@@ -8,6 +8,7 @@ import { logger } from "../utils/logger.js";
 class SchedulerService {
   constructor() {
     this.jobs = new Map();
+    this.transactionExpiryJob = null;
   }
 
   normalizeDay(day) {
@@ -126,6 +127,146 @@ class SchedulerService {
       }
       this.jobs.delete(broadcastId);
       logger.info(`Unregistered broadcast job ${broadcastId}`);
+    }
+  }
+
+  normalizeWhatsappJid(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    if (raw.includes("@")) return raw;
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return "";
+    if (digits.startsWith("62")) return `${digits}@s.whatsapp.net`;
+    if (digits.startsWith("0")) return `62${digits.slice(1)}@s.whatsapp.net`;
+    if (digits.startsWith("8")) return `62${digits}@s.whatsapp.net`;
+    return `${digits}@s.whatsapp.net`;
+  }
+
+  formatDate(value) {
+    if (!value) return "-";
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat("id-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    }).format(date);
+  }
+
+  registerTransactionExpiryJob() {
+    if (this.transactionExpiryJob) {
+      return;
+    }
+
+    this.transactionExpiryJob = cron.schedule(
+      "0 0 * * *",
+      async () => {
+        await this.notifyExpiredTransactions();
+      },
+      {
+        timezone: "Asia/Jakarta",
+      },
+    );
+    logger.info("Scheduled transaction expiry notification: 0 0 * * * (Asia/Jakarta)");
+  }
+
+  buildTransactionExpiryMessage(row, type) {
+    const isWarranty = type === "warranty";
+    const expDate = isWarranty ? row.warranty_expires_at : row.active_expires_at;
+    const duration = isWarranty ? row.warranty_duration_days : row.active_duration_days;
+    const label = isWarranty ? "garansi" : "masa aktif";
+
+    return (
+      `Notifikasi transaksi expired.\n\n` +
+      `idTrx: ${row.pakasir_order_id}\n` +
+      `Produk: /${row.nama_perintah ?? "-"}\n` +
+      `Nomor WA: ${String(row.customer_jid ?? "").replace("@s.whatsapp.net", "")}\n` +
+      `Platform: ${row.platform ?? "whatsapp"}\n` +
+      `Nominal: Rp ${Number(row.amount ?? 0).toLocaleString("id-ID")}\n` +
+      `Jenis Exp: ${label}\n` +
+      `Durasi: ${duration ? `${Number(duration)} hari` : "-"}\n` +
+      `Tanggal Exp: ${this.formatDate(expDate)}\n\n` +
+      `Transaksi ini sudah melewati batas exp ${label}.`
+    );
+  }
+
+  async sendExpiryNotification(pool, row, type) {
+    const ownerJid = this.normalizeWhatsappJid(row.owner_phone_number);
+    if (!ownerJid) {
+      logger.warn(`Skip transaction expiry notification ${row.pakasir_order_id}: owner phone empty`);
+      return false;
+    }
+
+    const sock = baileysManager.getSocketForBot(Number(row.bot_id));
+    if (!sock) {
+      logger.warn(`Skip transaction expiry notification ${row.pakasir_order_id}: bot ${row.bot_id} offline`);
+      return false;
+    }
+
+    await sock.sendMessage(ownerJid, {
+      text: this.buildTransactionExpiryMessage(row, type),
+    });
+
+    const column = type === "warranty" ? "warranty_exp_notified_at" : "active_exp_notified_at";
+    await pool.execute(
+      `UPDATE cs_transactions
+          SET ${column} = CURRENT_TIMESTAMP
+        WHERE id = ? AND ${column} IS NULL`,
+      [Number(row.id)],
+    );
+    return true;
+  }
+
+  async notifyExpiredTransactions() {
+    try {
+      const pool = getPool();
+      const [rows] = await pool.execute(
+        `SELECT tx.id, tx.user_id, tx.customer_jid, tx.pakasir_order_id, tx.amount,
+                tx.platform, tx.active_duration_days, tx.warranty_duration_days,
+                tx.active_expires_at, tx.warranty_expires_at,
+                tx.active_exp_notified_at, tx.warranty_exp_notified_at,
+                cs.nama_perintah,
+                b.id AS bot_id,
+                COALESCE(b.owner_phone_number, b.phone_number) AS owner_phone_number
+           FROM cs_transactions tx
+           LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+           JOIN LATERAL (
+             SELECT id, owner_phone_number, phone_number
+               FROM bots
+              WHERE user_id = tx.user_id
+                AND is_online = 1
+              ORDER BY created_at DESC
+              LIMIT 1
+           ) b ON true
+          WHERE tx.status = 'paid'
+            AND (
+              (tx.active_expires_at IS NOT NULL
+               AND tx.active_expires_at < CURRENT_TIMESTAMP
+               AND tx.active_exp_notified_at IS NULL)
+              OR
+              (tx.warranty_expires_at IS NOT NULL
+               AND tx.warranty_expires_at < CURRENT_TIMESTAMP
+               AND tx.warranty_exp_notified_at IS NULL)
+            )
+          ORDER BY tx.active_expires_at NULLS LAST, tx.warranty_expires_at NULLS LAST
+          LIMIT 100`,
+      );
+
+      let sentCount = 0;
+      for (const row of rows) {
+        if (row.active_expires_at && !row.active_exp_notified_at) {
+          const sent = await this.sendExpiryNotification(pool, row, "active");
+          if (sent) sentCount += 1;
+        }
+        if (row.warranty_expires_at && !row.warranty_exp_notified_at) {
+          const sent = await this.sendExpiryNotification(pool, row, "warranty");
+          if (sent) sentCount += 1;
+        }
+      }
+
+      logger.info(`Transaction expiry notification checked: ${sentCount} sent`);
+    } catch (err) {
+      logger.error(err, "Transaction expiry notification error");
     }
   }
 
@@ -281,6 +422,8 @@ class SchedulerService {
 
   async loadAll() {
     try {
+      this.registerTransactionExpiryJob();
+
       const pool = getPool();
       const broadcastTable = await resolveBroadcastTable(pool);
       const [broadcasts] = await pool.execute(
