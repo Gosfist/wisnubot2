@@ -160,7 +160,7 @@ function hasDayOverlap(daysA, daysB) {
 
 async function resolveEffectiveTargetBotIds(pool, user, targetBotIds) {
   const [ownerBots] = await pool.execute(
-    `SELECT id FROM bots WHERE user_id = ? AND is_online = 1 ORDER BY created_at DESC`,
+    `SELECT id FROM bots WHERE user_id = ? AND is_online = 1 AND COALESCE(bot_purpose, 'main') = 'main' ORDER BY created_at DESC`,
     [user.id],
   );
 
@@ -183,6 +183,7 @@ async function resolveEffectiveTargetGroupIds(
       `g.id IN (${normalizedTargetGroupIds.map(() => "?").join(",")})`,
       "g.is_active = 1",
       "b.user_id = ?",
+      "COALESCE(b.bot_purpose, 'main') = 'main'",
     ];
     const params = [...normalizedTargetGroupIds, user.id];
 
@@ -202,7 +203,7 @@ async function resolveEffectiveTargetGroupIds(
     return [...new Set(groups.map((group) => Number(group.id)).filter((id) => id > 0))];
   }
 
-  const clauses = ["b.user_id = ?", "g.is_active = 1"];
+  const clauses = ["b.user_id = ?", "g.is_active = 1", "COALESCE(b.bot_purpose, 'main') = 'main'"];
   const params = [user.id];
 
   if (normalizedTargetBotIds.length > 0) {
@@ -424,6 +425,7 @@ export async function createBroadcast(req, res) {
       const groupClauses = [
         `g.id IN (${groupIdsToValidate.map(() => "?").join(",")})`,
         "b.user_id = ?",
+        "COALESCE(b.bot_purpose, 'main') = 'main'",
       ];
       const groupParams = [...groupIdsToValidate, userId];
 
@@ -466,6 +468,7 @@ export async function createBroadcast(req, res) {
       `id IN (${normalizedTargetBotIds.map(() => "?").join(",")})`,
       "user_id = ?",
       "is_online = 1",
+      "COALESCE(bot_purpose, 'main') = 'main'",
     ];
     const botParams = [...normalizedTargetBotIds, userId];
 
@@ -614,6 +617,7 @@ export async function updateBroadcast(req, res) {
       const groupClauses = [
         `g.id IN (${groupIdsToValidate.map(() => "?").join(",")})`,
         "b.user_id = ?",
+        "COALESCE(b.bot_purpose, 'main') = 'main'",
       ];
       const groupParams = [...groupIdsToValidate, req.user.id];
 
@@ -658,6 +662,7 @@ export async function updateBroadcast(req, res) {
         `id IN (${normalizedTargetBotIds.map(() => "?").join(",")})`,
         "user_id = ?",
         "is_online = 1",
+        "COALESCE(bot_purpose, 'main') = 'main'",
       ];
       const botParams = [...normalizedTargetBotIds, req.user.id];
 

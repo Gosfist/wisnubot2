@@ -131,6 +131,83 @@ function buildTemplateData(row) {
   };
 }
 
+function formatRupiah(value) {
+  return Number(value ?? 0).toLocaleString("id-ID");
+}
+
+function maskBuyerNumber(jid) {
+  const digits = String(jid ?? "").replace("@s.whatsapp.net", "").replace(/\D/g, "");
+  if (!digits) return "-";
+  const local = digits.startsWith("62") ? `0${digits.slice(2)}` : digits;
+  if (local.length <= 6) return `${local.slice(0, 3)}***`;
+  return `${local.slice(0, Math.max(0, local.length - 3))}***`;
+}
+
+function buildTestimonialMessage(transaction) {
+  return (
+    `idTrx: ${transaction.pakasir_order_id}\n` +
+    `Produk: /${transaction.nama_perintah ?? "-"}\n` +
+    `Harga: Rp ${formatRupiah(transaction.amount)}\n` +
+    `No Pembeli: ${maskBuyerNumber(transaction.customer_jid)}`
+  );
+}
+
+async function sendTransactionTestimonial(sock, transaction) {
+  if (!sock || !transaction || transaction.testimonial_sent_at) {
+    return false;
+  }
+
+  const channelJid = String(transaction.testimonial_channel_jid ?? "").trim();
+  if (!channelJid) {
+    return false;
+  }
+
+  const pool = getPool();
+  const [currentRows] = await pool.execute(
+    "SELECT testimonial_sent_at FROM cs_transactions WHERE id = ? LIMIT 1",
+    [Number(transaction.id)],
+  );
+  if (currentRows[0]?.testimonial_sent_at) {
+    return false;
+  }
+
+  try {
+    if (typeof sock.newsletterMetadata === "function") {
+      const metadata = await sock.newsletterMetadata("jid", channelJid, "ADMIN");
+      const role = String(metadata?.viewer_metadata?.view_role ?? "").toUpperCase();
+      if (role !== "ADMIN" && role !== "OWNER") {
+        await pool.execute(
+          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+          [
+            Number(transaction.user_id),
+            "testimonial_channel_not_admin",
+            "Bot belum jadi admin saluran testimoni. Jadikan bot sebagai admin saluran agar testimoni transaksi bisa terkirim.",
+          ],
+        );
+        return false;
+      }
+    }
+
+    await sock.sendMessage(channelJid, { text: buildTestimonialMessage(transaction) });
+    await pool.execute(
+      "UPDATE cs_transactions SET testimonial_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND testimonial_sent_at IS NULL",
+      [Number(transaction.id)],
+    );
+    return true;
+  } catch (err) {
+    logger.warn(err, `Testimonial channel send failed for ${transaction.pakasir_order_id}`);
+    await pool.execute(
+      "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+      [
+        Number(transaction.user_id),
+        "testimonial_channel_failed",
+        `Gagal mengirim testimoni ${transaction.pakasir_order_id}. Pastikan bot sudah masuk saluran dan menjadi admin.`,
+      ],
+    );
+    return false;
+  }
+}
+
 function applyTemplate(text, row) {
   const source = String(text ?? "");
   if (!source) return "";
@@ -305,7 +382,9 @@ async function findPendingTransactionsForCustomer(userId, customerJid) {
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.created_at,
             tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             cs.nama_perintah,
-            s.pakasir_slug, s.pakasir_api_key
+            s.pakasir_slug, s.pakasir_api_key,
+            s.testimonial_channel_jid, s.testimonial_channel_name,
+            tx.testimonial_sent_at
        FROM cs_transactions tx
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
        LEFT JOIN app_settings s ON s.user_id = tx.user_id
@@ -468,7 +547,8 @@ async function createOwnerManualTransaction({
   const targetJid = normalizeJid(customerJid) || String(ownerJid);
 
   const pool = getPool();
-  await pool.execute(
+  const settings = await appSettingsService.getRawForUserId(userId);
+  const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
         qris_string, amount, status, paid_at, delivered_at, platform, is_manual,
@@ -495,6 +575,13 @@ async function createOwnerManualTransaction({
   );
 
   return {
+    id: Number(insertResult.insertId ?? 0),
+    user_id: Number(userId),
+    customer_jid: targetJid,
+    pakasir_order_id: orderId,
+    nama_perintah: String(entry.nama_perintah ?? ""),
+    testimonial_channel_jid: settings.testimonialChannelJid || "",
+    testimonial_sent_at: null,
     idTrx: orderId,
     orderId,
     amount: price,
@@ -536,7 +623,9 @@ async function findTransaction(orderId, amount) {
             tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
             cs.relay_waiting_text, cs.relay_owner_instruction, cs.relay_done_text,
-            s.pakasir_slug, s.pakasir_api_key
+            s.pakasir_slug, s.pakasir_api_key,
+            s.testimonial_channel_jid, s.testimonial_channel_name,
+            tx.testimonial_sent_at
        FROM cs_transactions tx
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
        LEFT JOIN app_settings s ON s.user_id = tx.user_id
@@ -557,7 +646,9 @@ async function findTransactionByOrderForUser(userId, orderId) {
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
-            s.pakasir_slug, s.pakasir_api_key
+            s.pakasir_slug, s.pakasir_api_key,
+            s.testimonial_channel_jid, s.testimonial_channel_name,
+            tx.testimonial_sent_at
        FROM cs_transactions tx
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
        LEFT JOIN app_settings s ON s.user_id = tx.user_id
@@ -777,6 +868,7 @@ async function deliverPaidTransaction(sock, transaction) {
   }
 
   if (transaction.delivered_at) {
+    await sendTransactionTestimonial(sock, transaction);
     return true;
   }
 
@@ -828,6 +920,7 @@ async function deliverPaidTransaction(sock, transaction) {
       customerJid,
       `Pembayaran berhasil.\n\nData pesanan kamu:\n${stock.content}`,
     );
+    await sendTransactionTestimonial(sock, transaction);
     return true;
   }
 
@@ -851,6 +944,7 @@ async function deliverPaidTransaction(sock, transaction) {
       customerJid,
       applyTemplate(prompt, transaction),
     );
+    await sendTransactionTestimonial(sock, transaction);
     return true;
   }
 
@@ -878,6 +972,7 @@ async function deliverPaidTransaction(sock, transaction) {
     customerJid,
     "Pembayaran berhasil. Pesanan kamu sedang diproses.",
   );
+  await sendTransactionTestimonial(sock, transaction);
   return true;
 }
 
@@ -913,6 +1008,7 @@ async function getWaitingRelayForCustomer(userId, customerJid) {
            FROM bots
           WHERE user_id = tx.user_id
             AND is_online = 1
+            AND COALESCE(bot_purpose, 'main') = 'main'
           ORDER BY created_at DESC
           LIMIT 1
        )
@@ -1016,6 +1112,7 @@ async function handleOwnerDone({
            FROM bots
           WHERE user_id = tx.user_id
             AND is_online = 1
+            AND COALESCE(bot_purpose, 'main') = 'main'
           ORDER BY created_at DESC
           LIMIT 1
        )
@@ -1159,9 +1256,96 @@ async function listPaidTransactionsForUser(user) {
   }));
 }
 
+function normalizePhone(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("62")) return digits;
+  if (digits.startsWith("0") && digits.length > 1) return `62${digits.slice(1)}`;
+  if (digits.startsWith("8")) return `62${digits}`;
+  return digits;
+}
+
+function normalizeCustomerJid(value) {
+  const raw = String(value ?? "").trim();
+  if (raw.includes("@")) return raw;
+  const phone = normalizePhone(raw);
+  return phone ? `${phone}@s.whatsapp.net` : "";
+}
+
+function nullableDate(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString();
+}
+
+async function updateTransactionForUser(user, transactionId, payload) {
+  const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
+  const customerJid = normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
+  const platform = String(payload.platform ?? "whatsapp").trim() || "whatsapp";
+  const amount = Number(payload.amount ?? 0);
+  const activeStartAt = nullableDate(payload.activeStartAt ?? payload.active_start_at);
+  const activeExpiresAt = nullableDate(payload.activeExpiresAt ?? payload.active_expires_at);
+  const warrantyExpiresAt = nullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at);
+
+  if (!idTrx) throw new Error("idTrx wajib diisi");
+  if (!customerJid) throw new Error("No buyer wajib diisi");
+  if (!Number.isFinite(amount) || amount < 0) throw new Error("Nominal tidak valid");
+
+  const pool = getPool();
+  const [result] = await pool.execute(
+    `UPDATE cs_transactions
+        SET pakasir_order_id = ?,
+            customer_jid = ?,
+            platform = ?,
+            amount = ?,
+            active_start_at = ?,
+            active_expires_at = ?,
+            warranty_expires_at = ?
+      WHERE id = ?
+        AND user_id = ?`,
+    [
+      idTrx,
+      customerJid,
+      platform,
+      Math.floor(amount),
+      activeStartAt,
+      activeExpiresAt,
+      warrantyExpiresAt,
+      Number(transactionId),
+      Number(user.id),
+    ],
+  );
+
+  if (Number(result.affectedRows ?? 0) === 0) {
+    throw new Error("Transaksi tidak ditemukan");
+  }
+
+  const [items] = await pool.execute(
+    `SELECT id, pakasir_order_id, customer_jid, amount, platform,
+            active_start_at, active_expires_at, warranty_expires_at
+       FROM cs_transactions
+      WHERE id = ? AND user_id = ?
+      LIMIT 1`,
+    [Number(transactionId), Number(user.id)],
+  );
+
+  return items[0] ?? null;
+}
+
+async function deleteTransactionForUser(user, transactionId) {
+  const pool = getPool();
+  const [result] = await pool.execute(
+    "DELETE FROM cs_transactions WHERE id = ? AND user_id = ?",
+    [Number(transactionId), Number(user.id)],
+  );
+  return Number(result.affectedRows ?? 0) > 0;
+}
+
 export const csPaymentService = {
   createBuyTransaction,
   createOwnerManualTransaction,
+  sendTransactionTestimonial,
   markPaidFromPakasir,
   deliverPaidTransaction,
   checkAndDeliverPayment,
@@ -1170,4 +1354,6 @@ export const csPaymentService = {
   handleOwnerDone,
   handleWebhookAndDeliver,
   listPaidTransactionsForUser,
+  updateTransactionForUser,
+  deleteTransactionForUser,
 };

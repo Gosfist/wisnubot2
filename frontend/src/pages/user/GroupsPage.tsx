@@ -18,6 +18,7 @@ export function GroupsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
+  const [selectedJoinBotId, setSelectedJoinBotId] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [togglingGroupIds, setTogglingGroupIds] = useState<string[]>([]);
   const [settingsGroup, setSettingsGroup] = useState<{ id: string; name: string } | null>(null);
@@ -44,6 +45,7 @@ export function GroupsPage() {
       setIsLoading(true);
       await Promise.all([
         appData.refreshGroups(),
+        appData.bots.length ? Promise.resolve(appData.bots) : appData.refreshBots(),
         appData.user ? Promise.resolve(appData.user) : appData.refreshUser(),
       ]);
       setError(null);
@@ -96,10 +98,11 @@ export function GroupsPage() {
 
     setIsJoining(true);
     try {
-      await appData.joinGroup(inviteLink);
+      await appData.joinGroup(inviteLink, Number(selectedJoinBotId) || undefined);
       await appData.refreshGroups();
       await appData.refreshBots();
       setInviteLink("");
+      setSelectedJoinBotId("");
       setShowJoinModal(false);
       showToast("Group berhasil ditambahkan.", "success");
     } catch (nextError) {
@@ -249,6 +252,18 @@ export function GroupsPage() {
 
       <Modal open={showJoinModal} title={isOwner ? "Join Group Owner" : "Join Group Baru"} onClose={() => setShowJoinModal(false)}>
         <form className="space-y-4" onSubmit={handleJoinGroup}>
+          <label className="block space-y-2">
+            <span className="text-xs font-bold tracking-[0.22em] text-text-muted">BOT</span>
+            <select value={selectedJoinBotId} onChange={(event) => setSelectedJoinBotId(event.target.value)}>
+              <option value="">Pilih bot online</option>
+              {appData.bots.filter((bot) => bot.status === "online").map((bot) => (
+                <option key={bot.id} value={bot.id}>
+                  {bot.purpose === "push_contact" ? "Bot 2 Push Kontak" : "Bot 1 Utama"} - {bot.phoneNumber}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="block space-y-2">
             <span className="text-xs font-bold tracking-[0.22em] text-text-muted">INVITE LINK</span>
             <input

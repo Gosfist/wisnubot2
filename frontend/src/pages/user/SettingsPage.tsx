@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CreditCard, Key, Lock, PencilLine, Save, User } from "lucide-react";
+import { CreditCard, Key, Lock, Megaphone, PencilLine, Save, User } from "lucide-react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -23,6 +23,8 @@ export function SettingsPage() {
   const [pakasirSlug, setPakasirSlug] = useState("");
   const [pakasirApiKey, setPakasirApiKey] = useState("");
   const [pakasirApiKeyMasked, setPakasirApiKeyMasked] = useState<string | null>(null);
+  const [testimonialChannelLink, setTestimonialChannelLink] = useState("");
+  const [testimonialChannelStatus, setTestimonialChannelStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(true);
@@ -36,6 +38,8 @@ export function SettingsPage() {
         if (!mounted) return;
         setPakasirSlug(settings.pakasirSlug);
         setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
+        setTestimonialChannelLink(settings.testimonialChannelLink);
+        setTestimonialChannelStatus(settings.testimonialChannelStatus);
       } catch (error) {
         showToast(error instanceof Error ? error.message : "Gagal memuat setting Pakasir.", "danger");
       } finally {
@@ -113,10 +117,17 @@ export function SettingsPage() {
       const settings = await appData.updateSettings({
         pakasirSlug: pakasirSlug.trim(),
         pakasirApiKey: pakasirApiKey.trim(),
+        testimonialChannelLink: testimonialChannelLink.trim(),
       });
       setPakasirApiKey("");
       setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
-      showToast("Setting Pakasir berhasil disimpan", "success");
+      setTestimonialChannelLink(settings.testimonialChannelLink);
+      setTestimonialChannelStatus(settings.testimonialChannelStatus);
+      if (settings.testimonialChannelStatus && !settings.testimonialChannelStatus.ok) {
+        showToast(settings.testimonialChannelStatus.message, "danger");
+      } else {
+        showToast("Setting payment dan saluran berhasil disimpan", "success");
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Gagal menyimpan setting Pakasir.", "danger");
     } finally {
@@ -200,6 +211,26 @@ export function SettingsPage() {
               />
               <span className="text-xs text-text-secondary">
                 Kosongkan jika tidak ingin mengganti API key yang sudah tersimpan.
+              </span>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="flex items-center gap-2 text-xs font-bold tracking-[0.22em] text-text-muted">
+                <Megaphone size={14} />
+                LINK SALURAN TESTIMONI
+              </span>
+              <input
+                autoComplete="off"
+                name="testimonial_channel_link"
+                value={testimonialChannelLink}
+                onChange={(event) => {
+                  setTestimonialChannelLink(event.target.value);
+                  setTestimonialChannelStatus(null);
+                }}
+                placeholder="https://whatsapp.com/channel/..."
+              />
+              <span className={testimonialChannelStatus?.ok ? "text-xs text-success" : "text-xs text-text-secondary"}>
+                {testimonialChannelStatus?.message || "Bot utama harus masuk ke saluran dan dijadikan admin agar testimoni otomatis terkirim."}
               </span>
             </label>
 

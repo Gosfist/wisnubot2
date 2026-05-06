@@ -213,15 +213,21 @@ async function deleteTemplate(user, templateId) {
   return Number(result.affectedRows ?? 0) > 0;
 }
 
-async function assertGroupForUser(pool, userId, groupId) {
+async function assertGroupForUser(pool, userId, groupId, botId = null) {
+  const clauses = ["g.id = ?", "b.user_id = ?"];
+  const params = [Number(groupId), Number(userId)];
+  if (botId) {
+    clauses.push("b.id = ?");
+    params.push(Number(botId));
+  }
+
   const [rows] = await pool.execute(
     `SELECT g.id, g.bot_id, g.group_jid, g.name, g.is_active, b.phone_number, b.owner_phone_number
        FROM "groups" g
        JOIN bots b ON b.id = g.bot_id
-      WHERE g.id = ?
-        AND b.user_id = ?
+      WHERE ${clauses.join(" AND ")}
       LIMIT 1`,
-    [Number(groupId), Number(userId)],
+    params,
   );
   return rows[0] ?? null;
 }
@@ -316,7 +322,7 @@ async function deleteExclusion(user, groupId, exclusionId) {
   return Number(result.affectedRows ?? 0) > 0;
 }
 
-async function startPush(user, { templateId, groupId }) {
+async function startPush(user, { templateId, groupId, botId }) {
   const pool = getPool();
   const running = await getRunningRun(user);
   if (running) {
@@ -328,12 +334,12 @@ async function startPush(user, { templateId, groupId }) {
       "SELECT id, title, message_text FROM push_contact_templates WHERE id = ? AND user_id = ? LIMIT 1",
       [Number(templateId), Number(user.id)],
     ).then(([rows]) => rows),
-    assertGroupForUser(pool, user.id, groupId),
+    assertGroupForUser(pool, user.id, groupId, botId),
   ]);
   const template = templateRows[0] ?? null;
 
   if (!template) throw new Error("Template tidak ditemukan");
-  if (!group) throw new Error("Group tidak ditemukan");
+  if (!group) throw new Error("Group tidak ditemukan untuk bot yang dipilih");
   if (!Boolean(group.is_active)) {
     throw new Error("Group sedang dimatikan di Kelola Group");
   }

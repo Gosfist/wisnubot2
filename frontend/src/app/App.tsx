@@ -29,12 +29,17 @@ const navItems = [
       { to: "/broadcasts", label: "Broadcast" },
       { to: "/push-kontak", label: "Push Kontak", end: true },
       { to: "/customer-service", label: "Customer Service", end: true },
+      { to: "/groups", label: "Kelola Group", end: true },
     ],
   },
-  { to: "/stock", label: "Stock", end: true },
-  { to: "/transactions", label: "Transaksi", end: true },
+  {
+    label: "Penjualan",
+    children: [
+      { to: "/stock", label: "Stock", end: true },
+      { to: "/transactions", label: "Transaksi", end: true },
+    ],
+  },
   { to: "/documentation", label: "Dokumentasi", end: true },
-  { to: "/groups", label: "Kelola Group", end: true },
   { to: "/settings", label: "Settings", end: true },
 ];
 

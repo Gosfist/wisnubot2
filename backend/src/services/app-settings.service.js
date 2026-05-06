@@ -14,6 +14,10 @@ function rowToModel(row, { mask = true } = {}) {
       pakasirApiKey: "",
       pakasirApiKeyMasked: null,
       hasApiKey: false,
+      testimonialChannelLink: "",
+      testimonialChannelJid: "",
+      testimonialChannelName: "",
+      testimonialChannelStatus: null,
       updatedAt: null,
     };
   }
@@ -22,14 +26,80 @@ function rowToModel(row, { mask = true } = {}) {
     pakasirApiKey: mask ? "" : String(row.pakasir_api_key ?? ""),
     pakasirApiKeyMasked: maskApiKey(row.pakasir_api_key),
     hasApiKey: Boolean(row.pakasir_api_key),
+    testimonialChannelLink: row.testimonial_channel_link ? String(row.testimonial_channel_link) : "",
+    testimonialChannelJid: row.testimonial_channel_jid ? String(row.testimonial_channel_jid) : "",
+    testimonialChannelName: row.testimonial_channel_name ? String(row.testimonial_channel_name) : "",
+    testimonialChannelStatus: row.testimonial_channel_status ?? null,
     updatedAt: row.updated_at,
+  };
+}
+
+function extractNewsletterInviteKey(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.endsWith("@newsletter")) return raw;
+
+  const match = raw.match(/(?:whatsapp\.com\/channel\/|wa\.me\/channel\/)([A-Za-z0-9_-]+)/i);
+  if (match?.[1]) return match[1];
+
+  const parts = raw.split(/[/?#]/).filter(Boolean);
+  return parts[parts.length - 1] ?? raw;
+}
+
+async function resolveTestimonialChannel(sock, link) {
+  const key = extractNewsletterInviteKey(link);
+  if (!key) {
+    return {
+      jid: null,
+      name: null,
+      status: { ok: false, message: "Link saluran testimoni belum diisi" },
+    };
+  }
+
+  if (!sock) {
+    return {
+      jid: key.endsWith("@newsletter") ? key : null,
+      name: null,
+      status: { ok: false, message: "Bot utama harus online untuk cek saluran" },
+    };
+  }
+
+  if (typeof sock.newsletterMetadata !== "function") {
+    return {
+      jid: key.endsWith("@newsletter") ? key : null,
+      name: null,
+      status: { ok: false, message: "Library bot belum mendukung saluran WhatsApp" },
+    };
+  }
+
+  const metadataType = key.endsWith("@newsletter") ? "jid" : "invite";
+  const metadata = await sock.newsletterMetadata(metadataType, key, "ADMIN");
+  const jid = String(metadata?.id ?? (key.endsWith("@newsletter") ? key : ""));
+  const name = String(metadata?.name ?? "");
+  const role = String(metadata?.viewer_metadata?.view_role ?? "").toUpperCase();
+
+  if (jid && typeof sock.newsletterFollow === "function") {
+    await sock.newsletterFollow(jid).catch(() => null);
+  }
+
+  const isAdmin = role === "ADMIN" || role === "OWNER";
+  return {
+    jid,
+    name,
+    status: {
+      ok: isAdmin,
+      message: isAdmin
+        ? `Bot sudah admin saluran${name ? ` ${name}` : ""}`
+        : "Bot belum jadi admin saluran. Masukkan bot ke saluran lalu jadikan admin.",
+    },
   };
 }
 
 async function getForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT pakasir_slug, pakasir_api_key, updated_at
+    `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
+            testimonial_channel_jid, testimonial_channel_name, updated_at
        FROM app_settings
       WHERE user_id = ?
       LIMIT 1`,
@@ -42,7 +112,8 @@ async function getForUser(user) {
 async function getRawForUserId(userId) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT pakasir_slug, pakasir_api_key, updated_at
+    `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
+            testimonial_channel_jid, testimonial_channel_name, updated_at
        FROM app_settings
       WHERE user_id = ?
       LIMIT 1`,
@@ -51,22 +122,61 @@ async function getRawForUserId(userId) {
   return rowToModel(rows[0], { mask: false });
 }
 
-async function upsertForUser(user, payload) {
+async function upsertForUser(user, payload, options = {}) {
   const pakasirSlug = String(payload?.pakasirSlug ?? "").trim();
   const apiKey = String(payload?.pakasirApiKey ?? "").trim();
-
+  const testimonialChannelLink = String(payload?.testimonialChannelLink ?? "").trim();
   const pool = getPool();
+  const channel = testimonialChannelLink
+    ? await resolveTestimonialChannel(options.sock, testimonialChannelLink)
+    : {
+        jid: null,
+        name: null,
+        status: { ok: true, message: "Saluran testimoni dikosongkan" },
+      };
+
+  if (testimonialChannelLink && !channel.jid) {
+    const [existingRows] = await pool.execute(
+      `SELECT testimonial_channel_link, testimonial_channel_jid, testimonial_channel_name
+         FROM app_settings
+        WHERE user_id = ?
+        LIMIT 1`,
+      [user.id],
+    );
+    const existing = existingRows[0] ?? null;
+    if (existing && String(existing.testimonial_channel_link ?? "") === testimonialChannelLink) {
+      channel.jid = existing.testimonial_channel_jid || null;
+      channel.name = existing.testimonial_channel_name || null;
+    }
+  }
+
   await pool.execute(
-    `INSERT INTO app_settings (user_id, pakasir_slug, pakasir_api_key)
-       VALUES (?, ?, ?)
+    `INSERT INTO app_settings (
+       user_id, pakasir_slug, pakasir_api_key,
+       testimonial_channel_link, testimonial_channel_jid, testimonial_channel_name
+     )
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id) DO UPDATE SET
          pakasir_slug = EXCLUDED.pakasir_slug,
-         pakasir_api_key = EXCLUDED.pakasir_api_key,
+         pakasir_api_key = COALESCE(EXCLUDED.pakasir_api_key, app_settings.pakasir_api_key),
+         testimonial_channel_link = EXCLUDED.testimonial_channel_link,
+         testimonial_channel_jid = EXCLUDED.testimonial_channel_jid,
+         testimonial_channel_name = EXCLUDED.testimonial_channel_name,
          updated_at = CURRENT_TIMESTAMP`,
-    [user.id, pakasirSlug || null, apiKey || null],
+    [
+      user.id,
+      pakasirSlug || null,
+      apiKey || null,
+      testimonialChannelLink || null,
+      channel.jid || null,
+      channel.name || null,
+    ],
   );
 
-  return getForUser(user);
+  return {
+    ...(await getForUser(user)),
+    testimonialChannelStatus: channel.status,
+  };
 }
 
 export const appSettingsService = {

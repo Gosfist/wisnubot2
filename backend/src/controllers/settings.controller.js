@@ -1,4 +1,5 @@
 import { appSettingsService } from "../services/app-settings.service.js";
+import { baileysManager } from "../services/baileys.service.js";
 import { logger } from "../utils/logger.js";
 
 export async function getSettings(req, res) {
@@ -16,6 +17,9 @@ export async function updateSettings(req, res) {
     const settings = await appSettingsService.upsertForUser(req.user, {
       pakasirSlug: req.body?.pakasirSlug,
       pakasirApiKey: req.body?.pakasirApiKey,
+      testimonialChannelLink: req.body?.testimonialChannelLink,
+    }, {
+      sock: baileysManager.getSocket(req.user.id),
     });
     res.json({ message: "Pengaturan berhasil disimpan", settings });
   } catch (err) {

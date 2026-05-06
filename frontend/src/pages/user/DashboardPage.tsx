@@ -6,7 +6,9 @@ import { SurfaceCard } from "../../components/SurfaceCard";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
 import { socketService } from "../../lib/socket";
-import type { ActivityLogModel } from "../../types/models";
+import type { ActivityLogModel, BotModel } from "../../types/models";
+
+type DashboardBotPurpose = "main" | "push_contact";
 
 export function DashboardPage() {
   const appData = useAppData();
@@ -15,6 +17,7 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
+  const [connectPurpose, setConnectPurpose] = useState<DashboardBotPurpose>("main");
   const [activityLogs, setActivityLogs] = useState<ActivityLogModel[]>([]);
 
   async function refreshActivityLogs() {
@@ -108,7 +111,81 @@ export function DashboardPage() {
     };
   }
 
-  const bot = appData.bots[0] ?? null;
+  const mainBot = appData.bots.find((item) => item.purpose === "main") ?? null;
+  const pushBot = appData.bots.find((item) => item.purpose === "push_contact") ?? null;
+
+  function openConnectModal(purpose: DashboardBotPurpose) {
+    setConnectPurpose(purpose);
+    setShowConnectModal(true);
+  }
+
+  function BotPanel({
+    bot,
+    purpose,
+    title,
+    description,
+  }: {
+    bot: BotModel | null;
+    purpose: DashboardBotPurpose;
+    title: string;
+    description: string;
+  }) {
+    const isOnline = bot?.status === "online";
+    return (
+      <div className="flex flex-col gap-3 rounded-[18px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.38)] p-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div
+            className={
+              isOnline
+                ? "flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[rgba(34,197,94,0.16)] text-success"
+                : "flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[rgba(148,163,184,0.12)] text-text-secondary"
+            }
+          >
+            <Bolt size={18} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-bold">{title}</h3>
+              {bot ? (
+                <span
+                  className={
+                    isOnline
+                      ? "rounded-full bg-[rgba(34,197,94,0.12)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] text-success"
+                      : "rounded-full bg-[rgba(148,163,184,0.12)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] text-text-secondary"
+                  }
+                >
+                  {bot.status}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 truncate text-sm font-semibold text-white">{bot?.phoneNumber ?? "Belum ada bot"}</p>
+            <p className="mt-1 text-xs text-text-secondary">{description}</p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {purpose === "main" && isOnline ? (
+            <button
+              className="rounded-[14px] border border-[rgba(56,189,248,0.2)] bg-[rgba(37,99,235,0.12)] px-3 py-2 text-xs font-semibold text-accent transition hover:bg-[rgba(37,99,235,0.2)] disabled:opacity-60"
+              type="button"
+              onClick={handleTestBot}
+              disabled={isTesting}
+            >
+              {isTesting ? "Testing..." : "Test Bot"}
+            </button>
+          ) : null}
+          <button
+            className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.2)] bg-[rgba(37,99,235,0.12)] px-3 py-2 text-sm font-semibold text-accent transition hover:border-[rgba(56,189,248,0.38)] hover:bg-[rgba(37,99,235,0.2)]"
+            type="button"
+            onClick={() => openConnectModal(purpose)}
+          >
+            <PlusCircle size={15} />
+            {bot ? "Ganti Bot" : "Tambah Bot"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -129,65 +206,28 @@ export function DashboardPage() {
       ) : null}
 
       <SurfaceCard className="shrink-0 p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className={
-                bot?.status === "online"
-                  ? "flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[rgba(34,197,94,0.16)] text-success"
-                  : "flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[rgba(148,163,184,0.12)] text-text-secondary"
-              }
-            >
-              <Bolt size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-lg font-bold">Bot</h3>
-                {bot ? (
-                  <span
-                    className={
-                      bot.status === "online"
-                        ? "rounded-full bg-[rgba(34,197,94,0.12)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] text-success"
-                        : "rounded-full bg-[rgba(148,163,184,0.12)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] text-text-secondary"
-                    }
-                  >
-                    {bot.status}
-                  </span>
-                ) : null}
-              </div>
-              <p className="mt-1 text-sm font-semibold text-white">{bot?.phoneNumber ?? "Belum ada bot"}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {bot?.status === "online" ? (
-              <button
-                className="rounded-[14px] border border-[rgba(56,189,248,0.2)] bg-[rgba(37,99,235,0.12)] px-3 py-2 text-xs font-semibold text-accent transition hover:bg-[rgba(37,99,235,0.2)] disabled:opacity-60"
-                type="button"
-                onClick={handleTestBot}
-                disabled={isTesting}
-              >
-                {isTesting ? "Testing..." : "Test Bot"}
-              </button>
-            ) : null}
-          <button
-            className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.2)] bg-[rgba(37,99,235,0.12)] px-3 py-2 text-sm font-semibold text-accent transition hover:border-[rgba(56,189,248,0.38)] hover:bg-[rgba(37,99,235,0.2)]"
-            type="button"
-            onClick={() => setShowConnectModal(true)}
-          >
-            <PlusCircle size={15} />
-            {bot ? "Ganti Bot" : "Tambah Bot"}
-          </button>
-          </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <BotPanel
+            bot={mainBot}
+            purpose="main"
+            title="Bot 1"
+            description="Broadcast CS dan push kontak"
+          />
+          <BotPanel
+            bot={pushBot}
+            purpose="push_contact"
+            title="Bot 2"
+            description="Khusus push kontak"
+          />
         </div>
 
         {isLoading ? (
           <div className="mt-3 flex min-h-16 items-center justify-center rounded-[16px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.5)]">
             <div className="size-8 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
           </div>
-        ) : !bot ? (
+        ) : !mainBot ? (
           <p className="mt-3 rounded-[16px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.5)] px-4 py-3 text-sm text-text-secondary">
-            Belum ada bot. <button type="button" className="text-accent hover:underline" onClick={() => setShowConnectModal(true)}>Tambahkan bot</button> untuk mulai menggunakan fitur broadcast.
+            Belum ada bot utama. <button type="button" className="text-accent hover:underline" onClick={() => openConnectModal("main")}>Tambahkan bot 1</button> untuk mulai menggunakan fitur broadcast.
           </p>
         ) : null}
       </SurfaceCard>
@@ -227,8 +267,8 @@ export function DashboardPage() {
       </SurfaceCard>
       <OwnerBotConnectModal
         open={showConnectModal}
-        purpose="broadcast"
-        title={bot ? "Ganti Bot" : "Tambahkan Bot"}
+        purpose={connectPurpose === "push_contact" ? "push_contact" : "broadcast"}
+        title={connectPurpose === "push_contact" ? (pushBot ? "Ganti Bot 2" : "Tambah Bot 2") : (mainBot ? "Ganti Bot 1" : "Tambah Bot 1")}
         onClose={() => setShowConnectModal(false)}
         onConnected={async () => {
           await loadData(true);

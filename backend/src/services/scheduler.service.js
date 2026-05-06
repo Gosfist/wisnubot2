@@ -235,6 +235,7 @@ class SchedulerService {
                FROM bots
               WHERE user_id = tx.user_id
                 AND is_online = 1
+                AND COALESCE(bot_purpose, 'main') = 'main'
               ORDER BY created_at DESC
               LIMIT 1
            ) b ON true
@@ -302,7 +303,7 @@ class SchedulerService {
       let groups = [];
       let closedGroups = [];
       if (targetGroupIds.length === 0) {
-        const clauses = ["b.user_id = ?", "g.is_active = 1"];
+        const clauses = ["b.user_id = ?", "g.is_active = 1", "COALESCE(b.bot_purpose, 'main') = 'main"];
         const params = [userId];
         if (targetBotIds.length > 0) {
           clauses.push(`b.id IN (${targetBotIds.map(() => "?").join(",")})`);
@@ -325,6 +326,7 @@ class SchedulerService {
         const selectedClauses = [
           `g.id IN (${targetGroupIds.map(() => "?").join(",")})`,
           "b.user_id = ?",
+          "COALESCE(b.bot_purpose, 'main') = 'main'",
         ];
         const selectedParams = [...targetGroupIds, userId];
 

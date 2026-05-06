@@ -7,6 +7,7 @@ export interface UserModel {
 export interface BotModel {
   id: number;
   phoneNumber: string;
+  purpose: "main" | "push_contact";
   status: string;
   expiredAt: string | null;
   groupCount: number;
@@ -15,6 +16,9 @@ export interface BotModel {
 
 export interface GroupModel {
   id: string;
+  botId: number;
+  botPhoneNumber: string;
+  botPurpose: "main" | "push_contact";
   name: string;
   memberCount: number;
   isActive: boolean;
@@ -154,6 +158,10 @@ export interface AppSettingsModel {
   pakasirApiKey: string;
   pakasirApiKeyMasked: string | null;
   hasApiKey: boolean;
+  testimonialChannelLink: string;
+  testimonialChannelJid: string;
+  testimonialChannelName: string;
+  testimonialChannelStatus: { ok: boolean; message: string } | null;
   updatedAt: string | null;
 }
 

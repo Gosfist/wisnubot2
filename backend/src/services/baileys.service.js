@@ -500,12 +500,13 @@ class BaileysManager {
     sessionName,
     phoneNumber,
     ownerPhoneNumber = null,
+    botPurpose = "main",
   ) {
     const pool = getPool();
 
     const [result] = await pool.execute(
-      "INSERT INTO bots (user_id, phone_number, owner_phone_number, session_name, is_online, expired_at) VALUES (?, ?, ?, ?, 1, ?)",
-      [userId, phoneNumber, ownerPhoneNumber || null, sessionName, null],
+      "INSERT INTO bots (user_id, phone_number, owner_phone_number, session_name, is_online, expired_at, bot_purpose) VALUES (?, ?, ?, ?, 1, ?, ?)",
+      [userId, phoneNumber, ownerPhoneNumber || null, sessionName, null, botPurpose],
     );
 
     return Number(result.insertId);
@@ -569,12 +570,14 @@ class BaileysManager {
       sessionName,
       expectedPhoneNumber,
       ownerPhoneNumber: ownerPhoneNumber || null,
+      botPurpose: options.botPurpose === "push_contact" ? "push_contact" : "main",
       usePairingCode: options.usePairingCode === true,
     });
 
     const sock = await this.connect(userId, tempBotId, sessionName, {
       persistOnConnect: true,
       usePairingCode: options.usePairingCode === true,
+      botPurpose: options.botPurpose === "push_contact" ? "push_contact" : "main",
       ...(expectedPhoneNumber ? { expectedPhoneNumber } : {}),
     });
 
@@ -793,9 +796,10 @@ class BaileysManager {
     }
 
     const [bots] = await pool.execute(
-      `SELECT id, user_id, phone_number
+      `SELECT id, user_id, phone_number, bot_purpose
        FROM bots
        WHERE ${clauses.join(" AND ")}
+         AND COALESCE(bot_purpose, 'main') = 'main'
        ORDER BY created_at DESC`,
       params,
     );
@@ -807,6 +811,7 @@ class BaileysManager {
           botId: Number(bot.id),
           userId: Number(bot.user_id),
           phoneNumber: bot.phone_number || null,
+          botPurpose: bot.bot_purpose || "main",
           sock,
         };
       }
@@ -929,6 +934,19 @@ class BaileysManager {
     const key = Number(botId);
     let runtimeBotId = key;
     const isPendingPairing = this.isPendingBotId(key);
+    let botPurpose = options.botPurpose === "push_contact" ? "push_contact" : "main";
+    if (!isPendingPairing && !options.botPurpose) {
+      try {
+        const pool = getPool();
+        const [rows] = await pool.execute(
+          "SELECT bot_purpose FROM bots WHERE id = ? LIMIT 1",
+          [key],
+        );
+        botPurpose = rows[0]?.bot_purpose === "push_contact" ? "push_contact" : "main";
+      } catch {
+        botPurpose = "main";
+      }
+    }
     const expectedPhoneNumber = this.normalizeWhatsappPhoneNumber(
       options.expectedPhoneNumber,
     );
@@ -1006,7 +1024,13 @@ class BaileysManager {
         return await _sendMessage(jid, content, options);
       };
 
-      this.connections.set(key, { sock, botId, userId, sessionName });
+      this.connections.set(key, {
+        sock,
+        botId,
+        userId,
+        sessionName,
+        botPurpose,
+      });
       this.manualDisconnectBots.delete(key);
 
       sock.ev.on("messages.upsert", async (payload) => {
@@ -1087,6 +1111,9 @@ class BaileysManager {
             const activeConnection =
               this.connections.get(runtimeBotId) ?? this.connections.get(key);
             const activeBotId = Number(activeConnection?.botId ?? runtimeBotId);
+            if (activeConnection?.botPurpose === "push_contact") {
+              continue;
+            }
             const incomingText = extractIncomingTextContent(message.message)
               .trim()
               .toLowerCase();
@@ -1131,6 +1158,7 @@ class BaileysManager {
                   customerJid: customerRaw || remoteJid,
                   platform: platformRaw,
                 });
+                await csPaymentService.sendTransactionTestimonial(sock, tx);
                 this.pendingOwnerManualTransactions.delete(remoteJid);
                 await messageService.sendCustomerServiceMessage(
                   sock,
@@ -1811,6 +1839,7 @@ class BaileysManager {
               sessionName,
               phoneNumber,
               pendingData?.ownerPhoneNumber || null,
+              pendingData?.botPurpose || "main",
             );
             this.promoteConnection(key, activeBotId);
             this.pendingConnections.delete(sessionName);
@@ -1822,12 +1851,15 @@ class BaileysManager {
             );
           }
           runtimeBotId = activeBotId;
+          const activeConnectionAfterPersist = this.connections.get(activeBotId);
+          const activeBotPurpose = activeConnectionAfterPersist?.botPurpose || "main";
           if (activeBotId !== key) {
             this.connectionReadyAt.set(activeBotId, readyAt);
           }
 
-          // wisnubot2: single owner — always ensure welcome for new bot
-          await customerServiceService.ensureDefaultWelcomeForBot(activeBotId);
+          if (activeBotPurpose === "main") {
+            await customerServiceService.ensureDefaultWelcomeForBot(activeBotId);
+          }
 
           this.expectedPhoneNumbers.delete(key);
           if (activeBotId !== key) {
@@ -1849,7 +1881,11 @@ class BaileysManager {
           const pool = getPool();
           await pool.execute(
             "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
-            [userId, "bot_connected", `Bot terhubung: ${phoneNumber}`],
+            [
+              userId,
+              "bot_connected",
+              `Bot ${activeBotPurpose === "push_contact" ? "push kontak" : "utama"} terhubung: ${phoneNumber}`,
+            ],
           );
         }
 
@@ -2079,13 +2115,15 @@ class BaileysManager {
     try {
       const pool = getPool();
       const [bots] = await pool.execute(
-        "SELECT b.id, b.user_id, b.session_name FROM bots b WHERE b.is_online = 1",
+        "SELECT b.id, b.user_id, b.session_name, b.bot_purpose FROM bots b WHERE b.is_online = 1",
       );
 
       for (const bot of bots) {
         logger.info(`Auto-reconnecting bot: ${bot.session_name}`);
         this.expectedPhoneNumbers.delete(Number(bot.id));
-        await this.connect(bot.user_id, bot.id, bot.session_name);
+        await this.connect(bot.user_id, bot.id, bot.session_name, {
+          botPurpose: bot.bot_purpose || "main",
+        });
       }
     } catch (err) {
       logger.error(err, "Reconnect all error");

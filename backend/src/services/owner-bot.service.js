@@ -3,7 +3,7 @@ import { baileysManager } from "./baileys.service.js";
 
 async function findBotInternal({ requireOnline = false } = {}) {
   const pool = getPool();
-  const clauses = [];
+  const clauses = ["COALESCE(b.bot_purpose, 'main') = 'main'"];
 
   if (requireOnline) {
     clauses.push("b.is_online = 1");

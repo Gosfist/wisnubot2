@@ -63,3 +63,31 @@ export async function listPaidTransactions(req, res) {
     res.status(500).json({ error: "Gagal memuat transaksi" });
   }
 }
+
+export async function updateTransaction(req, res) {
+  try {
+    const item = await csPaymentService.updateTransactionForUser(
+      req.user,
+      req.params.transactionId,
+      req.body,
+    );
+    res.json({ message: "Transaksi berhasil diperbarui", item });
+  } catch (err) {
+    logger.error(err, "Update transaction error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Gagal memperbarui transaksi" });
+  }
+}
+
+export async function deleteTransaction(req, res) {
+  try {
+    const ok = await csPaymentService.deleteTransactionForUser(
+      req.user,
+      req.params.transactionId,
+    );
+    if (!ok) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+    res.json({ message: "Transaksi berhasil dihapus" });
+  } catch (err) {
+    logger.error(err, "Delete transaction error");
+    res.status(500).json({ error: "Gagal menghapus transaksi" });
+  }
+}

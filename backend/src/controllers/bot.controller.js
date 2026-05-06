@@ -24,6 +24,15 @@ function normalizeWhatsappPhoneNumber(rawValue) {
   return digits;
 }
 
+function normalizeBotPurpose(value) {
+  return String(value ?? "").trim().toLowerCase() === "push_contact"
+    ? "push_contact"
+    : "main";
+}
+
+function botPurposeLabel(purpose) {
+  return purpose === "push_contact" ? "push kontak" : "utama";
+}
 
 export async function getBotStatus(req, res) {
   try {
@@ -36,6 +45,7 @@ export async function getBotStatus(req, res) {
         b.user_id,
         b.session_name,
         b.phone_number,
+        b.bot_purpose,
         b.is_online,
         b.expired_at,
         b.created_at,
@@ -49,8 +59,10 @@ export async function getBotStatus(req, res) {
       LEFT JOIN \`groups\` g ON g.bot_id = b.id
       WHERE b.user_id = ?
         AND (b.phone_number IS NOT NULL OR b.is_online = 1)
-      GROUP BY b.id, b.user_id, b.session_name, b.phone_number, b.is_online, b.expired_at, b.created_at
-      ORDER BY b.created_at DESC`,
+      GROUP BY b.id, b.user_id, b.session_name, b.phone_number, b.bot_purpose, b.is_online, b.expired_at, b.created_at
+      ORDER BY
+        CASE WHEN COALESCE(b.bot_purpose, 'main') = 'main' THEN 0 ELSE 1 END,
+        b.created_at DESC`,
       [req.user.id],
     );
 
@@ -60,6 +72,7 @@ export async function getBotStatus(req, res) {
         id: Number(bot.id),
         session_name: bot.session_name,
         phone_number: bot.phone_number ?? "-",
+        bot_purpose: bot.bot_purpose || "main",
         status: isConnected ? "online" : "offline",
         expired_at: bot.expired_at,
         group_count: Number(bot.group_count || 0),
@@ -95,6 +108,7 @@ export async function connectBot(req, res) {
     const normalizedPhoneNumber = normalizeWhatsappPhoneNumber(phoneNumberInput);
     const ownerPhoneNumberInput = String(req.body?.ownerPhoneNumber ?? "");
     const normalizedOwnerPhoneNumber = normalizeWhatsappPhoneNumber(ownerPhoneNumberInput);
+    const botPurpose = normalizeBotPurpose(req.body?.purpose ?? req.body?.botPurpose);
     const pairingMethod = String(req.body?.pairingMethod ?? "").trim().toLowerCase();
     const usePairingCode = pairingMethod === "code";
 
@@ -119,14 +133,31 @@ export async function connectBot(req, res) {
       }
     }
 
+    const [purposeBots] = await pool.execute(
+      `SELECT id
+         FROM bots
+        WHERE user_id = ?
+          AND COALESCE(bot_purpose, 'main') = ?
+          AND (is_online = 1 OR phone_number IS NOT NULL)
+        LIMIT 1`,
+      [userId, botPurpose],
+    );
+
+    if (purposeBots.length > 0) {
+      return res.status(409).json({
+        error: `Bot ${botPurposeLabel(botPurpose)} sudah ada. Hapus bot lama dulu sebelum add ulang.`,
+      });
+    }
+
     const pendingPairing = await baileysManager.startPendingPairing(userId, {
       usePairingCode,
+      botPurpose,
       ...(normalizedPhoneNumber ? { expectedPhoneNumber: normalizedPhoneNumber } : {}),
       ...(normalizedOwnerPhoneNumber ? { ownerPhoneNumber: normalizedOwnerPhoneNumber } : {}),
     });
 
     res.json({
-      message: "Memulai pairing bot dengan pairing code",
+      message: `Memulai pairing bot ${botPurposeLabel(botPurpose)} dengan pairing code`,
       sessionName: pendingPairing.sessionName,
       pending: true,
       pairingCode: pendingPairing.pairingCode,
@@ -143,7 +174,7 @@ export async function testUserBot(req, res) {
     const userId = req.user.id;
 
     const [bots] = await pool.execute(
-      "SELECT id, phone_number, owner_phone_number FROM bots WHERE user_id = ? AND is_online = 1 ORDER BY created_at DESC LIMIT 1",
+      "SELECT id, phone_number, owner_phone_number FROM bots WHERE user_id = ? AND is_online = 1 AND COALESCE(bot_purpose, 'main') = 'main' ORDER BY created_at DESC LIMIT 1",
       [userId],
     );
 

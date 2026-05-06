@@ -5,6 +5,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
+import type { BotModel } from "../../types/models";
 
 export function ManageBotsPage() {
   const appData = useAppData();
@@ -12,6 +13,7 @@ export function ManageBotsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmittingId, setIsSubmittingId] = useState<number | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [addPurpose, setAddPurpose] = useState<"main" | "push_contact">("main");
 
   useEffect(() => {
     let mounted = true;
@@ -63,7 +65,16 @@ export function ManageBotsPage() {
     }
   }
 
+  function getNextPurpose(bots: BotModel[]) {
+    const hasMain = bots.some((bot) => bot.purpose === "main");
+    const hasPush = bots.some((bot) => bot.purpose === "push_contact");
+    if (!hasMain) return "main";
+    if (!hasPush) return "push_contact";
+    return "main";
+  }
+
   function handleAddBot() {
+    setAddPurpose(getNextPurpose(appData.bots));
     setShowAddModal(true);
   }
 
@@ -80,9 +91,10 @@ export function ManageBotsPage() {
             className="inline-flex w-full items-center justify-center gap-2 rounded-[18px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110"
             type="button"
             onClick={handleAddBot}
+            disabled={appData.bots.length >= 2}
           >
             <Plus size={16} />
-            Tambah Bot
+            {appData.bots.length >= 2 ? "Maksimal 2 Bot" : "Tambah Bot"}
           </button>
         </div>
       </SurfaceCard>
@@ -95,14 +107,19 @@ export function ManageBotsPage() {
         null
       ) : (
         <div className="space-y-3">
-          {sortedBots.map((bot, index) => {
+          {sortedBots.map((bot) => {
             const isBusy = isSubmittingId === bot.id;
             return (
               <SurfaceCard key={bot.id} className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-base font-bold">Bot #{index + 1}</h3>
+                    <h3 className="text-base font-bold">
+                      {bot.purpose === "push_contact" ? "Bot 2 Push Kontak" : "Bot 1 Utama"}
+                    </h3>
                     <p className="mt-1 text-sm text-text-secondary">Nomor: {bot.phoneNumber || "-"}</p>
+                    <p className="mt-1 text-sm text-text-secondary">
+                      Fungsi: {bot.purpose === "push_contact" ? "Khusus push kontak" : "Broadcast CS dan push kontak"}
+                    </p>
                     <p className="mt-1 text-sm text-text-secondary">Status: {bot.status === "online" ? "Online" : "Offline"}</p>
                   </div>
                 </div>
@@ -126,8 +143,8 @@ export function ManageBotsPage() {
 
       <OwnerBotConnectModal
         open={showAddModal}
-        purpose="broadcast"
-        title="Tambah Bot"
+        purpose={addPurpose === "push_contact" ? "push_contact" : "broadcast"}
+        title={addPurpose === "push_contact" ? "Tambah Bot Push Kontak" : "Tambah Bot Utama"}
         onClose={() => setShowAddModal(false)}
         onConnected={async () => {
           await appData.refreshBots();

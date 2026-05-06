@@ -219,15 +219,15 @@ export function AddBroadcastPage() {
     () =>
       selectedBotIds.filter((botId) => {
         const bot = appData.bots.find((item) => item.id === botId);
-        return bot?.status === "online";
+        return bot?.status === "online" && bot.purpose === "main";
       }),
     [selectedBotIds, appData.bots],
   );
-  const ownerBroadcastBots = appData.bots;
+  const ownerBroadcastBots = appData.bots.filter((bot) => bot.purpose === "main");
   const ownerOnlineBroadcastBotIds = useMemo(
     () =>
       appData.bots
-        .filter((bot) => bot.status === "online")
+        .filter((bot) => bot.status === "online" && bot.purpose === "main")
         .map((bot) => Number(bot.id)),
     [appData.bots],
   );
@@ -247,7 +247,7 @@ export function AddBroadcastPage() {
     }
 
     setSelectedBotIds((current) =>
-      current.filter((botId) => appData.bots.some((bot) => bot.id === botId)),
+      current.filter((botId) => appData.bots.some((bot) => bot.id === botId && bot.purpose === "main")),
     );
   }, [appData.bots]);
 
@@ -616,7 +616,7 @@ export function AddBroadcastPage() {
     }
 
     const userOnlineBotIds = resolvedBots
-      .filter((bot) => bot.status === "online")
+      .filter((bot) => bot.status === "online" && bot.purpose === "main")
       .map((bot) => Number(bot.id));
     const onlineBotIds = isOwner ? ownerOnlineBroadcastBotIds : userOnlineBotIds;
 

@@ -58,19 +58,21 @@ interface AppDataContextValue {
   updatePushTemplate: (templateId: number, payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
   deletePushTemplate: (templateId: number) => Promise<string>;
   fetchPushStatus: () => Promise<{ isRunning: boolean; running: PushContactRunModel | null }>;
-  startPushContact: (payload: { templateId: number; groupId: number }) => Promise<{ message: string; totalTargets: number; isRunning: boolean; running: PushContactRunModel | null }>;
+  startPushContact: (payload: { templateId: number; groupId: number; botId?: number }) => Promise<{ message: string; totalTargets: number; isRunning: boolean; running: PushContactRunModel | null }>;
   fetchGroupPushMembers: (groupId: string) => Promise<GroupPushMemberModel[]>;
   fetchGroupPushExclusions: (groupId: string) => Promise<GroupPushExclusionModel[]>;
   addGroupPushExclusion: (groupId: string, payload: { phoneNumber: string; label?: string }) => Promise<GroupPushExclusionModel>;
   deleteGroupPushExclusion: (groupId: string, exclusionId: number) => Promise<string>;
   fetchTransactions: () => Promise<TransactionModel[]>;
+  updateTransaction: (transactionId: number, payload: Record<string, unknown>) => Promise<TransactionModel>;
+  deleteTransaction: (transactionId: number) => Promise<string>;
   fetchSettings: () => Promise<AppSettingsModel>;
   updateSettings: (payload: Partial<AppSettingsModel>) => Promise<AppSettingsModel>;
   connectBot: (data?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   refreshQr: (target: { botId?: number; sessionName?: string }, data?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   cancelPendingBot: (sessionName: string) => Promise<void>;
   disconnectBot: (botId: number) => Promise<string>;
-  joinGroup: (inviteLink: string) => Promise<GroupModel>;
+  joinGroup: (inviteLink: string, botId?: number) => Promise<GroupModel>;
   toggleGroup: (groupId: string) => Promise<void>;
   deleteGroup: (groupId: string) => Promise<string>;
 }
@@ -86,9 +88,11 @@ function parseUser(payload: Record<string, unknown>): UserModel {
 }
 
 function parseBot(payload: Record<string, unknown>): BotModel {
+  const purpose = String(payload.bot_purpose ?? payload.purpose ?? "main") === "push_contact" ? "push_contact" : "main";
   return {
     id: Number(payload.id ?? 0),
     phoneNumber: String(payload.phone_number ?? "-"),
+    purpose,
     status: String(payload.status ?? "offline"),
     expiredAt: payload.expired_at ? String(payload.expired_at) : null,
     groupCount: Number(payload.group_count ?? 0),
@@ -97,8 +101,12 @@ function parseBot(payload: Record<string, unknown>): BotModel {
 }
 
 function parseGroup(payload: Record<string, unknown>): GroupModel {
+  const botPurpose = String(payload.bot_purpose ?? payload.botPurpose ?? "main") === "push_contact" ? "push_contact" : "main";
   return {
     id: String(payload.id ?? ""),
+    botId: Number(payload.bot_id ?? payload.botId ?? 0),
+    botPhoneNumber: String(payload.bot_phone_number ?? payload.botPhoneNumber ?? ""),
+    botPurpose,
     name: String(payload.name ?? ""),
     memberCount: Number(payload.member_count ?? 0),
     isActive: Boolean(payload.is_active ?? true),
@@ -324,11 +332,24 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
 }
 
 function parseAppSettings(payload: Record<string, unknown>): AppSettingsModel {
+  const statusRaw = payload.testimonialChannelStatus ?? payload.testimonial_channel_status;
+  const status = statusRaw && typeof statusRaw === "object"
+    ? statusRaw as Record<string, unknown>
+    : null;
   return {
     pakasirSlug: String(payload.pakasirSlug ?? ""),
     pakasirApiKey: String(payload.pakasirApiKey ?? ""),
     pakasirApiKeyMasked: payload.pakasirApiKeyMasked ? String(payload.pakasirApiKeyMasked) : null,
     hasApiKey: Boolean(payload.hasApiKey ?? false),
+    testimonialChannelLink: String(payload.testimonialChannelLink ?? payload.testimonial_channel_link ?? ""),
+    testimonialChannelJid: String(payload.testimonialChannelJid ?? payload.testimonial_channel_jid ?? ""),
+    testimonialChannelName: String(payload.testimonialChannelName ?? payload.testimonial_channel_name ?? ""),
+    testimonialChannelStatus: status
+      ? {
+          ok: Boolean(status.ok),
+          message: String(status.message ?? ""),
+        }
+      : null,
     updatedAt: payload.updatedAt ? String(payload.updatedAt) : null,
   };
 }
@@ -536,7 +557,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     };
   }
 
-  async function startPushContact(payload: { templateId: number; groupId: number }): Promise<{ message: string; totalTargets: number; isRunning: boolean; running: PushContactRunModel | null }> {
+  async function startPushContact(payload: { templateId: number; groupId: number; botId?: number }): Promise<{ message: string; totalTargets: number; isRunning: boolean; running: PushContactRunModel | null }> {
     const data = await apiFetch("/push-contact/run", withJsonBody(payload));
     const runningRaw = (data as { running?: Record<string, unknown> | null }).running ?? null;
     return {
@@ -572,6 +593,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseTransaction);
   }
 
+  async function updateTransaction(transactionId: number, payload: Record<string, unknown>): Promise<TransactionModel> {
+    const data = await apiFetch(`/cs-payments/transactions/${transactionId}`, withJsonBody(payload, "PUT"));
+    return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function deleteTransaction(transactionId: number): Promise<string> {
+    const data = await apiFetch(`/cs-payments/transactions/${transactionId}`, { method: "DELETE" });
+    return String((data as { message: string }).message ?? "Transaksi berhasil dihapus");
+  }
+
   async function fetchSettings(): Promise<AppSettingsModel> {
     const data = await apiFetch("/settings");
     return parseAppSettings((data as { settings: Record<string, unknown> }).settings ?? {});
@@ -605,8 +636,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return String((data as { message: string }).message ?? "Bot berhasil dihapus");
   }
 
-  async function joinGroup(inviteLink: string): Promise<GroupModel> {
-    const data = await apiFetch("/groups/join", withJsonBody({ inviteLink }));
+  async function joinGroup(inviteLink: string, botId?: number): Promise<GroupModel> {
+    const data = await apiFetch("/groups/join", withJsonBody({ inviteLink, ...(botId ? { botId } : {}) }));
     const group = parseGroup((data as { group: Record<string, unknown> }).group ?? {});
     await refreshGroups();
     return group;
@@ -664,6 +695,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       addGroupPushExclusion,
       deleteGroupPushExclusion,
       fetchTransactions,
+      updateTransaction,
+      deleteTransaction,
       fetchSettings,
       updateSettings,
       connectBot,

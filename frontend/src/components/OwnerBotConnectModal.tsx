@@ -6,7 +6,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { socketService } from "../lib/socket";
 import { Modal } from "./Modal";
 
-type OwnerBotPurpose = "otp" | "broadcast" | "default";
+type OwnerBotPurpose = "otp" | "broadcast" | "push_contact" | "default";
 
 function normalizePhoneNumber(value: string) {
   const digits = value.replace(/\D/g, "");

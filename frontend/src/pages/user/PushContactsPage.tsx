@@ -15,6 +15,7 @@ export function PushContactsPage() {
   const [editingTemplate, setEditingTemplate] = useState<PushContactTemplateModel | null>(null);
   const [title, setTitle] = useState("");
   const [messageText, setMessageText] = useState("");
+  const [selectedBotId, setSelectedBotId] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -22,9 +23,14 @@ export function PushContactsPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [runningRun, setRunningRun] = useState<PushContactRunModel | null>(null);
 
+  const onlineBots = useMemo(
+    () => appData.bots.filter((bot) => bot.status === "online"),
+    [appData.bots],
+  );
+
   const activeGroups = useMemo(
-    () => appData.groups.filter((group) => group.isActive),
-    [appData.groups],
+    () => appData.groups.filter((group) => group.isActive && (!selectedBotId || Number(group.botId) === Number(selectedBotId))),
+    [appData.groups, selectedBotId],
   );
   const pushStillRunning = Boolean(runningRun) || isRunning;
 
@@ -37,13 +43,20 @@ export function PushContactsPage() {
   async function loadData() {
     setIsLoading(true);
     try {
-      const [nextTemplates, nextGroups, pushStatus] = await Promise.all([
+      const [nextTemplates, nextBots, nextGroups, pushStatus] = await Promise.all([
         appData.fetchPushTemplates(),
+        appData.bots.length ? Promise.resolve(appData.bots) : appData.refreshBots(),
         appData.groups.length ? Promise.resolve(appData.groups) : appData.refreshGroups(),
         appData.fetchPushStatus(),
       ]);
       setTemplates(nextTemplates);
       setRunningRun(pushStatus.isRunning ? pushStatus.running : null);
+      setSelectedBotId((current) => {
+        if (current && nextBots.some((bot) => String(bot.id) === current && bot.status === "online")) {
+          return current;
+        }
+        return String(nextBots.find((bot) => bot.status === "online")?.id ?? "");
+      });
       if (selectedGroupId && !nextGroups.some((group) => group.id === selectedGroupId && group.isActive)) {
         setSelectedGroupId("");
       }
@@ -126,18 +139,19 @@ export function PushContactsPage() {
   async function handleRunPush(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const templateId = Number(selectedTemplateId);
+    const botId = Number(selectedBotId);
     const groupId = Number(selectedGroupId);
     if (runningRun) {
       showToast("Push kontak masih berjalan. Tunggu sampai selesai.", "danger");
       return;
     }
-    if (!templateId || !groupId) {
-      showToast("Pilih template dan group aktif dulu.", "danger");
+    if (!templateId || !botId || !groupId) {
+      showToast("Pilih template, bot, dan group aktif dulu.", "danger");
       return;
     }
     setIsRunning(true);
     try {
-      const result = await appData.startPushContact({ templateId, groupId });
+      const result = await appData.startPushContact({ templateId, groupId, botId });
       setRunningRun(result.isRunning ? result.running : null);
       showToast(result.message, "success");
     } catch (error) {
@@ -165,13 +179,30 @@ export function PushContactsPage() {
 
       <SurfaceCard>
         <form className="space-y-4" onSubmit={handleRunPush}>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <label className="block space-y-2">
               <span className="text-xs font-bold tracking-[0.18em] text-text-muted">TEMPLATE</span>
               <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
                 <option value="">Pilih template</option>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>{template.title}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.18em] text-text-muted">BOT PENGIRIM</span>
+              <select
+                value={selectedBotId}
+                onChange={(event) => {
+                  setSelectedBotId(event.target.value);
+                  setSelectedGroupId("");
+                }}
+              >
+                <option value="">Pilih bot</option>
+                {onlineBots.map((bot) => (
+                  <option key={bot.id} value={bot.id}>
+                    {bot.purpose === "push_contact" ? "Bot 2 Push Kontak" : "Bot 1 Utama"} - {bot.phoneNumber}
+                  </option>
                 ))}
               </select>
             </label>
@@ -185,6 +216,11 @@ export function PushContactsPage() {
               </select>
             </label>
           </div>
+          {onlineBots.length === 0 ? (
+            <div className="rounded-[14px] border border-[rgba(251,191,36,0.22)] bg-[rgba(251,191,36,0.08)] px-4 py-3 text-sm text-warning">
+              Tidak ada bot online. Hubungkan bot dulu di Kelola Bot.
+            </div>
+          ) : null}
           {activeGroups.length === 0 ? (
             <div className="rounded-[14px] border border-[rgba(251,191,36,0.22)] bg-[rgba(251,191,36,0.08)] px-4 py-3 text-sm text-warning">
               Tidak ada group aktif. Aktifkan group dulu di Kelola Group.
@@ -202,7 +238,7 @@ export function PushContactsPage() {
           <button
             className="inline-flex w-full items-center justify-center gap-2 rounded-[18px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow disabled:opacity-60"
             type="submit"
-            disabled={pushStillRunning || isLoading || activeGroups.length === 0}
+            disabled={pushStillRunning || isLoading || onlineBots.length === 0 || activeGroups.length === 0}
           >
             <Play size={16} />
             {pushStillRunning ? "PUSH KONTAK MASIH BERJALAN..." : "JALANKAN PUSH KONTAK"}

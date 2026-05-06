@@ -9,14 +9,23 @@ function extractInviteCode(inviteLink = "") {
   return match ? match[1] : value;
 }
 
-async function getPrimaryBot(pool, userId) {
+async function getPrimaryBot(pool, userId, preferredBotId = null) {
+  const clauses = ["user_id = ?", "is_online = 1"];
+  const params = [userId];
+  if (preferredBotId) {
+    clauses.push("id = ?");
+    params.push(Number(preferredBotId));
+  }
+
   const [bots] = await pool.execute(
     `SELECT id, session_name
      FROM bots
-     WHERE user_id = ? AND is_online = 1
-     ORDER BY created_at DESC
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY
+       CASE WHEN COALESCE(bot_purpose, 'main') = 'main' THEN 0 ELSE 1 END,
+       created_at DESC
      LIMIT 1`,
-    [userId],
+    params,
   );
 
   return bots[0] ?? null;
@@ -26,7 +35,12 @@ export async function listGroups(req, res) {
   try {
     const pool = getPool();
     const [groups] = await pool.execute(
-      `SELECT g.* FROM \`groups\` g
+      `SELECT
+         g.*,
+         b.id AS bot_id,
+         b.phone_number AS bot_phone_number,
+         COALESCE(b.bot_purpose, 'main') AS bot_purpose
+       FROM \`groups\` g
        JOIN bots b ON g.bot_id = b.id
        WHERE b.user_id = ?
        ORDER BY g.joined_at DESC`,
@@ -50,12 +64,13 @@ export async function joinGroup(req, res) {
       return res.status(400).json({ error: "Link undangan group tidak valid" });
     }
 
-    const bot = await getPrimaryBot(pool, userId);
+    const requestedBotId = Number(req.body?.botId ?? 0) || null;
+    const bot = await getPrimaryBot(pool, userId, requestedBotId);
     if (!bot) {
       return res.status(400).json({
         error:
           req.user.role === "owner"
-            ? "Bot broadcast owner harus online untuk join group"
+            ? "Bot yang dipilih harus online untuk join group"
             : "Tidak ada bot yang online",
       });
     }
@@ -109,13 +124,14 @@ export async function syncGroups(req, res) {
   try {
     const pool = getPool();
     const userId = req.user.id;
-    const bot = await getPrimaryBot(pool, userId);
+    const requestedBotId = Number(req.body?.botId ?? 0) || null;
+    const bot = await getPrimaryBot(pool, userId, requestedBotId);
 
     if (!bot) {
       return res.status(400).json({
         error:
           req.user.role === "owner"
-            ? "Bot broadcast owner harus online untuk sync group"
+            ? "Bot yang dipilih harus online untuk sync group"
             : "Tidak ada bot yang online",
       });
     }
