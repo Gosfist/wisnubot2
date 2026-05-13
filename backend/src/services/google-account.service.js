@@ -39,7 +39,9 @@ async function listForUser(user) {
           AND COALESCE(
             tx.active_status,
             CASE
-              WHEN tx.active_expires_at IS NOT NULL AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
+              WHEN COALESCE(tx.platform, '') <> 'pribadi'
+               AND tx.active_expires_at IS NOT NULL
+               AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
               ELSE 'aktif'
             END
           ) = 'expired'
@@ -110,7 +112,9 @@ async function setSuspendedForUser(user, accountId, suspended) {
           AND COALESCE(
             tx.active_status,
             CASE
-              WHEN tx.active_expires_at IS NOT NULL AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
+              WHEN COALESCE(tx.platform, '') <> 'pribadi'
+               AND tx.active_expires_at IS NOT NULL
+               AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
               ELSE 'aktif'
             END
           ) = 'expired'

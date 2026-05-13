@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { getPool } from "../config/database.js";
 import { baileysManager } from "./baileys.service.js";
 import { messageService } from "./message.service.js";
+import { realtimeService } from "./realtime.service.js";
 import { resolveBroadcastTable, parseScheduleEntries } from "../utils/helpers.js";
 import { logger } from "../utils/logger.js";
 
@@ -153,6 +154,12 @@ class SchedulerService {
     }).format(date);
   }
 
+  isPastDate(value) {
+    if (!value) return false;
+    const date = value instanceof Date ? value : new Date(value);
+    return !Number.isNaN(date.getTime()) && date.getTime() < Date.now();
+  }
+
   registerTransactionExpiryJob() {
     if (this.transactionExpiryJob) {
       return;
@@ -217,9 +224,41 @@ class SchedulerService {
     return true;
   }
 
+  async expireActiveTransactions(pool) {
+    const result = await pool.query(
+      `UPDATE cs_transactions
+          SET active_status = 'expired'
+        WHERE status = 'paid'
+          AND COALESCE(platform, '') <> 'pribadi'
+          AND active_expires_at IS NOT NULL
+          AND active_expires_at < CURRENT_TIMESTAMP
+          AND COALESCE(active_status, 'aktif') <> 'expired'
+        RETURNING id, user_id, pakasir_order_id`,
+    );
+    const rows = result.rows ?? [];
+
+    const userIds = [...new Set(rows.map((row) => Number(row.user_id)).filter(Boolean))];
+    for (const userId of userIds) {
+      realtimeService.emitTrxGeminiChanged(userId, { source: "daily_active_expire" });
+    }
+
+    if (rows.length > 0) {
+      logger.info(
+        {
+          count: rows.length,
+          idTrx: rows.slice(0, 20).map((row) => row.pakasir_order_id),
+        },
+        "Daily active status expired transactions updated",
+      );
+    }
+
+    return rows.length;
+  }
+
   async notifyExpiredTransactions() {
     try {
       const pool = getPool();
+      const expiredCount = await this.expireActiveTransactions(pool);
       const [rows] = await pool.execute(
         `SELECT tx.id, tx.user_id, tx.customer_jid, tx.pakasir_order_id, tx.amount,
                 tx.platform, tx.active_duration_days, tx.warranty_duration_days,
@@ -242,6 +281,7 @@ class SchedulerService {
           WHERE tx.status = 'paid'
             AND (
               (tx.active_expires_at IS NOT NULL
+               AND COALESCE(tx.platform, '') <> 'pribadi'
                AND tx.active_expires_at < CURRENT_TIMESTAMP
                AND tx.active_exp_notified_at IS NULL)
               OR
@@ -255,17 +295,17 @@ class SchedulerService {
 
       let sentCount = 0;
       for (const row of rows) {
-        if (row.active_expires_at && !row.active_exp_notified_at) {
+        if (this.isPastDate(row.active_expires_at) && !row.active_exp_notified_at) {
           const sent = await this.sendExpiryNotification(pool, row, "active");
           if (sent) sentCount += 1;
         }
-        if (row.warranty_expires_at && !row.warranty_exp_notified_at) {
+        if (this.isPastDate(row.warranty_expires_at) && !row.warranty_exp_notified_at) {
           const sent = await this.sendExpiryNotification(pool, row, "warranty");
           if (sent) sentCount += 1;
         }
       }
 
-      logger.info(`Transaction expiry notification checked: ${sentCount} sent`);
+      logger.info(`Transaction expiry checked: ${expiredCount} active status updated, ${sentCount} notification sent`);
     } catch (err) {
       logger.error(err, "Transaction expiry notification error");
     }

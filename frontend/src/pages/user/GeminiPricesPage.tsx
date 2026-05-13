@@ -1,6 +1,7 @@
 import { Edit2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../../components/Modal";
+import { SurfaceCard } from "../../components/SurfaceCard";
 import { formatCurrency } from "../../lib/format";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
@@ -124,75 +125,82 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {embedded ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-text-secondary">{activeCount} harga aktif</p>
-          {headerActions}
-        </div>
+        <div className="flex flex-wrap justify-end gap-2">{headerActions}</div>
       ) : null}
 
       {loading ? null : items.length === 0 ? (
-        <div className="rounded-[20px] border border-glass-border bg-[rgba(30,41,59,0.88)] py-10 text-center text-sm text-text-secondary">
+        <SurfaceCard className="py-10 text-center text-sm text-text-secondary">
           Belum ada harga Gemini.
-        </div>
+        </SurfaceCard>
       ) : (
-        <div className="overflow-x-auto rounded-[18px] border border-[rgba(56,189,248,0.16)]">
-          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-            <thead className="bg-[rgba(15,23,42,0.78)] text-[12px] font-extrabold text-white">
-              <tr>
-                <th className="px-5 py-4">Nama</th>
-                <th className="px-5 py-4">Masa Aktif</th>
-                <th className="px-5 py-4">Harga</th>
-                <th className="px-5 py-4">Status</th>
-                <th className="px-5 py-4 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[rgba(56,189,248,0.1)] bg-[rgba(15,23,42,0.36)]">
-              {items.map((item) => (
-                <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
-                  <td className="px-5 py-4 font-semibold text-white">{item.label}</td>
-                  <td className="px-5 py-4 text-text-primary">{formatDurationLabel(item.durationDays)}</td>
-                  <td className="px-5 py-4 text-text-primary">Rp {formatCurrency(item.price)}</td>
-                  <td className="px-5 py-4">
-                    <span
-                      className={
-                        item.isActive
-                          ? "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(34,197,94,0.16)] px-4 py-2 text-xs font-extrabold uppercase text-success"
-                          : "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(148,163,184,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-text-secondary"
-                      }
-                    >
-                      {item.isActive ? "AKTIF" : "NON AKTIF"}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-                        type="button"
-                        onClick={() => openEditModal(item)}
-                        aria-label="Edit harga"
-                        title="Edit harga"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button
-                        className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
-                        type="button"
-                        disabled={saving}
-                        onClick={() => void handleDelete(item)}
-                        aria-label="Hapus harga"
-                        title="Hapus harga"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
+        <SurfaceCard className="p-3 lg:p-4">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
+              <colgroup>
+                <col className="w-[18%]" />
+                <col className="w-[18%]" />
+                <col className="w-[22%]" />
+                <col className="w-[18%]" />
+                <col className="w-[10%]" />
+              </colgroup>
+              <thead className="text-[12px] font-extrabold text-white">
+                <tr>
+                  <th className="px-3 py-3">Nama</th>
+                  <th className="px-3 py-3">Masa Aktif</th>
+                  <th className="px-3 py-3">Harga</th>
+                  <th className="px-2 py-3 text-center">Status</th>
+                  <th className="px-2 py-3 text-center">Aksi</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-[rgba(56,189,248,0.1)]">
+                {items.map((item) => (
+                  <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
+                    <td className="px-3 py-2.5 font-semibold text-white">{item.label}</td>
+                    <td className="px-3 py-2.5 text-text-primary">{formatDurationLabel(item.durationDays)}</td>
+                    <td className="px-3 py-2.5 text-text-primary">Rp {formatCurrency(item.price)}</td>
+                    <td className="px-2 py-2.5 text-center">
+                      <span
+                        className={
+                          item.isActive
+                            ? "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(34,197,94,0.16)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-success"
+                            : "inline-flex min-w-[76px] justify-center rounded-[10px] bg-[rgba(148,163,184,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-text-secondary"
+                        }
+                      >
+                        {item.isActive ? "AKTIF" : "NON AKTIF"}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <div className="flex justify-center gap-2">
+                        <button
+                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+                          type="button"
+                          onClick={() => openEditModal(item)}
+                          aria-label="Edit harga"
+                          title="Edit harga"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                        <button
+                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void handleDelete(item)}
+                          aria-label="Hapus harga"
+                          title="Hapus harga"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-sm text-text-secondary">{activeCount} harga aktif</p>
+        </SurfaceCard>
       )}
 
       <Modal

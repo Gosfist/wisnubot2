@@ -38,8 +38,13 @@ function formatShortDate(value: string | null) {
   }).format(parsed);
 }
 
-function getActiveStatus(value: string | null, manualStatus?: TransactionModel["activeStatus"]) {
-  if (manualStatus === "aktif") return "Aktif";
+function getActiveStatus(
+  value: string | null,
+  manualStatus?: TransactionModel["activeStatus"],
+  platform?: string,
+) {
+  const isPribadi = String(platform ?? "").trim().toLowerCase() === "pribadi";
+  if (manualStatus === "aktif" && isPribadi) return "Aktif";
   if (manualStatus === "expired") return "Expired";
   if (!value) return "Aktif";
   const parsed = new Date(value);
@@ -297,6 +302,9 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const [pricePlans, setPricePlans] = useState<GeminiPricePlanModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [expFilter, setExpFilter] = useState("all");
+  const [activeStatusFilter, setActiveStatusFilter] = useState("all");
+  const [memberStatusFilter, setMemberStatusFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [isManualOpen, setIsManualOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionModel | null>(null);
@@ -351,9 +359,37 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => item.idTrx.toLowerCase().includes(q));
-  }, [items, query]);
+    const hasStatusFilter =
+      expFilter !== "all" ||
+      activeStatusFilter !== "all" ||
+      memberStatusFilter !== "all";
+    return items.filter((item) => {
+      if (q && !item.idTrx.toLowerCase().includes(q)) return false;
+      if (hasStatusFilter && String(item.platform ?? "").trim().toLowerCase() === "pribadi") return false;
+
+      const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform).toLowerCase();
+      if (activeStatusFilter !== "all" && activeStatus !== activeStatusFilter) return false;
+
+      if (memberStatusFilter !== "all" && item.memberStatus !== memberStatusFilter) return false;
+
+      if (expFilter !== "all") {
+        const expDate = item.activeExpiresAt ? new Date(item.activeExpiresAt) : null;
+        if (!expDate || Number.isNaN(expDate.getTime())) return false;
+
+        const now = new Date();
+        if (expFilter === "expired" && expDate.getTime() >= now.getTime()) return false;
+
+        const todayStart = new Date(now);
+        todayStart.setHours(0, 0, 0, 0);
+        const sevenDaysLater = new Date(todayStart);
+        sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
+
+        if (expFilter === "7" && (expDate < todayStart || expDate > sevenDaysLater)) return false;
+      }
+
+      return true;
+    });
+  }, [activeStatusFilter, expFilter, items, memberStatusFilter, query]);
 
   const totalPages = Math.max(Math.ceil(filteredItems.length / pageSize), 1);
   const pageItems = useMemo(() => {
@@ -377,7 +413,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [query, items.length]);
+  }, [activeStatusFilter, expFilter, memberStatusFilter, query, items.length]);
 
   useEffect(() => {
     if (!manualForm.pricePlanId && defaultPricePlan) {
@@ -398,7 +434,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       idTrx: item.idTrx,
       buyerEmail: item.buyerEmail ?? formatCustomerJid(item.customerJid),
       platform: item.platform || "whatsapp",
-      activeStatus: getActiveStatus(item.activeExpiresAt, item.activeStatus).toLowerCase(),
+      activeStatus: getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform).toLowerCase(),
       memberStatus: item.memberStatus,
       activeStartAt: toDateOnlyInputValue(item.activeStartAt),
       activeExpiresAt: toDateOnlyInputValue(item.activeExpiresAt),
@@ -465,7 +501,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       Bayar: formatDateTime(item.paidAt ?? item.createdAt),
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
-      "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus),
+      "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform),
       "Status Akun": item.memberStatus === "kick" ? "kick" : "Anggota",
       Total: item.amount,
     }));
@@ -690,18 +726,62 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
       {loading ? null : (
         <SurfaceCard className="p-3 lg:p-4">
-          <label className="relative mb-3 flex min-h-[48px] w-full items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4">
-            <Search size={18} className="pointer-events-none absolute left-5 text-text-secondary" />
-            <input
-              className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Cari idTrx"
-            />
-          </label>
+          <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_160px_160px_auto]">
+            <label className="relative flex min-h-[48px] items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4">
+              <Search size={18} className="pointer-events-none absolute left-5 text-text-secondary" />
+              <input
+                className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Cari idTrx"
+              />
+            </label>
+            <select
+              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
+              value={expFilter}
+              onChange={(event) => setExpFilter(event.target.value)}
+              aria-label="Filter exp"
+            >
+              <option value="all">Exp</option>
+              <option value="7">Exp: 7 hari</option>
+              <option value="expired">Exp: Lewat</option>
+            </select>
+            <select
+              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
+              value={activeStatusFilter}
+              onChange={(event) => setActiveStatusFilter(event.target.value)}
+              aria-label="Filter masa aktif"
+            >
+              <option value="all">Masa Aktif</option>
+              <option value="aktif">Aktif</option>
+              <option value="expired">Expired</option>
+            </select>
+            <select
+              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
+              value={memberStatusFilter}
+              onChange={(event) => setMemberStatusFilter(event.target.value)}
+              aria-label="Filter status akun"
+            >
+              <option value="all">Status</option>
+              <option value="anggota">Anggota</option>
+              <option value="kick">Kick</option>
+            </select>
+            <button
+              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 text-sm font-bold text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] hover:text-white"
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setExpFilter("all");
+                setActiveStatusFilter("all");
+                setMemberStatusFilter("all");
+              }}
+            >
+              Clear Filter
+            </button>
+          </div>
           <>
-            <div className="overflow-hidden rounded-[18px] border border-[rgba(56,189,248,0.16)]">
-              <table className="w-full table-fixed border-collapse text-left text-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-[980px] table-fixed border-collapse text-left text-sm">
                 <colgroup>
                   <col className="w-[12%]" />
                   <col className="w-[14%]" />
@@ -713,7 +793,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   <col className="w-[8%]" />
                   <col className="w-[8%]" />
                 </colgroup>
-                <thead className="bg-[rgba(15,23,42,0.78)] text-[12px] font-extrabold text-white">
+                <thead className="text-[12px] font-extrabold text-white">
                   <tr>
                     <th className="px-3 py-3">idTrx</th>
                     <th className="px-3 py-3">Google</th>
@@ -726,7 +806,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                     <th className="px-2 py-3 text-center">Aksi</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[rgba(56,189,248,0.1)] bg-[rgba(15,23,42,0.36)]">
+                <tbody className="divide-y divide-[rgba(56,189,248,0.1)]">
                   {items.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="px-5 py-8 text-center text-sm text-text-secondary">
@@ -740,7 +820,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                       </td>
                     </tr>
                   ) : pageItems.map((item) => {
-                    const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus);
+                    const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform);
                     return (
                       <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
                         <td className="px-3 py-2.5 font-semibold leading-snug text-white">
