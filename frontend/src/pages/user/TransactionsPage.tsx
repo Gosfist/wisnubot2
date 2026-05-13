@@ -416,8 +416,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     const start = (currentPage - 1) * pageSize;
     return filteredItems.slice(start, start + pageSize);
   }, [currentPage, filteredItems]);
-  const pageStart = filteredItems.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const pageEnd = Math.min(currentPage * pageSize, filteredItems.length);
   const activePricePlans = useMemo(
     () => pricePlans.filter((plan) => plan.isActive),
     [pricePlans],
@@ -813,8 +811,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <colgroup>
                   <col className="w-[12%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[8%]" />
                   <col className="w-[13%]" />
+                  <col className="w-[8%]" />
                   <col className="w-[10%]" />
                   <col className="w-[10%]" />
                   <col className="w-[8%]" />
@@ -825,8 +823,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   <tr>
                     <th className="px-3 py-3">idTrx</th>
                     <th className="px-3 py-3">Google</th>
-                    <th className="px-3 py-3">Platform</th>
                     <th className="px-3 py-3">Email</th>
+                    <th className="px-3 py-3">Platform</th>
                     <th className="px-3 py-3">Start</th>
                     <th className="px-3 py-3">Exp</th>
                     <th className="px-2 py-3 text-center">Masa Aktif</th>
@@ -860,16 +858,16 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                           </span>
                         </td>
                         <td className="px-3 py-2.5 text-text-primary">
-                          <span className="block truncate" title={item.platform || "whatsapp"}>
-                            {item.platform || "whatsapp"}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-text-primary">
                           <span
                             className="block truncate"
                             title={item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
                           >
                             {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-text-primary">
+                          <span className="block truncate" title={item.platform || "whatsapp"}>
+                            {item.platform || "whatsapp"}
                           </span>
                         </td>
                         <td className="px-3 py-2.5 text-text-primary">
@@ -934,10 +932,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </div>
 
             {filteredItems.length > 0 ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-text-secondary">
-              <span>
-                Menampilkan {pageStart} - {pageEnd} dari {filteredItems.length} data
-              </span>
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-sm text-text-secondary">
               <div className="flex items-center gap-2">
                 <button
                   className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-45"
@@ -1046,7 +1041,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <option value="" disabled>Pilih harga</option>
                 {activePricePlans.map((plan) => (
                   <option key={plan.id} value={plan.id}>
-                    {plan.label} - {formatDurationLabel(plan.durationDays)} - Rp {formatCurrency(plan.price)}
+                    {plan.label} - Rp {formatCurrency(plan.price)}
                   </option>
                 ))}
               </select>
