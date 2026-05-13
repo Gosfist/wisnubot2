@@ -10,19 +10,6 @@ import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
 import type { GeminiPricePlanModel, GoogleAccountModel, TransactionModel } from "../../types/models";
 
-function formatDateTime(value: string | null) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
-}
-
 function formatCustomerJid(value: string) {
   return value.replace("@s.whatsapp.net", "");
 }
@@ -88,11 +75,20 @@ function toTodayInputValue() {
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
-function getTransactionSortTime(item: TransactionModel) {
-  const raw = item.activeStartAt ?? item.paidAt ?? item.createdAt;
-  if (!raw) return 0;
+function getTransactionStartSortTime(item: TransactionModel) {
+  const raw = item.activeStartAt;
+  if (!raw) return null;
   const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+function compareTransactionStart(a: TransactionModel, b: TransactionModel, newestFirst: boolean) {
+  const timeA = getTransactionStartSortTime(a);
+  const timeB = getTransactionStartSortTime(b);
+  if (timeA === null && timeB === null) return a.idTrx.localeCompare(b.idTrx, "id", { numeric: true });
+  if (timeA === null) return 1;
+  if (timeB === null) return -1;
+  return newestFirst ? timeB - timeA : timeA - timeB;
 }
 
 function normalizeDateTextInput(value: string) {
@@ -383,6 +379,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       expFilter !== "all" ||
       activeStatusFilter !== "all" ||
       memberStatusFilter !== "all";
+    const hasAnyFilter = q.length > 0 || hasStatusFilter;
     return items.filter((item) => {
       if (q && !item.idTrx.toLowerCase().includes(q)) return false;
       if (hasStatusFilter && String(item.platform ?? "").trim().toLowerCase() === "pribadi") return false;
@@ -408,7 +405,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       }
 
       return true;
-    }).sort((a, b) => getTransactionSortTime(b) - getTransactionSortTime(a));
+    }).sort((a, b) => compareTransactionStart(a, b, !hasAnyFilter));
   }, [activeStatusFilter, expFilter, items, memberStatusFilter, query]);
 
   const totalPages = Math.max(Math.ceil(filteredItems.length / pageSize), 1);
@@ -516,7 +513,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       "Akun Google": item.googleAccountEmail ?? "",
       Platform: item.platform || "whatsapp",
       "Email Buyer": item.buyerEmail ?? formatCustomerJid(item.customerJid),
-      Bayar: formatDateTime(item.paidAt ?? item.createdAt),
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
       "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform),

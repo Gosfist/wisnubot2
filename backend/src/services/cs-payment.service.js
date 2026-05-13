@@ -1351,6 +1351,7 @@ async function createManualTransactionForUser(user, payload) {
   const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
   const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
   const orderStatus = normalizeOrderStatus(payload.orderStatus ?? payload.order_status ?? payload.statusText);
+  const now = new Date();
 
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
   if (!pricePlanId) throw new Error("Paket harga wajib dipilih");
@@ -1377,7 +1378,6 @@ async function createManualTransactionForUser(user, payload) {
     throw new Error("Akun Google tidak ditemukan");
   }
 
-  const now = new Date();
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, google_account_id, gemini_price_plan_id, customer_jid, buyer_email,
