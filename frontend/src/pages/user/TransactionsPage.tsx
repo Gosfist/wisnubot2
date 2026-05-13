@@ -88,6 +88,13 @@ function toTodayInputValue() {
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
+function getTransactionSortTime(item: TransactionModel) {
+  const raw = item.activeStartAt ?? item.paidAt ?? item.createdAt;
+  if (!raw) return 0;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
 function normalizeDateTextInput(value: string) {
   const raw = value.trim();
   const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -401,7 +408,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       }
 
       return true;
-    });
+    }).sort((a, b) => getTransactionSortTime(b) - getTransactionSortTime(a));
   }, [activeStatusFilter, expFilter, items, memberStatusFilter, query]);
 
   const totalPages = Math.max(Math.ceil(filteredItems.length / pageSize), 1);
@@ -565,11 +572,18 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       const seenOrders = new Set<string>();
       let imported = 0;
       let skipped = 0;
+      let createdAccounts = 0;
       for (const row of groupedRows.values()) {
         const accountEmail = String(getCell(row, ["Akun Google", "Google Account", "akun_google"])).trim();
-        const account = accountByEmail.get(accountEmail.toLowerCase());
+        if (!accountEmail) {
+          throw new Error("Akun Google wajib diisi di file Excel.");
+        }
+
+        let account = accountByEmail.get(accountEmail.toLowerCase());
         if (!account) {
-          throw new Error(`Akun Google tidak ditemukan: ${accountEmail}`);
+          account = await appData.createGoogleAccount({ email: accountEmail });
+          accountByEmail.set(account.email.trim().toLowerCase(), account);
+          createdAccounts += 1;
         }
 
         const noPesanan = String(getCell(row, ["No Pesanan", "ID TRX", "ID Trx", "idTrx", "IDTRX", "No Order"])).trim();
@@ -634,7 +648,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       setGoogleAccounts(nextAccounts);
       setPricePlans(nextPlans);
       showToast(
-        `${imported} transaksi berhasil diimport${skipped ? `, ${skipped} duplikat dilewati` : ""}.`,
+        `${imported} transaksi berhasil diimport${createdAccounts ? `, ${createdAccounts} akun Google dibuat` : ""}${skipped ? `, ${skipped} duplikat dilewati` : ""}.`,
         "success",
       );
       setPendingImportFile(null);

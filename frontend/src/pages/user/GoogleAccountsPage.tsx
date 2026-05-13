@@ -1,7 +1,5 @@
-import { Download, Plus, Upload } from "lucide-react";
-import * as XLSX from "xlsx";
-import { useEffect, useRef, useState } from "react";
-import { ImportConfirmModal } from "../../components/ImportConfirmModal";
+import { Plus } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { useAppData } from "../../hooks/useAppData";
@@ -57,7 +55,6 @@ function sortGoogleAccounts(items: GoogleAccountModel[]) {
 export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean }) {
   const appData = useAppData();
   const { showToast } = useToast();
-  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<GoogleAccountModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -66,7 +63,6 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null);
   const [emailText, setEmailText] = useState("");
   const [saving, setSaving] = useState(false);
-  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -113,65 +109,6 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
       showToast(`${created.length} Google Account berhasil disimpan.`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal menyimpan Google Account", "danger");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleExportExcel() {
-    const rows = items.map((item) => ({
-      Email: item.email,
-      "Anggota Aktif": getUsedSlots(item),
-      "Total Slot": getTotalSlots(item),
-    }));
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Google Accounts");
-    XLSX.writeFile(workbook, "google-accounts.xlsx");
-  }
-
-  function handleImportExcel(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setPendingImportFile(file);
-  }
-
-  async function processImportExcel(file: File) {
-    setSaving(true);
-    try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const emails = [
-        ...new Set(
-          rows
-            .map((row) => {
-              const entries = Object.entries(row);
-              const emailEntry = entries.find(([key]) => key.trim().toLowerCase() === "email");
-              return String((emailEntry ?? entries[0])?.[1] ?? "").trim();
-            })
-            .filter(Boolean),
-        ),
-      ];
-
-      if (emails.length === 0) {
-        showToast("File Excel tidak berisi akun Google.", "danger");
-        return;
-      }
-
-      const created: GoogleAccountModel[] = [];
-      for (const email of emails) {
-        const item = await appData.createGoogleAccount({ email });
-        created.push(item);
-      }
-      const nextItems = await appData.fetchGoogleAccounts();
-      setItems(sortGoogleAccounts(nextItems));
-      showToast(`${created.length} Google Account berhasil diimport.`, "success");
-      setPendingImportFile(null);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Gagal import Google Account.", "danger");
     } finally {
       setSaving(false);
     }
@@ -224,37 +161,13 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   }
 
   const headerActions = (
-    <>
-      <input
-        ref={importInputRef}
-        className="hidden"
-        type="file"
-        accept=".xlsx,.xls"
-        onChange={(event) => void handleImportExcel(event)}
-      />
-      <button
-        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-        type="button"
-        disabled={saving}
-        onClick={() => importInputRef.current?.click()}
-      >
-        <Upload size={18} /> Import Excel
-      </button>
-      <button
-        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-        type="button"
-        onClick={handleExportExcel}
-      >
-        <Download size={18} /> Export Excel
-      </button>
-      <button
-        className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
-        type="button"
-        onClick={() => setIsModalOpen(true)}
-      >
-        <Plus size={18} /> Add Google
-      </button>
-    </>
+    <button
+      className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
+      type="button"
+      onClick={() => setIsModalOpen(true)}
+    >
+      <Plus size={18} /> Add Google
+    </button>
   );
 
   return (
@@ -432,15 +345,6 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
         ) : null}
       </Modal>
 
-      <ImportConfirmModal
-        file={pendingImportFile}
-        open={Boolean(pendingImportFile)}
-        loading={saving}
-        onCancel={() => setPendingImportFile(null)}
-        onConfirm={() => {
-          if (pendingImportFile) void processImportExcel(pendingImportFile);
-        }}
-      />
     </div>
   );
 }
