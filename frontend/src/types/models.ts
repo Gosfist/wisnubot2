@@ -139,10 +139,21 @@ export interface GoogleAccountModel {
   createdAt: string | null;
 }
 
+export interface GeminiPricePlanModel {
+  id: number;
+  label: string;
+  durationDays: number;
+  price: number;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface TransactionModel {
   id: number;
   idTrx: string;
   googleAccountId: number | null;
+  geminiPricePlanId: number | null;
   customerJid: string;
   amount: number;
   status: string;

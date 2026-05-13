@@ -1,6 +1,7 @@
 ﻿import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
+import { useRef } from "react";
 import type {
   AdminStatsModel,
   AppSettingsModel,
@@ -12,6 +13,7 @@ import type {
   CsDeliveryMode,
   CsStockModel,
   CsStockSummaryModel,
+  GeminiPricePlanModel,
   GoogleAccountModel,
   CustomerServiceItemModel,
   GroupModel,
@@ -23,6 +25,7 @@ import type {
   UserModel,
 } from "../types/models";
 import { apiFetch, withJsonBody } from "../lib/http";
+import { socketService } from "../lib/socket";
 import { useAuth } from "./AuthProvider";
 
 interface AppDataContextValue {
@@ -31,6 +34,7 @@ interface AppDataContextValue {
   groups: GroupModel[];
   broadcasts: BroadcastModel[];
   customerServiceItems: CustomerServiceItemModel[];
+  trxGeminiVersion: number;
   preloadForSession: (seedUser?: UserModel) => Promise<void>;
   refreshUser: () => Promise<UserModel>;
   refreshBots: () => Promise<BotModel[]>;
@@ -57,6 +61,10 @@ interface AppDataContextValue {
   fetchGoogleAccounts: () => Promise<GoogleAccountModel[]>;
   createGoogleAccount: (payload: { email: string }) => Promise<GoogleAccountModel>;
   deleteGoogleAccount: (accountId: number) => Promise<string>;
+  fetchGeminiPricePlans: () => Promise<GeminiPricePlanModel[]>;
+  createGeminiPricePlan: (payload: Record<string, unknown>) => Promise<GeminiPricePlanModel>;
+  updateGeminiPricePlan: (priceId: number, payload: Record<string, unknown>) => Promise<GeminiPricePlanModel>;
+  deleteGeminiPricePlan: (priceId: number) => Promise<string>;
   fetchPushTemplates: () => Promise<PushContactTemplateModel[]>;
   createPushTemplate: (payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
   updatePushTemplate: (templateId: number, payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
@@ -322,11 +330,24 @@ function parseGoogleAccount(payload: Record<string, unknown>): GoogleAccountMode
   };
 }
 
+function parseGeminiPricePlan(payload: Record<string, unknown>): GeminiPricePlanModel {
+  return {
+    id: Number(payload.id ?? 0),
+    label: String(payload.label ?? ""),
+    durationDays: Number(payload.durationDays ?? payload.duration_days ?? 0),
+    price: Number(payload.price ?? 0),
+    isActive: Boolean(payload.isActive ?? payload.is_active ?? false),
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
+    updatedAt: payload.updatedAt ?? payload.updated_at ? String(payload.updatedAt ?? payload.updated_at) : null,
+  };
+}
+
 function parseTransaction(payload: Record<string, unknown>): TransactionModel {
   return {
     id: Number(payload.id ?? 0),
     idTrx: String(payload.idTrx ?? payload.id_trx ?? ""),
     googleAccountId: payload.googleAccountId ?? payload.google_account_id ? Number(payload.googleAccountId ?? payload.google_account_id) : null,
+    geminiPricePlanId: payload.geminiPricePlanId ?? payload.gemini_price_plan_id ? Number(payload.geminiPricePlanId ?? payload.gemini_price_plan_id) : null,
     customerJid: String(payload.customerJid ?? payload.customer_jid ?? ""),
     amount: Number(payload.amount ?? 0),
     status: String(payload.status ?? ""),
@@ -383,10 +404,48 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [groups, setGroups] = useState<GroupModel[]>([]);
   const [broadcasts, setBroadcasts] = useState<BroadcastModel[]>([]);
   const [customerServiceItems, setCustomerServiceItems] = useState<CustomerServiceItemModel[]>([]);
+  const [trxGeminiVersion, setTrxGeminiVersion] = useState(0);
+  const trxGeminiCacheRef = useRef<{
+    geminiPricePlans: GeminiPricePlanModel[] | null;
+    googleAccounts: GoogleAccountModel[] | null;
+    transactions: TransactionModel[] | null;
+  }>({ geminiPricePlans: null, googleAccounts: null, transactions: null });
+  const trxGeminiInflightRef = useRef<{
+    geminiPricePlans: Promise<GeminiPricePlanModel[]> | null;
+    googleAccounts: Promise<GoogleAccountModel[]> | null;
+    transactions: Promise<TransactionModel[]> | null;
+  }>({ geminiPricePlans: null, googleAccounts: null, transactions: null });
+
+  function invalidateTrxGeminiCache() {
+    trxGeminiCacheRef.current.geminiPricePlans = null;
+    trxGeminiCacheRef.current.googleAccounts = null;
+    trxGeminiCacheRef.current.transactions = null;
+    trxGeminiInflightRef.current.geminiPricePlans = null;
+    trxGeminiInflightRef.current.googleAccounts = null;
+    trxGeminiInflightRef.current.transactions = null;
+    setTrxGeminiVersion((version) => version + 1);
+  }
 
   useEffect(() => {
     setUser(auth.user);
   }, [auth.user]);
+
+  useEffect(() => {
+    const userId = auth.user?.id;
+    if (!userId) return;
+
+    socketService.connect().catch(() => undefined);
+    const unsubscribe = socketService.onTrxGeminiChanged((payload) => {
+      const payloadUserId = Number(payload.userId ?? 0);
+      if (!payloadUserId || payloadUserId === Number(userId)) {
+        invalidateTrxGeminiCache();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [auth.user?.id]);
 
   async function refreshUser(): Promise<UserModel> {
     const data = await apiFetch("/auth/me");
@@ -440,6 +499,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setGroups([]);
     setBroadcasts([]);
     setCustomerServiceItems([]);
+    invalidateTrxGeminiCache();
   }
 
   async function getAdminStats(): Promise<AdminStatsModel> {
@@ -551,18 +611,73 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function fetchGoogleAccounts(): Promise<GoogleAccountModel[]> {
-    const data = await apiFetch("/google-accounts");
-    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGoogleAccount);
+    if (trxGeminiCacheRef.current.googleAccounts) {
+      return trxGeminiCacheRef.current.googleAccounts;
+    }
+    if (trxGeminiInflightRef.current.googleAccounts) {
+      return trxGeminiInflightRef.current.googleAccounts;
+    }
+
+    trxGeminiInflightRef.current.googleAccounts = apiFetch("/google-accounts")
+      .then((data) => {
+        const parsed = ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGoogleAccount);
+        trxGeminiCacheRef.current.googleAccounts = parsed;
+        return parsed;
+      })
+      .finally(() => {
+        trxGeminiInflightRef.current.googleAccounts = null;
+      });
+    return trxGeminiInflightRef.current.googleAccounts;
   }
 
   async function createGoogleAccount(payload: { email: string }): Promise<GoogleAccountModel> {
     const data = await apiFetch("/google-accounts", withJsonBody(payload));
+    invalidateTrxGeminiCache();
     return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
   }
 
   async function deleteGoogleAccount(accountId: number): Promise<string> {
     const data = await apiFetch(`/google-accounts/${accountId}`, { method: "DELETE" });
+    invalidateTrxGeminiCache();
     return String((data as { message: string }).message ?? "Google Account berhasil dihapus");
+  }
+
+  async function fetchGeminiPricePlans(): Promise<GeminiPricePlanModel[]> {
+    if (trxGeminiCacheRef.current.geminiPricePlans) {
+      return trxGeminiCacheRef.current.geminiPricePlans;
+    }
+    if (trxGeminiInflightRef.current.geminiPricePlans) {
+      return trxGeminiInflightRef.current.geminiPricePlans;
+    }
+
+    trxGeminiInflightRef.current.geminiPricePlans = apiFetch("/gemini-prices")
+      .then((data) => {
+        const parsed = ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGeminiPricePlan);
+        trxGeminiCacheRef.current.geminiPricePlans = parsed;
+        return parsed;
+      })
+      .finally(() => {
+        trxGeminiInflightRef.current.geminiPricePlans = null;
+      });
+    return trxGeminiInflightRef.current.geminiPricePlans;
+  }
+
+  async function createGeminiPricePlan(payload: Record<string, unknown>): Promise<GeminiPricePlanModel> {
+    const data = await apiFetch("/gemini-prices", withJsonBody(payload));
+    invalidateTrxGeminiCache();
+    return parseGeminiPricePlan((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function updateGeminiPricePlan(priceId: number, payload: Record<string, unknown>): Promise<GeminiPricePlanModel> {
+    const data = await apiFetch(`/gemini-prices/${priceId}`, withJsonBody(payload, "PUT"));
+    invalidateTrxGeminiCache();
+    return parseGeminiPricePlan((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function deleteGeminiPricePlan(priceId: number): Promise<string> {
+    const data = await apiFetch(`/gemini-prices/${priceId}`, { method: "DELETE" });
+    invalidateTrxGeminiCache();
+    return String((data as { message: string }).message ?? "Harga Gemini berhasil dihapus");
   }
 
   async function fetchPushTemplates(): Promise<PushContactTemplateModel[]> {
@@ -626,22 +741,40 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function fetchTransactions(): Promise<TransactionModel[]> {
-    const data = await apiFetch("/cs-payments/transactions");
-    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseTransaction);
+    if (trxGeminiCacheRef.current.transactions) {
+      return trxGeminiCacheRef.current.transactions;
+    }
+    if (trxGeminiInflightRef.current.transactions) {
+      return trxGeminiInflightRef.current.transactions;
+    }
+
+    trxGeminiInflightRef.current.transactions = apiFetch("/cs-payments/transactions")
+      .then((data) => {
+        const parsed = ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseTransaction);
+        trxGeminiCacheRef.current.transactions = parsed;
+        return parsed;
+      })
+      .finally(() => {
+        trxGeminiInflightRef.current.transactions = null;
+      });
+    return trxGeminiInflightRef.current.transactions;
   }
 
   async function createManualTransaction(payload: Record<string, unknown>): Promise<TransactionModel> {
     const data = await apiFetch("/cs-payments/transactions", withJsonBody(payload));
+    invalidateTrxGeminiCache();
     return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
   }
 
   async function updateTransaction(transactionId: number, payload: Record<string, unknown>): Promise<TransactionModel> {
     const data = await apiFetch(`/cs-payments/transactions/${transactionId}`, withJsonBody(payload, "PUT"));
+    invalidateTrxGeminiCache();
     return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
   }
 
   async function deleteTransaction(transactionId: number): Promise<string> {
     const data = await apiFetch(`/cs-payments/transactions/${transactionId}`, { method: "DELETE" });
+    invalidateTrxGeminiCache();
     return String((data as { message: string }).message ?? "Transaksi berhasil dihapus");
   }
 
@@ -703,6 +836,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       groups,
       broadcasts,
       customerServiceItems,
+      trxGeminiVersion,
       preloadForSession,
       refreshUser,
       refreshBots,
@@ -729,6 +863,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       fetchGoogleAccounts,
       createGoogleAccount,
       deleteGoogleAccount,
+      fetchGeminiPricePlans,
+      createGeminiPricePlan,
+      updateGeminiPricePlan,
+      deleteGeminiPricePlan,
       fetchPushTemplates,
       createPushTemplate,
       updatePushTemplate,
@@ -753,7 +891,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       toggleGroup,
       deleteGroup,
     }),
-    [user, bots, groups, broadcasts, customerServiceItems],
+    [user, bots, groups, broadcasts, customerServiceItems, trxGeminiVersion],
   );
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;

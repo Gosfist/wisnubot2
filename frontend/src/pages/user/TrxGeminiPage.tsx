@@ -2,13 +2,15 @@ import { useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { cn } from "../../lib/cn";
 import { GoogleAccountsPage } from "./GoogleAccountsPage";
+import { GeminiPricesPage } from "./GeminiPricesPage";
 import { TransactionsPage } from "./TransactionsPage";
 
-type TrxGeminiTab = "trx" | "account";
+type TrxGeminiTab = "trx" | "account" | "price";
 
 const tabs: { id: TrxGeminiTab; label: string }[] = [
   { id: "trx", label: "Transaksi Manual" },
   { id: "account", label: "Google Account" },
+  { id: "price", label: "Harga" },
 ];
 
 export function TrxGeminiPage() {
@@ -36,7 +38,13 @@ export function TrxGeminiPage() {
         ))}
       </div>
 
-      {activeTab === "trx" ? <TransactionsPage embedded /> : <GoogleAccountsPage embedded />}
+      {activeTab === "trx" ? (
+        <TransactionsPage embedded />
+      ) : activeTab === "account" ? (
+        <GoogleAccountsPage embedded />
+      ) : (
+        <GeminiPricesPage embedded />
+      )}
     </div>
   );
 }

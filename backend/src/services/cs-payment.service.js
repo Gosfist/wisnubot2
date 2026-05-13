@@ -1,7 +1,9 @@
 import { getPool } from "../config/database.js";
 import { appSettingsService } from "./app-settings.service.js";
 import { csStockService } from "./cs-stock.service.js";
+import { geminiPriceService } from "./gemini-price.service.js";
 import { messageService } from "./message.service.js";
+import { realtimeService } from "./realtime.service.js";
 import { logger } from "../utils/logger.js";
 import { existsSync, readFileSync } from "fs";
 
@@ -583,6 +585,7 @@ async function createOwnerManualTransaction({
       lifecycle.warrantyExpiresAt,
     ],
   );
+  realtimeService.emitTrxGeminiChanged(userId, { source: "owner_manual_transaction_create" });
 
   return {
     id: Number(insertResult.insertId ?? 0),
@@ -737,6 +740,7 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
       WHERE id = ?`,
     [Number(tx.id)],
   );
+  realtimeService.emitTrxGeminiChanged(tx.user_id, { source: "transaction_paid" });
 
   return {
     paid: true,
@@ -818,6 +822,7 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
       WHERE id = ?`,
     [Number(tx.id)],
   );
+  realtimeService.emitTrxGeminiChanged(userId, { source: "transaction_paid_check" });
 
   await deliverPaidTransaction(sock, { ...tx, status: "paid" });
   return { paid: true, reason: null, transaction: buildPaymentView(tx) };
@@ -1228,7 +1233,8 @@ async function handleWebhookAndDeliver(payload, sockResolver) {
 async function listPaidTransactionsForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id, tx.amount,
+    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id,
+            tx.gemini_price_plan_id, tx.amount,
             tx.status, tx.paid_at, tx.delivered_at, tx.created_at,
             tx.platform, tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
@@ -1249,6 +1255,7 @@ async function listPaidTransactionsForUser(user) {
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
     googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
+    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
     customerJid: String(row.customer_jid ?? ""),
     amount: Number(row.amount ?? 0),
     status: String(row.status ?? ""),
@@ -1285,15 +1292,24 @@ function parseManualStartDate(value) {
 
 async function createManualTransactionForUser(user, payload) {
   const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
+  const pricePlanId = Number(payload.pricePlanId ?? payload.geminiPricePlanId ?? payload.gemini_price_plan_id ?? 0);
   const idTrx = String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
   const buyerEmail = normalizeBuyerEmail(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
   const platform = normalizePlatform(payload.platform || "shopee");
-  const activeDurationDays = normalizeDurationDays(payload.activeDurationDays ?? payload.masaAktif ?? 30) ?? 30;
+  const pricePlan = pricePlanId ? await geminiPriceService.getActiveForUser(user.id, pricePlanId) : null;
+  if (pricePlanId && !pricePlan) {
+    throw new Error("Paket harga tidak ditemukan atau non aktif");
+  }
+  const activeDurationDays = pricePlan
+    ? normalizeDurationDays(pricePlan.durationDays)
+    : normalizeDurationDays(payload.activeDurationDays ?? payload.masaAktif ?? 30) ?? 30;
+  const amount = pricePlan ? Number(pricePlan.price) : Math.max(0, Math.floor(Number(payload.amount ?? 0)));
   const warrantyDurationDays = Math.max(1, Math.floor(activeDurationDays / 2));
   const startAt = parseManualStartDate(payload.startDate ?? payload.start ?? payload.activeStartAt);
   const lifecycle = buildLifecyclePatch(startAt, activeDurationDays, warrantyDurationDays);
 
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
+  if (!pricePlanId) throw new Error("Paket harga wajib dipilih");
   if (!idTrx) throw new Error("No pesanan wajib diisi");
   if (!buyerEmail) throw new Error("Email buyer wajib diisi");
   if (!["shopee", "whatsapp"].includes(platform)) {
@@ -1320,18 +1336,20 @@ async function createManualTransactionForUser(user, payload) {
   const now = new Date();
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
-       (user_id, cs_id, google_account_id, customer_jid, buyer_email,
+       (user_id, cs_id, google_account_id, gemini_price_plan_id, customer_jid, buyer_email,
         pakasir_order_id, pakasir_payment_url, qris_string, amount, status,
         paid_at, delivered_at, platform, is_manual, active_duration_days,
         warranty_duration_days, completed_at, active_start_at, active_expires_at,
         warranty_start_at, warranty_expires_at)
-     VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL, 0, 'paid', ?, NULL, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, NULL, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(user.id),
       googleAccountId,
+      pricePlanId,
       buyerEmail,
       buyerEmail,
       idTrx,
+      amount,
       now,
       platform,
       activeDurationDays,
@@ -1345,7 +1363,8 @@ async function createManualTransactionForUser(user, payload) {
   );
 
   const [rows] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id, tx.buyer_email,
+    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id,
+            tx.gemini_price_plan_id, tx.buyer_email,
             tx.amount, tx.status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
@@ -1364,6 +1383,7 @@ async function createManualTransactionForUser(user, payload) {
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
     googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
+    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
     customerJid: String(row.customer_jid ?? ""),
     buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     amount: Number(row.amount ?? 0),
@@ -1483,7 +1503,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
   }
 
   const [items] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.customer_jid,
+    `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
             tx.buyer_email, tx.amount, tx.status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days, tx.completed_at,
             tx.active_start_at, tx.active_expires_at, tx.warranty_start_at,
@@ -1502,6 +1522,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
     googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
+    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
     customerJid: String(row.customer_jid ?? ""),
     buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     amount: Number(row.amount ?? 0),

@@ -57,7 +57,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [appData.trxGeminiVersion]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

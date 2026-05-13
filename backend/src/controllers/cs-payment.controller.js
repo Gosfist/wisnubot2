@@ -1,5 +1,6 @@
 import { baileysManager } from "../services/baileys.service.js";
 import { csPaymentService } from "../services/cs-payment.service.js";
+import { realtimeService } from "../services/realtime.service.js";
 import { logger } from "../utils/logger.js";
 
 export function pakasirWebhookInfo(req, res) {
@@ -40,6 +41,9 @@ export async function pakasirWebhook(req, res) {
       req.body,
       (userId) => baileysManager.getSocket(userId),
     );
+    if (result.paid && result.transaction?.user_id) {
+      realtimeService.emitTrxGeminiChanged(result.transaction.user_id, { source: "pakasir_webhook_paid" });
+    }
 
     res.json({
       message: result.paid ? "Pembayaran diproses" : "Webhook diterima",
@@ -67,6 +71,7 @@ export async function listPaidTransactions(req, res) {
 export async function createManualTransaction(req, res) {
   try {
     const item = await csPaymentService.createManualTransactionForUser(req.user, req.body);
+    realtimeService.emitTrxGeminiChanged(req.user.id, { source: "manual_transaction_create" });
     res.status(201).json({ message: "Transaksi berhasil disimpan", item });
   } catch (err) {
     logger.error(err, "Create manual transaction error");
@@ -81,6 +86,7 @@ export async function updateTransaction(req, res) {
       req.params.transactionId,
       req.body,
     );
+    realtimeService.emitTrxGeminiChanged(req.user.id, { source: "manual_transaction_update" });
     res.json({ message: "Transaksi berhasil diperbarui", item });
   } catch (err) {
     logger.error(err, "Update transaction error");
@@ -95,6 +101,7 @@ export async function deleteTransaction(req, res) {
       req.params.transactionId,
     );
     if (!ok) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+    realtimeService.emitTrxGeminiChanged(req.user.id, { source: "manual_transaction_delete" });
     res.json({ message: "Transaksi berhasil dihapus" });
   } catch (err) {
     logger.error(err, "Delete transaction error");

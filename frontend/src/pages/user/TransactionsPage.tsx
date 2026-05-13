@@ -7,7 +7,7 @@ import { SurfaceCard } from "../../components/SurfaceCard";
 import { formatCurrency } from "../../lib/format";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
-import type { GoogleAccountModel, TransactionModel } from "../../types/models";
+import type { GeminiPricePlanModel, GoogleAccountModel, TransactionModel } from "../../types/models";
 
 function formatDateTime(value: string | null) {
   if (!value) return "-";
@@ -121,6 +121,13 @@ function normalizeDuration(value: unknown) {
   return [30, 60, 90].includes(numeric) ? numeric : 30;
 }
 
+function formatDurationLabel(days: number) {
+  if (days % 30 === 0) {
+    return `${days / 30} Bulan`;
+  }
+  return `${days} Hari`;
+}
+
 function EditableDateField({
   label,
   value,
@@ -187,6 +194,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<TransactionModel[]>([]);
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountModel[]>([]);
+  const [pricePlans, setPricePlans] = useState<GeminiPricePlanModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -195,6 +203,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const [isSaving, setIsSaving] = useState(false);
   const [manualForm, setManualForm] = useState({
     googleAccountId: "",
+    pricePlanId: "",
     platform: "shopee",
     noPesanan: "",
     buyerEmail: "",
@@ -217,13 +226,15 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     let mounted = true;
     (async () => {
       try {
-        const [transactions, accounts] = await Promise.all([
+        const [transactions, accounts, plans] = await Promise.all([
           appData.fetchTransactions(),
           appData.fetchGoogleAccounts(),
+          appData.fetchGeminiPricePlans(),
         ]);
         if (mounted) {
           setItems(transactions);
           setGoogleAccounts(accounts);
+          setPricePlans(plans);
         }
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Gagal memuat transaksi", "danger");
@@ -235,7 +246,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [appData.trxGeminiVersion]);
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -250,6 +261,10 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   }, [currentPage, filteredItems]);
   const pageStart = filteredItems.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const pageEnd = Math.min(currentPage * pageSize, filteredItems.length);
+  const activePricePlans = useMemo(
+    () => pricePlans.filter((plan) => plan.isActive),
+    [pricePlans],
+  );
 
   useEffect(() => {
     setCurrentPage(1);
@@ -278,25 +293,35 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       showToast("Akun Google wajib dipilih.", "danger");
       return;
     }
+    const selectedPlan = activePricePlans.find((plan) => String(plan.id) === manualForm.pricePlanId);
+    if (!selectedPlan) {
+      showToast("Paket harga wajib dipilih.", "danger");
+      return;
+    }
 
     setIsSaving(true);
     try {
       await appData.createManualTransaction({
         googleAccountId: Number(manualForm.googleAccountId),
+        pricePlanId: selectedPlan.id,
         platform: manualForm.platform,
         noPesanan: manualForm.noPesanan,
         buyerEmail: normalizeBuyerEmail(manualForm.buyerEmail),
-        activeDurationDays: Number(manualForm.activeDurationDays),
+        amount: selectedPlan.price,
+        activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
       });
-      const [nextItems, nextAccounts] = await Promise.all([
+      const [nextItems, nextAccounts, nextPlans] = await Promise.all([
         appData.fetchTransactions(),
         appData.fetchGoogleAccounts(),
+        appData.fetchGeminiPricePlans(),
       ]);
       setItems(nextItems);
       setGoogleAccounts(nextAccounts);
+      setPricePlans(nextPlans);
       setManualForm({
         googleAccountId: "",
+        pricePlanId: "",
         platform: "shopee",
         noPesanan: "",
         buyerEmail: "",
@@ -374,15 +399,21 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         const platformRaw = String(getCell(row, ["Platform"])).trim().toLowerCase();
         const platform = platformRaw === "whatsapp" ? "whatsapp" : "shopee";
         const activeDurationDays = normalizeDuration(getCell(row, ["Masa Aktif", "Durasi", "Active Days"]));
+        const selectedPlan = activePricePlans.find((plan) => plan.durationDays === activeDurationDays);
+        if (!selectedPlan) {
+          throw new Error(`Paket harga aktif tidak ditemukan untuk durasi ${formatDurationLabel(activeDurationDays)}`);
+        }
         const startDate = formatDateInput(getCell(row, ["Start", "Tanggal Start", "Start Date"]));
 
         try {
           await appData.createManualTransaction({
             googleAccountId: account.id,
+            pricePlanId: selectedPlan.id,
             platform,
             noPesanan,
             buyerEmail,
-            activeDurationDays,
+            amount: selectedPlan.price,
+            activeDurationDays: selectedPlan.durationDays,
             startDate,
           });
           existingOrders.add(orderKey);
@@ -396,12 +427,14 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         }
       }
 
-      const [nextItems, nextAccounts] = await Promise.all([
+      const [nextItems, nextAccounts, nextPlans] = await Promise.all([
         appData.fetchTransactions(),
         appData.fetchGoogleAccounts(),
+        appData.fetchGeminiPricePlans(),
       ]);
       setItems(nextItems);
       setGoogleAccounts(nextAccounts);
+      setPricePlans(nextPlans);
       showToast(
         `${imported} transaksi berhasil diimport${skipped ? `, ${skipped} duplikat dilewati` : ""}.`,
         "success",
@@ -509,31 +542,44 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             />
           </label>
           <>
-            <div className="overflow-x-auto rounded-[18px] border border-[rgba(56,189,248,0.16)]">
-              <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
+            <div className="overflow-hidden rounded-[18px] border border-[rgba(56,189,248,0.16)]">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[16%]" />
+                </colgroup>
                 <thead className="bg-[rgba(15,23,42,0.78)] text-[12px] font-extrabold text-white">
                   <tr>
-                    <th className="px-5 py-5">idTrx</th>
-                    <th className="px-5 py-5">Google</th>
-                    <th className="px-5 py-5">Platform</th>
-                    <th className="px-5 py-5">Email</th>
-                    <th className="px-5 py-5">Start</th>
-                    <th className="px-5 py-5">Exp</th>
-                    <th className="px-5 py-5">Masa Aktif</th>
-                    <th className="px-5 py-5">Status</th>
-                    <th className="px-5 py-5 text-right">Aksi</th>
+                    <th className="px-4 py-5">idTrx</th>
+                    <th className="px-4 py-5">Google</th>
+                    <th className="px-4 py-5">Platform</th>
+                    <th className="px-4 py-5">Email</th>
+                    <th className="px-4 py-5">Harga</th>
+                    <th className="px-4 py-5">Start</th>
+                    <th className="px-4 py-5">Exp</th>
+                    <th className="px-2 py-5 text-center">Masa Aktif</th>
+                    <th className="px-2 py-5 text-center">Status</th>
+                    <th className="px-4 py-5 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(56,189,248,0.1)] bg-[rgba(15,23,42,0.36)]">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-5 py-10 text-center text-sm text-text-secondary">
+                      <td colSpan={10} className="px-5 py-10 text-center text-sm text-text-secondary">
                         Belum ada transaksi sukses.
                       </td>
                     </tr>
                   ) : filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-5 py-10 text-center text-sm text-text-secondary">
+                      <td colSpan={10} className="px-5 py-10 text-center text-sm text-text-secondary">
                         idTrx tidak ditemukan.
                       </td>
                     </tr>
@@ -541,65 +587,83 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                     const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus);
                     return (
                       <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
-                        <td className="break-all px-5 py-3 font-semibold leading-snug text-white">
-                          {item.idTrx}
+                        <td className="px-4 py-3 font-semibold leading-snug text-white">
+                          <span className="block truncate" title={item.idTrx}>{item.idTrx}</span>
                         </td>
-                        <td className="break-words px-5 py-3 text-text-primary">
-                          {item.googleAccountEmail ?? "-"}
+                        <td className="px-4 py-3 text-text-primary">
+                          <span className="block truncate" title={item.googleAccountEmail ?? "-"}>
+                            {item.googleAccountEmail ?? "-"}
+                          </span>
                         </td>
-                        <td className="px-5 py-3 text-text-primary">
-                          {item.platform || "whatsapp"}
+                        <td className="px-4 py-3 text-text-primary">
+                          <span className="block truncate" title={item.platform || "whatsapp"}>
+                            {item.platform || "whatsapp"}
+                          </span>
                         </td>
-                        <td className="break-words px-5 py-3 text-text-primary">
-                          {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                        <td className="px-4 py-3 text-text-primary">
+                          <span
+                            className="block truncate"
+                            title={item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                          >
+                            {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                          </span>
                         </td>
-                        <td className="px-5 py-3 text-text-primary">
-                          {formatShortDate(item.activeStartAt)}
+                        <td className="px-4 py-3 text-text-primary">
+                          <span className="block truncate" title={`Rp ${formatCurrency(item.amount)}`}>
+                            Rp {formatCurrency(item.amount)}
+                          </span>
                         </td>
-                        <td className="px-5 py-3 text-text-primary">
-                          {formatShortDate(item.activeExpiresAt)}
+                        <td className="px-4 py-3 text-text-primary">
+                          <span className="block truncate" title={formatShortDate(item.activeStartAt)}>
+                            {formatShortDate(item.activeStartAt)}
+                          </span>
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3 text-text-primary">
+                          <span className="block truncate" title={formatShortDate(item.activeExpiresAt)}>
+                            {formatShortDate(item.activeExpiresAt)}
+                          </span>
+                        </td>
+                        <td className="px-2 py-3 text-center">
                           <span
                             className={
                               activeStatus === "Aktif"
-                                ? "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(34,197,94,0.16)] px-4 py-2 text-xs font-extrabold uppercase text-success"
-                                : "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-danger"
+                                ? "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(34,197,94,0.16)] px-3 py-2 text-xs font-extrabold uppercase text-success"
+                                : "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-3 py-2 text-xs font-extrabold uppercase text-danger"
                             }
                           >
                             {activeStatus}
                           </span>
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="px-2 py-3 text-center">
                           <span
                             className={
                               item.memberStatus === "kick"
-                                ? "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-danger"
-                                : "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(56,189,248,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-accent"
+                                ? "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-3 py-2 text-xs font-extrabold uppercase text-danger"
+                                : "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(56,189,248,0.14)] px-3 py-2 text-xs font-extrabold uppercase text-accent"
                             }
                           >
                             {item.memberStatus === "kick" ? "KICK" : "ANGGOTA"}
                           </span>
                         </td>
-                        <td className="px-5 py-3">
-                          <div className="flex justify-end gap-2">
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2 pr-1">
                         <button
-                          className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+                          className="inline-flex size-9 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
                           type="button"
                           onClick={() => openEditModal(item)}
                           aria-label="Edit transaksi"
                           title="Edit transaksi"
                         >
-                          <Edit2 size={16} />
+                          <Edit2 size={15} />
                         </button>
                         <button
-                          className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                          className="inline-flex size-9 items-center justify-center rounded-[12px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
                           type="button"
                           onClick={() => void handleDelete(item)}
                           aria-label="Hapus transaksi"
                           title="Hapus transaksi"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
                         </td>
@@ -707,15 +771,28 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </label>
 
             <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
+              <span className="text-sm font-semibold text-text-secondary">Harga & Masa Aktif</span>
               <select
-                value={manualForm.activeDurationDays}
-                onChange={(event) => setManualForm((current) => ({ ...current, activeDurationDays: event.target.value }))}
+                value={manualForm.pricePlanId}
+                onChange={(event) => {
+                  const selectedPlan = activePricePlans.find((plan) => String(plan.id) === event.target.value);
+                  setManualForm((current) => ({
+                    ...current,
+                    pricePlanId: event.target.value,
+                    activeDurationDays: selectedPlan ? String(selectedPlan.durationDays) : current.activeDurationDays,
+                  }));
+                }}
               >
-                <option value="30">1 Bulan</option>
-                <option value="60">2 Bulan</option>
-                <option value="90">3 Bulan</option>
+                <option value="">Pilih harga</option>
+                {activePricePlans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.label} - {formatDurationLabel(plan.durationDays)} - Rp {formatCurrency(plan.price)}
+                  </option>
+                ))}
               </select>
+              {activePricePlans.length === 0 ? (
+                <span className="block text-xs text-danger">Belum ada harga aktif. Tambahkan di tab Harga.</span>
+              ) : null}
             </label>
 
             <label className="block space-y-2">

@@ -3,6 +3,7 @@ import { appConfig } from "./config";
 import { getStoredUser, getToken } from "./storage";
 
 type BotStatusListener = (payload: Record<string, unknown>) => void;
+type TrxGeminiListener = (payload: Record<string, unknown>) => void;
 type QrListener = (qr: string) => void;
 
 class SocketService {
@@ -11,6 +12,7 @@ class SocketService {
   private joinedUserId: number | null = null;
   private qrListeners = new Set<QrListener>();
   private botStatusListeners = new Set<BotStatusListener>();
+  private trxGeminiListeners = new Set<TrxGeminiListener>();
 
   async connect() {
     if (this.connecting) {
@@ -77,6 +79,14 @@ class SocketService {
         }
       });
 
+      this.socket.on("trx_gemini_changed", (payload: unknown) => {
+        if (typeof payload === "object" && payload !== null) {
+          this.trxGeminiListeners.forEach((listener) =>
+            listener(payload as Record<string, unknown>),
+          );
+        }
+      });
+
       this.socket.on("disconnect", () => {
         this.joinedUserId = null;
       });
@@ -112,6 +122,11 @@ class SocketService {
   onBotStatus(listener: BotStatusListener) {
     this.botStatusListeners.add(listener);
     return () => this.botStatusListeners.delete(listener);
+  }
+
+  onTrxGeminiChanged(listener: TrxGeminiListener) {
+    this.trxGeminiListeners.add(listener);
+    return () => this.trxGeminiListeners.delete(listener);
   }
 
   disconnect() {
