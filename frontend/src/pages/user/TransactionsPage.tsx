@@ -1,4 +1,4 @@
-import { CheckCircle2, Download, Edit2, Plus, ReceiptText, Search, Trash2, Upload } from "lucide-react";
+import { Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
@@ -94,7 +94,7 @@ function normalizeDuration(value: unknown) {
   return 30;
 }
 
-export function TransactionsPage() {
+export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const appData = useAppData();
   const { showToast } = useToast();
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -147,10 +147,6 @@ export function TransactionsPage() {
     };
   }, []);
 
-  const totalAmount = useMemo(
-    () => items.reduce((sum, item) => sum + item.amount, 0),
-    [items],
-  );
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
@@ -348,68 +344,47 @@ export function TransactionsPage() {
     }
   }
 
+  const headerActions = (
+    <>
+      <input
+        ref={importInputRef}
+        className="hidden"
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={(event) => void handleImportExcel(event)}
+      />
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+        type="button"
+        disabled={isSaving}
+        onClick={() => importInputRef.current?.click()}
+      >
+        <Upload size={18} /> Import Excel
+      </button>
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+        type="button"
+        onClick={handleExportExcel}
+      >
+        <Download size={18} /> Export Excel
+      </button>
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
+        type="button"
+        onClick={() => setIsManualOpen(true)}
+      >
+        <Plus size={18} /> Tambah Transaksi
+      </button>
+    </>
+  );
+
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Transaksi"
-        actions={
-          <>
-            <input
-              ref={importInputRef}
-              className="hidden"
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(event) => void handleImportExcel(event)}
-            />
-            <button
-              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-              type="button"
-              disabled={isSaving}
-              onClick={() => importInputRef.current?.click()}
-            >
-              <Upload size={18} /> Import Excel
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-              type="button"
-              onClick={handleExportExcel}
-            >
-              <Download size={18} /> Export Excel
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
-              type="button"
-              onClick={() => setIsManualOpen(true)}
-            >
-              <Plus size={18} /> Tambah Transaksi
-            </button>
-          </>
-        }
-      />
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <SurfaceCard className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Sukses</p>
-            <strong className="mt-2 block text-2xl font-extrabold text-white">{items.length}</strong>
-          </div>
-          <div className="rounded-[16px] bg-[rgba(34,197,94,0.12)] p-3 text-success">
-            <CheckCircle2 size={22} />
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Total</p>
-            <strong className="mt-2 block text-2xl font-extrabold text-white">
-              Rp {formatCurrency(totalAmount)}
-            </strong>
-          </div>
-          <div className="rounded-[16px] bg-[rgba(56,189,248,0.12)] p-3 text-accent">
-            <ReceiptText size={22} />
-          </div>
-        </SurfaceCard>
-      </div>
+      {embedded ? (
+        <div className="flex flex-wrap justify-end gap-2">{headerActions}</div>
+      ) : (
+        <PageHeader title="Transaksi" actions={headerActions} />
+      )}
 
       <SurfaceCard>
         <label className="relative mb-4 flex min-h-[64px] w-full items-center rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-5">

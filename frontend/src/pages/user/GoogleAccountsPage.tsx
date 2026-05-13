@@ -12,7 +12,7 @@ function getInitials(email: string) {
   return name.slice(0, 2).toUpperCase();
 }
 
-export function GoogleAccountsPage() {
+export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean }) {
   const appData = useAppData();
   const { showToast } = useToast();
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -127,45 +127,51 @@ export function GoogleAccountsPage() {
     }
   }
 
+  const headerActions = (
+    <>
+      <input
+        ref={importInputRef}
+        className="hidden"
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={(event) => void handleImportExcel(event)}
+      />
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+        type="button"
+        disabled={saving}
+        onClick={() => importInputRef.current?.click()}
+      >
+        <Upload size={18} /> Import Excel
+      </button>
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+        type="button"
+        onClick={handleExportExcel}
+      >
+        <Download size={18} /> Export Excel
+      </button>
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
+        type="button"
+        onClick={() => setIsModalOpen(true)}
+      >
+        <Plus size={18} /> Add Google
+      </button>
+    </>
+  );
+
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Google Accounts"
-        subtitle="Daftar akun Google untuk penjualan manual."
-        actions={
-          <>
-            <input
-              ref={importInputRef}
-              className="hidden"
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(event) => void handleImportExcel(event)}
-            />
-            <button
-              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-              type="button"
-              disabled={saving}
-              onClick={() => importInputRef.current?.click()}
-            >
-              <Upload size={18} /> Import Excel
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-              type="button"
-              onClick={handleExportExcel}
-            >
-              <Download size={18} /> Export Excel
-            </button>
-            <button
-              className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
-              type="button"
-              onClick={() => setIsModalOpen(true)}
-            >
-              <Plus size={18} /> Add Google
-            </button>
-          </>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap justify-end gap-2">{headerActions}</div>
+      ) : (
+        <PageHeader
+          title="Google Accounts"
+          subtitle="Daftar akun Google untuk penjualan manual."
+          actions={headerActions}
+        />
+      )}
 
       {loading ? (
         <div className="flex min-h-40 items-center justify-center">

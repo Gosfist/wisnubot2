@@ -18,27 +18,23 @@ import { GoogleAccountsPage } from "../pages/user/GoogleAccountsPage";
 import { GroupsPage } from "../pages/user/GroupsPage";
 import { ManageBotsPage } from "../pages/user/ManageBotsPage";
 import { PushContactsPage } from "../pages/user/PushContactsPage";
+import { SalesDashboardPage } from "../pages/user/SalesDashboardPage";
 import { SettingsPage } from "../pages/user/SettingsPage";
 import { StockPage } from "../pages/user/StockPage";
-import { TransactionsPage } from "../pages/user/TransactionsPage";
+import { TrxGeminiPage } from "../pages/user/TrxGeminiPage";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", end: true },
+  { to: "/transactions", label: "TRX Gemini", end: true },
   {
-    label: "Fitur",
+    label: "Bot Wa",
     children: [
+      { to: "/bot-wa", label: "Dashboard", end: true },
       { to: "/broadcasts", label: "Broadcast" },
       { to: "/push-kontak", label: "Push Kontak", end: true },
       { to: "/customer-service", label: "Customer Service", end: true },
       { to: "/groups", label: "Kelola Group", end: true },
-    ],
-  },
-  {
-    label: "Penjualan",
-    children: [
-      { to: "/google-accounts", label: "Google Account", end: true },
       { to: "/stock", label: "Stock", end: true },
-      { to: "/transactions", label: "Transaksi", end: true },
     ],
   },
   { to: "/documentation", label: "Dokumentasi", end: true },
@@ -113,7 +109,8 @@ export function App() {
       </Route>
 
       <Route element={<ProtectedShell />}>
-        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/dashboard" element={<SalesDashboardPage />} />
+        <Route path="/bot-wa" element={<DashboardPage />} />
         <Route path="/groups" element={<GroupsPage />} />
         <Route path="/google-accounts" element={<GoogleAccountsPage />} />
         <Route path="/broadcasts" element={<BroadcastsPage />} />
@@ -123,7 +120,7 @@ export function App() {
         <Route path="/customer-service/add" element={<AddCustomerServicePage />} />
         <Route path="/customer-service/:id" element={<AddCustomerServicePage />} />
         <Route path="/stock" element={<StockPage />} />
-        <Route path="/transactions" element={<TransactionsPage />} />
+        <Route path="/transactions" element={<TrxGeminiPage />} />
         <Route path="/documentation" element={<DocumentationPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/bot/manage" element={<ManageBotsPage />} />

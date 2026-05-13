@@ -189,7 +189,7 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <PageHeader title="Dashboard" />
+      <PageHeader title="Bot Wa" />
 
       {error ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[20px] border border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.12)] px-4 py-3 text-sm text-danger">
