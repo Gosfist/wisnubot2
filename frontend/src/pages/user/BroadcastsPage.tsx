@@ -142,9 +142,7 @@ export function BroadcastsPage() {
       />
 
       {isLoading ? (
-        <SurfaceCard className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </SurfaceCard>
+        null
       ) : error ? (
         <div className="rounded-[20px] border border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.12)] px-4 py-3 text-sm text-danger">
           {error}

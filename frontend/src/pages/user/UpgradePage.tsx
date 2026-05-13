@@ -76,9 +76,7 @@ export function UpgradePage() {
       ) : null}
 
       {!limits && !error ? (
-        <SurfaceCard className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </SurfaceCard>
+        null
       ) : limits ? (
         <>
           <div className="grid gap-5 xl:grid-cols-2">

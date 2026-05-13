@@ -499,11 +499,7 @@ export function AddBroadcastPage() {
 
   function renderTargetGroupDropdown(mode: "selected" | "all_except") {
     if (isLoadingGroups) {
-      return (
-        <div className="flex min-h-24 items-center justify-center rounded-[16px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.52)]">
-          <div className="size-8 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </div>
-      );
+      return null;
     }
 
     if (appData.groups.length === 0) {

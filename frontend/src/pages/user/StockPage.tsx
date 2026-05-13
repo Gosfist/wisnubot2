@@ -121,9 +121,7 @@ export function StockPage() {
 
       <SurfaceCard>
         {loading ? (
-          <div className="flex min-h-40 items-center justify-center">
-            <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-          </div>
+          null
         ) : stockEnabledRows.length === 0 ? (
           <div className="py-8 text-center text-sm text-text-secondary">
             Belum ada perintah CS dengan mode <strong>Stock</strong>.

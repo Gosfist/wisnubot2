@@ -106,9 +106,7 @@ export function CustomerServicePage() {
 
       <SurfaceCard className="overflow-hidden">
         {isLoading ? (
-          <div className="flex min-h-40 items-center justify-center">
-            <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-          </div>
+          null
         ) : error ? (
           <div className="px-5 py-6 text-sm text-danger">{error}</div>
         ) : items.length === 0 ? (

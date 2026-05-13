@@ -382,9 +382,7 @@ export function AddCustomerServicePage() {
 
       <SurfaceCard>
         {isLoading ? (
-          <div className="flex min-h-40 items-center justify-center">
-            <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-          </div>
+          null
         ) : (
           <div className="space-y-4">
             {/* Nama Perintah */}

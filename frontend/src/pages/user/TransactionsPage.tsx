@@ -26,14 +26,6 @@ function formatCustomerJid(value: string) {
   return value.replace("@s.whatsapp.net", "");
 }
 
-function formatProductName(value: string | null | undefined) {
-  if (!value) return "-";
-  const normalized = value.replace(/^\/+/, "").trim();
-  if (!normalized) return "-";
-  if (normalized.includes("@")) return normalized;
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
-
 function formatShortDate(value: string | null) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -45,12 +37,19 @@ function formatShortDate(value: string | null) {
   }).format(parsed);
 }
 
-function toDateInputValue(value: string | null) {
+function getActiveStatus(value: string | null) {
+  if (!value) return "Aktif";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Aktif";
+  return parsed.getTime() >= Date.now() ? "Aktif" : "Expired";
+}
+
+function toDateOnlyInputValue(value: string | null) {
   if (!value) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
   const offsetMs = parsed.getTimezoneOffset() * 60 * 1000;
-  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 16);
+  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 function toTodayInputValue() {
@@ -95,6 +94,7 @@ function normalizeDuration(value: unknown) {
 }
 
 export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
+  const pageSize = 5;
   const appData = useAppData();
   const { showToast } = useToast();
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -102,6 +102,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isManualOpen, setIsManualOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionModel | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -114,10 +115,12 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     startDate: toTodayInputValue(),
   });
   const [editForm, setEditForm] = useState({
+    googleAccountId: "",
     idTrx: "",
-    noBuyer: "",
+    buyerEmail: "",
     platform: "",
-    amount: "",
+    activeStatus: "aktif",
+    memberStatus: "anggota",
     activeStartAt: "",
     activeExpiresAt: "",
     warrantyExpiresAt: "",
@@ -153,16 +156,32 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     return items.filter((item) => item.idTrx.toLowerCase().includes(q));
   }, [items, query]);
 
+  const totalPages = Math.max(Math.ceil(filteredItems.length / pageSize), 1);
+  const pageItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [currentPage, filteredItems]);
+  const pageStart = filteredItems.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const pageEnd = Math.min(currentPage * pageSize, filteredItems.length);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, items.length]);
+
   function openEditModal(item: TransactionModel) {
+    const matchedAccount = googleAccounts.find((account) => account.id === item.googleAccountId)
+      ?? googleAccounts.find((account) => account.email === item.googleAccountEmail);
     setEditingItem(item);
     setEditForm({
+      googleAccountId: matchedAccount ? String(matchedAccount.id) : "",
       idTrx: item.idTrx,
-      noBuyer: formatCustomerJid(item.customerJid),
+      buyerEmail: item.buyerEmail ?? formatCustomerJid(item.customerJid),
       platform: item.platform || "whatsapp",
-      amount: String(item.amount),
-      activeStartAt: toDateInputValue(item.activeStartAt),
-      activeExpiresAt: toDateInputValue(item.activeExpiresAt),
-      warrantyExpiresAt: toDateInputValue(item.warrantyExpiresAt),
+      activeStatus: getActiveStatus(item.activeExpiresAt).toLowerCase(),
+      memberStatus: item.memberStatus,
+      activeStartAt: toDateOnlyInputValue(item.activeStartAt),
+      activeExpiresAt: toDateOnlyInputValue(item.activeExpiresAt),
+      warrantyExpiresAt: toDateOnlyInputValue(item.warrantyExpiresAt),
     });
   }
 
@@ -209,14 +228,14 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   function handleExportExcel() {
     const rows = filteredItems.map((item) => ({
       idTrx: item.idTrx,
-      Produk: formatProductName(item.commandName),
+      Google: item.googleAccountEmail ?? "",
       Platform: item.platform || "whatsapp",
-      "Akun Google": item.googleAccountEmail ?? "",
       "Email Buyer": item.buyerEmail ?? formatCustomerJid(item.customerJid),
       Bayar: formatDateTime(item.paidAt ?? item.createdAt),
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
-      Status: "Sukses",
+      "Masa Aktif": getActiveStatus(item.activeExpiresAt),
+      Status: item.memberStatus === "kick" ? "Kick" : "Anggota",
       Total: item.amount,
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -313,10 +332,13 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     setIsSaving(true);
     try {
       await appData.updateTransaction(editingItem.id, {
+        googleAccountId: Number(editForm.googleAccountId),
         idTrx: editForm.idTrx,
-        noBuyer: editForm.noBuyer,
+        buyerEmail: editForm.buyerEmail,
+        noBuyer: editForm.buyerEmail,
         platform: editForm.platform,
-        amount: Number(editForm.amount),
+        memberStatus: editForm.memberStatus,
+        amount: editingItem.amount,
         activeStartAt: editForm.activeStartAt,
         activeExpiresAt: editForm.activeExpiresAt,
         warrantyExpiresAt: editForm.warrantyExpiresAt,
@@ -369,7 +391,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         <Download size={18} /> Export Excel
       </button>
       <button
-        className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
+        className="inline-flex items-center gap-2 rounded-[18px] bg-linear-to-r from-primary to-accent px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110"
         type="button"
         onClick={() => setIsManualOpen(true)}
       >
@@ -386,79 +408,94 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         <PageHeader title="Transaksi" actions={headerActions} />
       )}
 
-      <SurfaceCard>
-        <label className="relative mb-4 flex min-h-[64px] w-full items-center rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-5">
-          <Search size={20} className="pointer-events-none absolute left-6 text-text-secondary" />
-          <input
-            className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-11 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Cari idTrx"
-          />
-        </label>
-        {loading ? (
-          <div className="flex min-h-40 items-center justify-center">
-            <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-          </div>
-        ) : items.length === 0 ? (
-          <div className="py-8 text-center text-sm text-text-secondary">Belum ada transaksi sukses.</div>
-        ) : filteredItems.length === 0 ? (
-          <div className="py-8 text-center text-sm text-text-secondary">idTrx tidak ditemukan.</div>
-        ) : (
-          <div className="overflow-hidden rounded-[18px] border border-[rgba(56,189,248,0.16)]">
-            <table className="w-full table-fixed border-collapse text-left text-[13px]">
-              <colgroup>
-                <col className="w-[20%]" />
-                <col className="w-[16%]" />
-                <col className="w-[12%]" />
-                <col className="w-[10%]" />
-                <col className="w-[10%]" />
-                <col className="w-[12%]" />
-                <col className="w-[12%]" />
-                <col className="w-[6%]" />
-              </colgroup>
-              <thead className="bg-[rgba(15,23,42,0.76)] text-[11px] font-bold uppercase tracking-[0.12em] text-text-muted">
-                <tr>
-                  <th className="px-3 py-4">idTrx</th>
-                  <th className="px-3 py-4">Produk</th>
-                  <th className="px-3 py-4">Platform</th>
-                  <th className="px-3 py-4">Start</th>
-                  <th className="px-3 py-4">Exp</th>
-                  <th className="px-3 py-4">Status</th>
-                  <th className="px-3 py-4 text-right">Total</th>
-                  <th className="px-3 py-4 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.42)]">
-                {filteredItems.map((item) => (
-                  <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
-                    <td className="break-all px-3 py-4 font-bold leading-snug text-white">
-                      {item.idTrx}
-                    </td>
-                    <td className="break-words px-3 py-4 text-text-primary">
-                      {formatProductName(item.commandName)}
-                    </td>
-                    <td className="break-words px-3 py-4 text-text-secondary">
-                      {item.platform || "whatsapp"}{item.isManual ? " - manual" : ""}
-                    </td>
-                    <td className="break-words px-3 py-4 text-text-secondary">
-                      {formatShortDate(item.activeStartAt)}
-                    </td>
-                    <td className="break-words px-3 py-4 text-text-secondary">
-                      {formatShortDate(item.activeExpiresAt)}
-                    </td>
-                    <td className="px-3 py-4">
-                      <span className="inline-flex max-w-full rounded-full border border-[rgba(34,197,94,0.24)] bg-[rgba(34,197,94,0.12)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-success">
-                        Sukses
-                      </span>
-                    </td>
-                    <td className="break-words px-3 py-4 text-right font-extrabold text-white">
-                      Rp {formatCurrency(item.amount)}
-                    </td>
-                    <td className="px-3 py-4">
-                      <div className="flex justify-end gap-1.5">
+      {loading ? null : (
+        <SurfaceCard>
+          <label className="relative mb-4 flex min-h-[64px] w-full items-center rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-5">
+            <Search size={20} className="pointer-events-none absolute left-6 text-text-secondary" />
+            <input
+              className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-11 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Cari idTrx"
+            />
+          </label>
+          <>
+            <div className="overflow-x-auto rounded-[18px] border border-[rgba(56,189,248,0.16)]">
+              <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
+                <thead className="bg-[rgba(15,23,42,0.78)] text-[12px] font-extrabold text-white">
+                  <tr>
+                    <th className="px-5 py-5">idTrx</th>
+                    <th className="px-5 py-5">Google</th>
+                    <th className="px-5 py-5">Platform</th>
+                    <th className="px-5 py-5">Email</th>
+                    <th className="px-5 py-5">Start</th>
+                    <th className="px-5 py-5">Exp</th>
+                    <th className="px-5 py-5">Masa Aktif</th>
+                    <th className="px-5 py-5">Status</th>
+                    <th className="px-5 py-5 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[rgba(56,189,248,0.1)] bg-[rgba(15,23,42,0.36)]">
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-5 py-10 text-center text-sm text-text-secondary">
+                        Belum ada transaksi sukses.
+                      </td>
+                    </tr>
+                  ) : filteredItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-5 py-10 text-center text-sm text-text-secondary">
+                        idTrx tidak ditemukan.
+                      </td>
+                    </tr>
+                  ) : pageItems.map((item) => {
+                    const activeStatus = getActiveStatus(item.activeExpiresAt);
+                    return (
+                      <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
+                        <td className="break-all px-5 py-5 font-semibold leading-snug text-white">
+                          {item.idTrx}
+                        </td>
+                        <td className="break-words px-5 py-5 text-text-primary">
+                          {item.googleAccountEmail ?? "-"}
+                        </td>
+                        <td className="px-5 py-5 text-text-primary">
+                          {item.platform || "whatsapp"}
+                        </td>
+                        <td className="break-words px-5 py-5 text-text-primary">
+                          {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                        </td>
+                        <td className="px-5 py-5 text-text-primary">
+                          {formatShortDate(item.activeStartAt)}
+                        </td>
+                        <td className="px-5 py-5 text-text-primary">
+                          {formatShortDate(item.activeExpiresAt)}
+                        </td>
+                        <td className="px-5 py-5">
+                          <span
+                            className={
+                              activeStatus === "Aktif"
+                                ? "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(34,197,94,0.16)] px-4 py-2 text-xs font-extrabold uppercase text-success"
+                                : "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-danger"
+                            }
+                          >
+                            {activeStatus}
+                          </span>
+                        </td>
+                        <td className="px-5 py-5">
+                          <span
+                            className={
+                              item.memberStatus === "kick"
+                                ? "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-danger"
+                                : "inline-flex min-w-[88px] justify-center rounded-[12px] bg-[rgba(56,189,248,0.14)] px-4 py-2 text-xs font-extrabold uppercase text-accent"
+                            }
+                          >
+                            {item.memberStatus === "kick" ? "KICK" : "ANGGOTA"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-5">
+                          <div className="flex justify-end gap-2">
                         <button
-                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+                          className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
                           type="button"
                           onClick={() => openEditModal(item)}
                           aria-label="Edit transaksi"
@@ -467,7 +504,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                           <Edit2 size={16} />
                         </button>
                         <button
-                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                          className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
                           type="button"
                           onClick={() => void handleDelete(item)}
                           aria-label="Hapus transaksi"
@@ -476,14 +513,57 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                           <Trash2 size={16} />
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SurfaceCard>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {filteredItems.length > 0 ? (
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary">
+              <span>
+                Menampilkan {pageStart} - {pageEnd} dari {filteredItems.length} data
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-45"
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+                >
+                  Prev
+                </button>
+                <button
+                  className="rounded-[12px] bg-[rgba(37,99,235,0.24)] px-4 py-2 font-bold text-white"
+                  type="button"
+                >
+                  {currentPage}
+                </button>
+                {totalPages > 1 && currentPage !== totalPages ? (
+                  <button
+                    className="rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)]"
+                    type="button"
+                    onClick={() => setCurrentPage(totalPages)}
+                  >
+                    {totalPages}
+                  </button>
+                ) : null}
+                <button
+                  className="rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2 text-white transition hover:bg-[rgba(56,189,248,0.08)] disabled:text-text-muted disabled:opacity-45"
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((page) => Math.min(page + 1, totalPages))}
+                >
+                  Next
+                </button>
+              </div>
+              </div>
+            ) : null}
+          </>
+        </SurfaceCard>
+      )}
 
       <Modal
         open={isManualOpen}
@@ -557,12 +637,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </label>
           </div>
 
-          <div className="rounded-[14px] bg-[rgba(148,163,184,0.1)] px-4 py-3 text-sm leading-6 text-text-secondary">
-            Perhitungan termasuk hari start sebagai hari pertama.
-            <br />
-            Jika 30 hari, exp jatuh pada hari ke-30 dan garansi hari ke-15.
-          </div>
-
           <button
             className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
             type="submit"
@@ -577,68 +651,100 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         open={Boolean(editingItem)}
         title="Edit Transaksi"
         onClose={() => setEditingItem(null)}
+        wide
       >
         <form className="space-y-4" onSubmit={handleSaveEdit}>
-          <label className="block space-y-2">
-            <span className="text-xs font-bold tracking-[0.18em] text-text-muted">IDTRX</span>
-            <input
-              value={editForm.idTrx}
-              onChange={(event) => setEditForm((current) => ({ ...current, idTrx: event.target.value }))}
-              placeholder="CS103-..."
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-xs font-bold tracking-[0.18em] text-text-muted">NO BUYER</span>
-            <input
-              value={editForm.noBuyer}
-              onChange={(event) => setEditForm((current) => ({ ...current, noBuyer: event.target.value }))}
-              placeholder="628xxxxxxxxxx"
-            />
-          </label>
-
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.18em] text-text-muted">PLATFORM</span>
-              <input
+              <span className="text-sm font-semibold text-text-secondary">Akun Google</span>
+              <select
+                value={editForm.googleAccountId}
+                onChange={(event) => setEditForm((current) => ({ ...current, googleAccountId: event.target.value }))}
+              >
+                <option value="">Pilih akun Google</option>
+                {googleAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.email} - {Math.max(account.totalSlots - account.usedSlots, 0)}/{account.totalSlots}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Platform</span>
+              <select
                 value={editForm.platform}
                 onChange={(event) => setEditForm((current) => ({ ...current, platform: event.target.value }))}
-                placeholder="whatsapp"
+              >
+                <option value="shopee">shopee</option>
+                <option value="whatsapp">whatsapp</option>
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">No Pesanan</span>
+              <input
+                value={editForm.idTrx}
+                onChange={(event) => setEditForm((current) => ({ ...current, idTrx: event.target.value }))}
+                placeholder="2604xxxx"
               />
             </label>
+
             <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.18em] text-text-muted">TOTAL</span>
+              <span className="text-sm font-semibold text-text-secondary">Email</span>
               <input
-                type="number"
-                min="0"
-                value={editForm.amount}
-                onChange={(event) => setEditForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="0"
+                value={editForm.buyerEmail}
+                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: event.target.value }))}
+                placeholder="email buyer"
               />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
+              <select
+                value={editForm.activeStatus}
+                onChange={(event) => setEditForm((current) => ({ ...current, activeStatus: event.target.value }))}
+              >
+                <option value="aktif">AKTIF</option>
+                <option value="expired">EXPIRED</option>
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Status</span>
+              <select
+                value={editForm.memberStatus}
+                onChange={(event) => setEditForm((current) => ({ ...current, memberStatus: event.target.value }))}
+              >
+                <option value="anggota">ANGGOTA</option>
+                <option value="kick">KICK</option>
+              </select>
             </label>
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
             <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.18em] text-text-muted">START</span>
+              <span className="text-sm font-semibold text-text-secondary">Start</span>
               <input
-                type="datetime-local"
+                type="date"
                 value={editForm.activeStartAt}
                 onChange={(event) => setEditForm((current) => ({ ...current, activeStartAt: event.target.value }))}
               />
             </label>
+
             <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.18em] text-text-muted">EXP</span>
+              <span className="text-sm font-semibold text-text-secondary">Exp</span>
               <input
-                type="datetime-local"
+                type="date"
                 value={editForm.activeExpiresAt}
                 onChange={(event) => setEditForm((current) => ({ ...current, activeExpiresAt: event.target.value }))}
               />
             </label>
+
             <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.18em] text-text-muted">GARANSI EXP</span>
+              <span className="text-sm font-semibold text-text-secondary">Garansi</span>
               <input
-                type="datetime-local"
+                type="date"
                 value={editForm.warrantyExpiresAt}
                 onChange={(event) => setEditForm((current) => ({ ...current, warrantyExpiresAt: event.target.value }))}
               />
@@ -646,11 +752,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           </div>
 
           <button
-            className="inline-flex w-full items-center justify-center rounded-[18px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-[18px] bg-[rgba(15,23,42,0.96)] px-4 py-3.5 text-sm font-bold text-white disabled:opacity-60"
             type="submit"
             disabled={isSaving}
           >
-            {isSaving ? "MENYIMPAN..." : "SIMPAN PERUBAHAN"}
+            {isSaving ? "Menyimpan..." : "Update Transaksi"}
           </button>
         </form>
       </Modal>

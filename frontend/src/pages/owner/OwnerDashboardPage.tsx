@@ -128,44 +128,44 @@ export function OwnerDashboardPage() {
       />
 
       {isLoading ? (
-        <SurfaceCard className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </SurfaceCard>
+        null
       ) : error ? (
         <div className="rounded-[20px] border border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.12)] px-4 py-3 text-sm text-danger">
           {error}
         </div>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-1">
-        {renderOwnerBotCard(
-          "Bot Broadcast",
-          "Bot Broadcast",
-          broadcastBot,
-          () => setActiveConnectModal("broadcast"),
-          () => handleTestBot("broadcast"),
-          isTestingBroadcast,
-        )}
-      </div>
+      {!isLoading && !error ? (
+        <>
+          <div className="grid gap-5 xl:grid-cols-1">
+            {renderOwnerBotCard(
+              "Bot Broadcast",
+              "Bot Broadcast",
+              broadcastBot,
+              () => setActiveConnectModal("broadcast"),
+              () => handleTestBot("broadcast"),
+              isTestingBroadcast,
+            )}
+          </div>
 
-      <OwnerBotConnectModal
-        open={activeConnectModal === "broadcast"}
-        purpose="broadcast"
-        title="Hubungkan Bot Broadcast"
-        onClose={() => setActiveConnectModal(null)}
-        onConnected={loadData}
-      />
+          <OwnerBotConnectModal
+            open={activeConnectModal === "broadcast"}
+            purpose="broadcast"
+            title="Hubungkan Bot Broadcast"
+            onClose={() => setActiveConnectModal(null)}
+            onConnected={loadData}
+          />
 
-      <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-5">
-        <StatCard label="Total Users" value={String(stats?.totalUsers ?? 0)} />
-        <StatCard label="Bot Aktif" value={String(stats?.activeBots ?? 0)} />
-        <StatCard label="Trial User" value={String(stats?.totalTrial ?? 0)} />
-        <StatCard label="Premium User" value={String(stats?.totalPremium ?? 0)} />
-        <StatCard label="Expired User" value={String(stats?.totalExpired ?? 0)} />
-      </div>
+          <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-5">
+            <StatCard label="Total Users" value={String(stats?.totalUsers ?? 0)} />
+            <StatCard label="Bot Aktif" value={String(stats?.activeBots ?? 0)} />
+            <StatCard label="Trial User" value={String(stats?.totalTrial ?? 0)} />
+            <StatCard label="Premium User" value={String(stats?.totalPremium ?? 0)} />
+            <StatCard label="Expired User" value={String(stats?.totalExpired ?? 0)} />
+          </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <SurfaceCard>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <SurfaceCard>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h3 className="text-lg font-bold">User Terbaru</h3>
             <button
@@ -199,9 +199,9 @@ export function OwnerDashboardPage() {
               <p className="text-sm text-text-secondary">Belum ada user</p>
             )}
           </div>
-        </SurfaceCard>
+            </SurfaceCard>
 
-        <SurfaceCard>
+            <SurfaceCard>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h3 className="text-lg font-bold">Transaksi Terbaru</h3>
             <span className="text-sm text-text-secondary">Rp {formatCurrency(stats?.totalRevenue ?? 0)}</span>
@@ -229,8 +229,10 @@ export function OwnerDashboardPage() {
               <p className="text-sm text-text-secondary">Belum ada transaksi</p>
             )}
           </div>
-        </SurfaceCard>
-      </div>
+            </SurfaceCard>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

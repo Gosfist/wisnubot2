@@ -65,9 +65,7 @@ export function SalesDashboardPage() {
       <PageHeader title="Dashboard" subtitle="Informasi penjualan Gemini dan ketersediaan akun." />
 
       {loading ? (
-        <div className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </div>
+        null
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

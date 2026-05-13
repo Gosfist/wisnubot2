@@ -222,9 +222,7 @@ export function DashboardPage() {
         </div>
 
         {isLoading ? (
-          <div className="mt-3 flex min-h-16 items-center justify-center rounded-[16px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.5)]">
-            <div className="size-8 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-          </div>
+          null
         ) : !mainBot ? (
           <p className="mt-3 rounded-[16px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.5)] px-4 py-3 text-sm text-text-secondary">
             Belum ada bot utama. <button type="button" className="text-accent hover:underline" onClick={() => openConnectModal("main")}>Tambahkan bot 1</button> untuk mulai menggunakan fitur broadcast.

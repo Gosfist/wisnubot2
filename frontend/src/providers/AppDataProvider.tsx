@@ -56,6 +56,7 @@ interface AppDataContextValue {
   clearStocks: (csId: number) => Promise<string>;
   fetchGoogleAccounts: () => Promise<GoogleAccountModel[]>;
   createGoogleAccount: (payload: { email: string }) => Promise<GoogleAccountModel>;
+  deleteGoogleAccount: (accountId: number) => Promise<string>;
   fetchPushTemplates: () => Promise<PushContactTemplateModel[]>;
   createPushTemplate: (payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
   updatePushTemplate: (templateId: number, payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
@@ -325,6 +326,7 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
   return {
     id: Number(payload.id ?? 0),
     idTrx: String(payload.idTrx ?? payload.id_trx ?? ""),
+    googleAccountId: payload.googleAccountId ?? payload.google_account_id ? Number(payload.googleAccountId ?? payload.google_account_id) : null,
     customerJid: String(payload.customerJid ?? payload.customer_jid ?? ""),
     amount: Number(payload.amount ?? 0),
     status: String(payload.status ?? ""),
@@ -333,6 +335,7 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
     buyerEmail: payload.buyerEmail ?? payload.buyer_email ? String(payload.buyerEmail ?? payload.buyer_email) : null,
     stockContent: payload.stockContent ?? payload.stock_content ? String(payload.stockContent ?? payload.stock_content) : null,
     platform: String(payload.platform ?? "whatsapp"),
+    memberStatus: String(payload.memberStatus ?? payload.member_status ?? "anggota").toLowerCase() === "kick" ? "kick" : "anggota",
     isManual: Boolean(payload.isManual ?? payload.is_manual ?? false),
     activeDurationDays: payload.activeDurationDays ?? payload.active_duration_days ? Number(payload.activeDurationDays ?? payload.active_duration_days) : null,
     warrantyDurationDays: payload.warrantyDurationDays ?? payload.warranty_duration_days ? Number(payload.warrantyDurationDays ?? payload.warranty_duration_days) : null,
@@ -554,6 +557,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
   }
 
+  async function deleteGoogleAccount(accountId: number): Promise<string> {
+    const data = await apiFetch(`/google-accounts/${accountId}`, { method: "DELETE" });
+    return String((data as { message: string }).message ?? "Google Account berhasil dihapus");
+  }
+
   async function fetchPushTemplates(): Promise<PushContactTemplateModel[]> {
     const data = await apiFetch("/push-contact/templates");
     return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parsePushTemplate);
@@ -717,6 +725,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       clearStocks,
       fetchGoogleAccounts,
       createGoogleAccount,
+      deleteGoogleAccount,
       fetchPushTemplates,
       createPushTemplate,
       updatePushTemplate,

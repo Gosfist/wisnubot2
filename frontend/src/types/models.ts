@@ -142,6 +142,7 @@ export interface GoogleAccountModel {
 export interface TransactionModel {
   id: number;
   idTrx: string;
+  googleAccountId: number | null;
   customerJid: string;
   amount: number;
   status: string;
@@ -150,6 +151,7 @@ export interface TransactionModel {
   buyerEmail: string | null;
   stockContent: string | null;
   platform: string;
+  memberStatus: "anggota" | "kick";
   isManual: boolean;
   activeDurationDays: number | null;
   warrantyDurationDays: number | null;

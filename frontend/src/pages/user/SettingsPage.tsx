@@ -181,9 +181,7 @@ export function SettingsPage() {
         </div>
 
         {isLoadingPayment ? (
-          <div className="flex min-h-28 items-center justify-center">
-            <div className="size-9 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-          </div>
+          null
         ) : (
           <form className="space-y-4" onSubmit={handleSavePayment}>
             <label className="block space-y-2">

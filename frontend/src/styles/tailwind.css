@@ -30,7 +30,6 @@
   --shadow-glow: 0 20px 50px rgba(56, 189, 248, 0.24);
 
   --animate-pulse-line: pulse-line 1.3s linear infinite;
-  --animate-spin-soft: spin-soft 800ms linear infinite;
 }
 
 @keyframes pulse-line {
@@ -47,12 +46,6 @@
   100% {
     opacity: 0.35;
     transform: scaleX(0.92);
-  }
-}
-
-@keyframes spin-soft {
-  to {
-    transform: rotate(360deg);
   }
 }
 
@@ -112,8 +105,14 @@
   textarea,
   select {
     @apply w-full rounded-[14px] border border-glass-border bg-card px-4 py-3.5 text-text-primary outline-none;
-    caret-color: #0F182A;
+    caret-color: #ffffff;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"] {
+    caret-color: #ffffff;
   }
 
   input:not([type="checkbox"]):not([type="radio"]):focus,
@@ -172,5 +171,11 @@
 
   .clean-scrollbar::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(180deg, rgba(56, 189, 248, 0.92), rgba(37, 99, 235, 0.78));
+  }
+}
+
+@keyframes spin-soft {
+  to {
+    transform: rotate(360deg);
   }
 }

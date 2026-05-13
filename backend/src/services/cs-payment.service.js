@@ -1218,9 +1218,9 @@ async function handleWebhookAndDeliver(payload, sockResolver) {
 async function listPaidTransactionsForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.amount,
+    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id, tx.amount,
             tx.status, tx.paid_at, tx.delivered_at, tx.created_at,
-            tx.platform, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
+            tx.platform, tx.member_status, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at, tx.buyer_email,
             cs.nama_perintah, st.content AS stock_content,
@@ -1238,6 +1238,7 @@ async function listPaidTransactionsForUser(user) {
   return rows.map((row) => ({
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
+    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
     customerJid: String(row.customer_jid ?? ""),
     amount: Number(row.amount ?? 0),
     status: String(row.status ?? ""),
@@ -1246,6 +1247,7 @@ async function listPaidTransactionsForUser(user) {
     buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     stockContent: row.stock_content ? String(row.stock_content) : null,
     platform: String(row.platform ?? "whatsapp"),
+    memberStatus: String(row.member_status ?? "anggota"),
     isManual: Boolean(Number(row.is_manual ?? 0)),
     activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
     warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
@@ -1332,8 +1334,8 @@ async function createManualTransactionForUser(user, payload) {
   );
 
   const [rows] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.buyer_email,
-            tx.amount, tx.status, tx.platform, tx.is_manual,
+    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id, tx.buyer_email,
+            tx.amount, tx.status, tx.platform, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
@@ -1350,6 +1352,7 @@ async function createManualTransactionForUser(user, payload) {
   return {
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
+    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
     customerJid: String(row.customer_jid ?? ""),
     buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     amount: Number(row.amount ?? 0),
@@ -1358,6 +1361,7 @@ async function createManualTransactionForUser(user, payload) {
     googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
     stockContent: null,
     platform: String(row.platform ?? "shopee"),
+    memberStatus: String(row.member_status ?? "anggota"),
     isManual: Boolean(Number(row.is_manual ?? 0)),
     activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
     warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
@@ -1397,24 +1401,39 @@ function nullableDate(value) {
 
 async function updateTransactionForUser(user, transactionId, payload) {
   const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
-  const customerJid = normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
-  const platform = String(payload.platform ?? "whatsapp").trim() || "whatsapp";
-  const amount = Number(payload.amount ?? 0);
+  const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
+  const buyerEmail = String(payload.buyerEmail ?? payload.email ?? payload.buyer_email ?? "").trim();
+  const customerJid = buyerEmail || normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
+  const platform = normalizePlatform(payload.platform || "shopee");
+  const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
+  const amountRaw = payload.amount === undefined ? null : Number(payload.amount);
   const activeStartAt = nullableDate(payload.activeStartAt ?? payload.active_start_at);
   const activeExpiresAt = nullableDate(payload.activeExpiresAt ?? payload.active_expires_at);
   const warrantyExpiresAt = nullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at);
 
   if (!idTrx) throw new Error("idTrx wajib diisi");
-  if (!customerJid) throw new Error("No buyer wajib diisi");
-  if (!Number.isFinite(amount) || amount < 0) throw new Error("Nominal tidak valid");
+  if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
+  if (!buyerEmail) throw new Error("Email buyer wajib diisi");
+  if (amountRaw !== null && (!Number.isFinite(amountRaw) || amountRaw < 0)) throw new Error("Nominal tidak valid");
 
   const pool = getPool();
+  const [accounts] = await pool.execute(
+    "SELECT id FROM google_accounts WHERE id = ? AND user_id = ? LIMIT 1",
+    [googleAccountId, Number(user.id)],
+  );
+  if (accounts.length === 0) {
+    throw new Error("Akun Google tidak ditemukan");
+  }
+
   const [result] = await pool.execute(
     `UPDATE cs_transactions
         SET pakasir_order_id = ?,
+            google_account_id = ?,
             customer_jid = ?,
+            buyer_email = ?,
             platform = ?,
-            amount = ?,
+            member_status = ?,
+            amount = COALESCE(?, amount),
             active_start_at = ?,
             active_expires_at = ?,
             warranty_expires_at = ?
@@ -1422,9 +1441,12 @@ async function updateTransactionForUser(user, transactionId, payload) {
         AND user_id = ?`,
     [
       idTrx,
+      googleAccountId,
       customerJid,
+      buyerEmail,
       platform,
-      Math.floor(amount),
+      memberStatus,
+      amountRaw === null ? null : Math.floor(amountRaw),
       activeStartAt,
       activeExpiresAt,
       warrantyExpiresAt,
@@ -1438,15 +1460,46 @@ async function updateTransactionForUser(user, transactionId, payload) {
   }
 
   const [items] = await pool.execute(
-    `SELECT id, pakasir_order_id, customer_jid, amount, platform,
-            active_start_at, active_expires_at, warranty_expires_at
-       FROM cs_transactions
-      WHERE id = ? AND user_id = ?
+    `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.customer_jid,
+            tx.buyer_email, tx.amount, tx.status, tx.platform, tx.member_status, tx.is_manual,
+            tx.active_duration_days, tx.warranty_duration_days, tx.completed_at,
+            tx.active_start_at, tx.active_expires_at, tx.warranty_start_at,
+            tx.warranty_expires_at, tx.paid_at, tx.delivered_at, tx.created_at,
+            ga.email AS google_account_email
+       FROM cs_transactions tx
+       LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
+      WHERE tx.id = ? AND tx.user_id = ?
       LIMIT 1`,
     [Number(transactionId), Number(user.id)],
   );
 
-  return items[0] ?? null;
+  const row = items[0];
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    idTrx: String(row.pakasir_order_id ?? ""),
+    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
+    customerJid: String(row.customer_jid ?? ""),
+    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
+    amount: Number(row.amount ?? 0),
+    status: String(row.status ?? ""),
+    commandName: row.google_account_email ? String(row.google_account_email) : null,
+    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
+    stockContent: null,
+    platform: String(row.platform ?? "shopee"),
+    memberStatus: String(row.member_status ?? "anggota"),
+    isManual: Boolean(Number(row.is_manual ?? 0)),
+    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
+    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
+    completedAt: row.completed_at ? String(row.completed_at) : null,
+    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
+    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
+    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
+    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
+    paidAt: row.paid_at ? String(row.paid_at) : null,
+    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
+    createdAt: row.created_at ? String(row.created_at) : null,
+  };
 }
 
 async function deleteTransactionForUser(user, transactionId) {

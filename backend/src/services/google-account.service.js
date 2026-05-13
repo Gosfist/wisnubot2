@@ -56,7 +56,30 @@ async function createForUser(user, payload) {
   return mapAccount(rows[0]);
 }
 
+async function deleteForUser(user, accountId) {
+  const id = Number(accountId);
+  if (!id) {
+    throw new Error("Google Account tidak valid");
+  }
+
+  const pool = getPool();
+  const [usedRows] = await pool.execute(
+    "SELECT COUNT(*) AS cnt FROM cs_transactions WHERE google_account_id = ? AND user_id = ?",
+    [id, Number(user.id)],
+  );
+  if (Number(usedRows[0]?.cnt ?? 0) > 0) {
+    throw new Error("Google Account masih dipakai transaksi dan tidak bisa dihapus");
+  }
+
+  const [result] = await pool.execute(
+    "DELETE FROM google_accounts WHERE id = ? AND user_id = ?",
+    [id, Number(user.id)],
+  );
+  return Number(result.affectedRows ?? 0) > 0;
+}
+
 export const googleAccountService = {
   listForUser,
   createForUser,
+  deleteForUser,
 };

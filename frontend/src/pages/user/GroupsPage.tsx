@@ -213,9 +213,7 @@ export function GroupsPage() {
       />
 
       {isLoading ? (
-        <SurfaceCard className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </SurfaceCard>
+        null
       ) : error ? (
         <div className="rounded-[20px] border border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.12)] px-4 py-3 text-sm text-danger">
           {error}
@@ -304,7 +302,7 @@ export function GroupsPage() {
               onClick={() => void loadPushMembers()}
               disabled={isLoadingMembers}
             >
-              <RefreshCw size={15} className={isLoadingMembers ? "animate-spin" : ""} />
+              <RefreshCw size={15} className={isLoadingMembers ? "opacity-60" : ""} />
               Refresh
             </button>
           </div>
@@ -329,9 +327,7 @@ export function GroupsPage() {
 
           <div className="clean-scrollbar max-h-[48vh] space-y-2 overflow-y-auto pr-2">
             {isLoadingMembers ? (
-              <div className="flex min-h-32 items-center justify-center">
-                <div className="size-9 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-              </div>
+              null
             ) : members.length === 0 ? (
               <div className="rounded-[14px] border border-[rgba(56,189,248,0.12)] px-4 py-3 text-sm text-text-secondary">
                 Anggota group tidak tersedia. Pastikan bot masih berada di group dan online.

@@ -5,11 +5,19 @@ import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
-import type { GoogleAccountModel } from "../../types/models";
+import type { GoogleAccountModel, TransactionModel } from "../../types/models";
 
 function getInitials(email: string) {
   const name = email.split("@")[0] || email;
   return name.slice(0, 2).toUpperCase();
+}
+
+function isActiveMemberTransaction(item: TransactionModel) {
+  if (item.memberStatus === "kick") return false;
+  if (!item.activeExpiresAt) return true;
+  const parsed = new Date(item.activeExpiresAt);
+  if (Number.isNaN(parsed.getTime())) return true;
+  return parsed.getTime() >= Date.now();
 }
 
 export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean }) {
@@ -19,6 +27,9 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   const [items, setItems] = useState<GoogleAccountModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<GoogleAccountModel | null>(null);
+  const [selectedTransactions, setSelectedTransactions] = useState<TransactionModel[]>([]);
+  const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null);
   const [emailText, setEmailText] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -127,6 +138,41 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     }
   }
 
+  async function openAccountCheckModal(item: GoogleAccountModel) {
+    setCheckingAccountId(item.id);
+    try {
+      const transactions = await appData.fetchTransactions();
+      const activeMembers = transactions.filter((transaction) => {
+          const sameAccount =
+            transaction.googleAccountId === item.id ||
+            transaction.googleAccountEmail?.trim().toLowerCase() === item.email.trim().toLowerCase();
+          return sameAccount && isActiveMemberTransaction(transaction);
+        });
+      setSelectedTransactions(activeMembers);
+      setSelectedAccount(item);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal memuat anggota aktif.", "danger");
+    } finally {
+      setCheckingAccountId(null);
+    }
+  }
+
+  async function handleDeleteAccount(item: GoogleAccountModel) {
+    const confirmed = window.confirm(`Hapus Google Account ${item.email}?`);
+    if (!confirmed) return;
+
+    setSaving(true);
+    try {
+      const message = await appData.deleteGoogleAccount(item.id);
+      setItems((current) => current.filter((account) => account.id !== item.id));
+      showToast(message, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal menghapus Google Account.", "danger");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const headerActions = (
     <>
       <input
@@ -174,9 +220,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
       )}
 
       {loading ? (
-        <div className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </div>
+        null
       ) : items.length === 0 ? (
         <div className="rounded-[20px] border border-glass-border bg-[rgba(30,41,59,0.88)] py-10 text-center text-sm text-text-secondary">
           Belum ada Google Account.
@@ -205,13 +249,24 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
                   </div>
                 </div>
 
-                <button
-                  className="mt-5 w-full rounded-[14px] bg-[rgba(15,23,42,0.95)] px-4 py-3 text-sm font-bold text-white transition hover:bg-[rgba(15,23,42,0.78)]"
-                  type="button"
-                  onClick={() => showToast(`${remaining} slot tersedia.`, "success")}
-                >
-                  Cek
-                </button>
+                <div className="mt-5 grid gap-2">
+                  <button
+                    className="w-full rounded-[14px] bg-[rgba(15,23,42,0.95)] px-4 py-3 text-sm font-bold text-white transition hover:bg-[rgba(15,23,42,0.78)]"
+                    type="button"
+                    disabled={checkingAccountId === item.id}
+                    onClick={() => void openAccountCheckModal(item)}
+                  >
+                    {checkingAccountId === item.id ? "Mengecek..." : "Cek"}
+                  </button>
+                  <button
+                    className="w-full rounded-[14px] border border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.1)] px-4 py-3 text-sm font-bold text-danger transition hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-60"
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void handleDeleteAccount(item)}
+                  >
+                    Hapus
+                  </button>
+                </div>
               </article>
             );
           })}
@@ -245,6 +300,62 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
             {saving ? "Menyimpan..." : "Simpan Google Account"}
           </button>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(selectedAccount)}
+        title=""
+        onClose={() => {
+          setSelectedAccount(null);
+          setSelectedTransactions([]);
+        }}
+        wide
+      >
+        {selectedAccount ? (
+          <div className="space-y-6">
+            <div className="rounded-[20px] border border-[rgba(239,68,68,0.38)] bg-[rgba(239,68,68,0.08)] p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex min-w-0 items-center gap-4">
+                  <div className="grid size-14 shrink-0 place-items-center rounded-full bg-[rgba(15,23,42,0.96)] text-base font-extrabold text-white">
+                    {getInitials(selectedAccount.email)}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-extrabold text-white">{selectedAccount.email}</h3>
+                    <p className="mt-1 text-sm text-text-secondary">Google Account</p>
+                  </div>
+                </div>
+                <div className="shrink-0 text-3xl font-extrabold text-white">
+                  {selectedAccount.usedSlots}/{selectedAccount.totalSlots}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-extrabold text-white">List Anggota Aktif</h3>
+              {selectedTransactions.length === 0 ? (
+                <div className="mt-4 rounded-[16px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.5)] px-4 py-5 text-sm text-text-secondary">
+                  Belum ada anggota aktif untuk akun ini.
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {selectedTransactions.map((transaction, index) => (
+                    <div
+                      key={transaction.id}
+                      className="rounded-[16px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.5)] p-4"
+                    >
+                      <h4 className="break-words text-sm font-extrabold text-white">
+                        {index + 1}. {transaction.buyerEmail || transaction.customerJid}
+                      </h4>
+                      <p className="mt-4 text-sm text-text-secondary">
+                        No Pesanan: <span>{transaction.idTrx}</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </div>
   );

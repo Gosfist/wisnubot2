@@ -20,3 +20,14 @@ export async function createGoogleAccount(req, res) {
     res.status(400).json({ error: err instanceof Error ? err.message : "Gagal menyimpan Google Account" });
   }
 }
+
+export async function deleteGoogleAccount(req, res) {
+  try {
+    const ok = await googleAccountService.deleteForUser(req.user, req.params.accountId);
+    if (!ok) return res.status(404).json({ error: "Google Account tidak ditemukan" });
+    res.json({ message: "Google Account berhasil dihapus" });
+  } catch (err) {
+    logger.error(err, "Delete google account error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Gagal menghapus Google Account" });
+  }
+}

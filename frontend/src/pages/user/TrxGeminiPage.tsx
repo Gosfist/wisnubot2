@@ -25,7 +25,7 @@ export function TrxGeminiPage() {
             className={cn(
               "rounded-[14px] border px-5 py-3 text-sm font-bold transition",
               activeTab === tab.id
-                ? "border-[rgba(37,99,235,0.36)] bg-[rgba(37,99,235,0.22)] text-accent"
+                ? "border-[rgba(37,99,235,0.36)] bg-[rgba(37,99,235,0.22)] text-white"
                 : "border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.62)] text-text-secondary hover:bg-[rgba(56,189,248,0.08)] hover:text-white",
             )}
             type="button"

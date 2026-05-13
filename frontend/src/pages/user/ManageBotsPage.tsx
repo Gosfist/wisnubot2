@@ -100,9 +100,7 @@ export function ManageBotsPage() {
       </SurfaceCard>
 
       {isLoading ? (
-        <SurfaceCard className="flex min-h-40 items-center justify-center">
-          <div className="size-10 rounded-full border-4 border-[rgba(56,189,248,0.12)] border-t-accent animate-spin-soft" />
-        </SurfaceCard>
+        null
       ) : sortedBots.length === 0 ? (
         null
       ) : (
