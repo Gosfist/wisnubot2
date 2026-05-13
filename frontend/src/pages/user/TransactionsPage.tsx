@@ -187,6 +187,19 @@ function countBuyerEmails(value: unknown) {
   return normalized.split(",").filter(Boolean).length;
 }
 
+function parseImportAmount(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return null;
+
+  const parsed = Number(digits);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
+}
+
 function normalizeDuration(value: unknown) {
   const raw = String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   if (!raw) return 30;
@@ -495,7 +508,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   function handleExportExcel() {
     const rows = filteredItems.map((item) => ({
       idTrx: item.idTrx,
-      Google: item.googleAccountEmail ?? "",
+      "Akun Google": item.googleAccountEmail ?? "",
       Platform: item.platform || "whatsapp",
       "Email Buyer": item.buyerEmail ?? formatCustomerJid(item.customerJid),
       Bayar: formatDateTime(item.paidAt ?? item.createdAt),
@@ -583,6 +596,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         }
         const activeStatus = normalizeActiveStatusImport(getCell(row, ["Masa Aktif", "Status Masa Aktif", "Active Status"]));
         const memberStatus = normalizeMemberStatusImport(getCell(row, ["Status Akun", "Status Member", "Member Status"]));
+        const importedAmount = parseImportAmount(getCell(row, ["Total", "Harga", "Amount", "Nominal"]));
 
         try {
           await appData.createManualTransaction({
@@ -591,7 +605,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             platform,
             noPesanan,
             buyerEmail,
-            amount: selectedPlan.price * buyerCount,
+            amount: importedAmount ?? selectedPlan.price * buyerCount,
             activeDurationDays: selectedPlan.durationDays,
             startDate,
             activeStartAt: startDate,

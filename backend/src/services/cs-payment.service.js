@@ -1337,7 +1337,10 @@ async function createManualTransactionForUser(user, payload) {
   const activeDurationDays = pricePlan
     ? normalizeDurationDays(pricePlan.durationDays)
     : normalizeDurationDays(payload.activeDurationDays ?? payload.masaAktif ?? 30) ?? 30;
-  const amount = pricePlan ? Number(pricePlan.price) * buyerCount : Math.max(0, Math.floor(Number(payload.amount ?? 0)));
+  const payloadAmount = Number(payload.amount);
+  const amount = Number.isFinite(payloadAmount) && payloadAmount >= 0
+    ? Math.floor(payloadAmount)
+    : pricePlan ? Number(pricePlan.price) * buyerCount : 0;
   const warrantyDurationDays = Math.max(1, Math.floor(activeDurationDays / 2));
   const startAt = parseManualStartDate(payload.startDate ?? payload.start ?? payload.activeStartAt);
   const lifecycle = buildLifecyclePatch(startAt, activeDurationDays, warrantyDurationDays);
