@@ -151,6 +151,7 @@ export interface TransactionModel {
   buyerEmail: string | null;
   stockContent: string | null;
   platform: string;
+  activeStatus: "aktif" | "expired" | null;
   memberStatus: "anggota" | "kick";
   isManual: boolean;
   activeDurationDays: number | null;

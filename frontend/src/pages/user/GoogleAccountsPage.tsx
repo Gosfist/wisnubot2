@@ -12,12 +12,21 @@ function getInitials(email: string) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function isActiveMemberTransaction(item: TransactionModel) {
-  if (item.memberStatus === "kick") return false;
-  if (!item.activeExpiresAt) return true;
+function getTransactionActiveStatus(item: TransactionModel) {
+  if (item.activeStatus === "aktif") return "aktif";
+  if (item.activeStatus === "expired") return "expired";
+  if (!item.activeExpiresAt) return "aktif";
   const parsed = new Date(item.activeExpiresAt);
-  if (Number.isNaN(parsed.getTime())) return true;
-  return parsed.getTime() >= Date.now();
+  if (Number.isNaN(parsed.getTime())) return "aktif";
+  return parsed.getTime() >= Date.now() ? "aktif" : "expired";
+}
+
+function isUsedSlotTransaction(item: TransactionModel) {
+  return !(item.memberStatus === "kick" && getTransactionActiveStatus(item) === "expired");
+}
+
+function getRemainingSlots(item: GoogleAccountModel) {
+  return Math.max(item.totalSlots - item.usedSlots, 0);
 }
 
 export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean }) {
@@ -86,7 +95,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   function handleExportExcel() {
     const rows = items.map((item) => ({
       Email: item.email,
-      "Sisa Slot": Math.max(item.totalSlots - item.usedSlots, 0),
+      "Sisa Slot": getRemainingSlots(item),
       "Total Slot": item.totalSlots,
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -142,13 +151,13 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     setCheckingAccountId(item.id);
     try {
       const transactions = await appData.fetchTransactions();
-      const activeMembers = transactions.filter((transaction) => {
+      const usedSlotMembers = transactions.filter((transaction) => {
           const sameAccount =
             transaction.googleAccountId === item.id ||
             transaction.googleAccountEmail?.trim().toLowerCase() === item.email.trim().toLowerCase();
-          return sameAccount && isActiveMemberTransaction(transaction);
+          return sameAccount && isUsedSlotTransaction(transaction);
         });
-      setSelectedTransactions(activeMembers);
+      setSelectedTransactions(usedSlotMembers);
       setSelectedAccount(item);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal memuat anggota aktif.", "danger");
@@ -228,7 +237,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => {
-            const remaining = Math.max(item.totalSlots - item.usedSlots, 0);
+            const remaining = getRemainingSlots(item);
             return (
               <article
                 key={item.id}
@@ -325,13 +334,13 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
                   </div>
                 </div>
                 <div className="shrink-0 text-3xl font-extrabold text-white">
-                  {selectedAccount.usedSlots}/{selectedAccount.totalSlots}
+                  {getRemainingSlots(selectedAccount)}/{selectedAccount.totalSlots}
                 </div>
               </div>
             </div>
 
             <div>
-              <h3 className="text-lg font-extrabold text-white">List Anggota Aktif</h3>
+              <h3 className="text-lg font-extrabold text-white">List Anggota</h3>
               {selectedTransactions.length === 0 ? (
                 <div className="mt-4 rounded-[16px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.5)] px-4 py-5 text-sm text-text-secondary">
                   Belum ada anggota aktif untuk akun ini.

@@ -61,6 +61,16 @@ function normalizePlatform(value) {
   return platform || "whatsapp";
 }
 
+function normalizeActiveStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (!status) return null;
+  return status === "expired" ? "expired" : "aktif";
+}
+
+function normalizeBuyerEmail(value) {
+  return String(value ?? "").trim().replace(/@gmail\.com$/i, "");
+}
+
 function addInclusiveDays(startDate, durationDays) {
   const days = normalizeDurationDays(durationDays);
   if (!days) return null;
@@ -1220,7 +1230,7 @@ async function listPaidTransactionsForUser(user) {
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id, tx.amount,
             tx.status, tx.paid_at, tx.delivered_at, tx.created_at,
-            tx.platform, tx.member_status, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
+            tx.platform, tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at, tx.buyer_email,
             cs.nama_perintah, st.content AS stock_content,
@@ -1247,6 +1257,7 @@ async function listPaidTransactionsForUser(user) {
     buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     stockContent: row.stock_content ? String(row.stock_content) : null,
     platform: String(row.platform ?? "whatsapp"),
+    activeStatus: normalizeActiveStatus(row.active_status),
     memberStatus: String(row.member_status ?? "anggota"),
     isManual: Boolean(Number(row.is_manual ?? 0)),
     activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
@@ -1275,7 +1286,7 @@ function parseManualStartDate(value) {
 async function createManualTransactionForUser(user, payload) {
   const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
   const idTrx = String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
-  const buyerEmail = String(payload.buyerEmail ?? payload.email ?? payload.buyer_email ?? "").trim();
+  const buyerEmail = normalizeBuyerEmail(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
   const platform = normalizePlatform(payload.platform || "shopee");
   const activeDurationDays = normalizeDurationDays(payload.activeDurationDays ?? payload.masaAktif ?? 30) ?? 30;
   const warrantyDurationDays = Math.max(1, Math.floor(activeDurationDays / 2));
@@ -1335,7 +1346,7 @@ async function createManualTransactionForUser(user, payload) {
 
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id, tx.buyer_email,
-            tx.amount, tx.status, tx.platform, tx.member_status, tx.is_manual,
+            tx.amount, tx.status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
@@ -1361,6 +1372,7 @@ async function createManualTransactionForUser(user, payload) {
     googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
     stockContent: null,
     platform: String(row.platform ?? "shopee"),
+    activeStatus: normalizeActiveStatus(row.active_status),
     memberStatus: String(row.member_status ?? "anggota"),
     isManual: Boolean(Number(row.is_manual ?? 0)),
     activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
@@ -1395,6 +1407,14 @@ function normalizeCustomerJid(value) {
 function nullableDate(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00+07:00`).toISOString();
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}T00:00:00+07:00`).toISOString();
+  }
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString();
 }
@@ -1402,11 +1422,12 @@ function nullableDate(value) {
 async function updateTransactionForUser(user, transactionId, payload) {
   const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
   const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
-  const buyerEmail = String(payload.buyerEmail ?? payload.email ?? payload.buyer_email ?? "").trim();
+  const buyerEmail = normalizeBuyerEmail(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
   const customerJid = buyerEmail || normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
   const platform = normalizePlatform(payload.platform || "shopee");
   const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
   const amountRaw = payload.amount === undefined ? null : Number(payload.amount);
+  const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
   const activeStartAt = nullableDate(payload.activeStartAt ?? payload.active_start_at);
   const activeExpiresAt = nullableDate(payload.activeExpiresAt ?? payload.active_expires_at);
   const warrantyExpiresAt = nullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at);
@@ -1432,6 +1453,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
             customer_jid = ?,
             buyer_email = ?,
             platform = ?,
+            active_status = ?,
             member_status = ?,
             amount = COALESCE(?, amount),
             active_start_at = ?,
@@ -1445,6 +1467,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
       customerJid,
       buyerEmail,
       platform,
+      activeStatus,
       memberStatus,
       amountRaw === null ? null : Math.floor(amountRaw),
       activeStartAt,
@@ -1461,7 +1484,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
 
   const [items] = await pool.execute(
     `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.customer_jid,
-            tx.buyer_email, tx.amount, tx.status, tx.platform, tx.member_status, tx.is_manual,
+            tx.buyer_email, tx.amount, tx.status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days, tx.completed_at,
             tx.active_start_at, tx.active_expires_at, tx.warranty_start_at,
             tx.warranty_expires_at, tx.paid_at, tx.delivered_at, tx.created_at,
@@ -1487,6 +1510,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
     googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
     stockContent: null,
     platform: String(row.platform ?? "shopee"),
+    activeStatus: normalizeActiveStatus(row.active_status),
     memberStatus: String(row.member_status ?? "anggota"),
     isManual: Boolean(Number(row.is_manual ?? 0)),
     activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),

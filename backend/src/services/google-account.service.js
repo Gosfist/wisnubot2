@@ -24,6 +24,16 @@ async function listForUser(user) {
          ON tx.google_account_id = ga.id
         AND tx.user_id = ga.user_id
         AND tx.status = 'paid'
+        AND NOT (
+          tx.member_status = 'kick'
+          AND COALESCE(
+            tx.active_status,
+            CASE
+              WHEN tx.active_expires_at IS NOT NULL AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
+              ELSE 'aktif'
+            END
+          ) = 'expired'
+        )
       WHERE ga.user_id = ?
       GROUP BY ga.id, ga.email, ga.total_slots, ga.created_at
       ORDER BY ga.created_at DESC, ga.id DESC`,

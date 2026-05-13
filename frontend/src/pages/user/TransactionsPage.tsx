@@ -1,4 +1,4 @@
-import { Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
+import { CalendarDays, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
@@ -37,7 +37,9 @@ function formatShortDate(value: string | null) {
   }).format(parsed);
 }
 
-function getActiveStatus(value: string | null) {
+function getActiveStatus(value: string | null, manualStatus?: TransactionModel["activeStatus"]) {
+  if (manualStatus === "aktif") return "Aktif";
+  if (manualStatus === "expired") return "Expired";
   if (!value) return "Aktif";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Aktif";
@@ -56,6 +58,21 @@ function toTodayInputValue() {
   const now = new Date();
   const offsetMs = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function normalizeDateTextInput(value: string) {
+  const raw = value.trim();
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  return raw;
+}
+
+function toDatePickerValue(value: string) {
+  const normalized = normalizeDateTextInput(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
 }
 
 function formatDateInput(value: unknown) {
@@ -89,8 +106,78 @@ function getCell(row: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
+function normalizeBuyerEmail(value: unknown) {
+  return String(value ?? "").trim().replace(/@gmail\.com$/i, "");
+}
+
 function normalizeDuration(value: unknown) {
-  return 30;
+  const raw = String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!raw) return 30;
+  if (raw.includes("3 bulan") || raw === "3bulan") return 90;
+  if (raw.includes("2 bulan") || raw === "2bulan") return 60;
+  if (raw.includes("1 bulan") || raw === "1bulan") return 30;
+
+  const numeric = Math.floor(Number(raw.replace(/[^\d]/g, "")));
+  return [30, 60, 90].includes(numeric) ? numeric : 30;
+}
+
+function EditableDateField({
+  label,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const pickerRef = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <label className="block space-y-2">
+      <span className="text-sm font-semibold text-text-secondary">{label}</span>
+      <div className="relative">
+        <input
+          className="pr-12"
+          type="text"
+          inputMode="numeric"
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={(event) => onChange(normalizeDateTextInput(event.target.value))}
+          placeholder="YYYY-MM-DD"
+        />
+        <input
+          ref={pickerRef}
+          className="pointer-events-none absolute right-4 top-1/2 h-px w-px -translate-y-1/2 opacity-0"
+          type="date"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={toDatePickerValue(value)}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button
+          className="absolute right-3 top-1/2 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-[10px] text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] hover:text-accent"
+          type="button"
+          disabled={disabled}
+          aria-label={`Pilih tanggal ${label}`}
+          title={`Pilih tanggal ${label}`}
+          onClick={() => {
+            const picker = pickerRef.current;
+            if (picker && typeof picker.showPicker === "function") {
+              picker.showPicker();
+            } else {
+              picker?.click();
+            }
+          }}
+        >
+          <CalendarDays size={18} />
+        </button>
+      </div>
+    </label>
+  );
 }
 
 export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
@@ -177,7 +264,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       idTrx: item.idTrx,
       buyerEmail: item.buyerEmail ?? formatCustomerJid(item.customerJid),
       platform: item.platform || "whatsapp",
-      activeStatus: getActiveStatus(item.activeExpiresAt).toLowerCase(),
+      activeStatus: getActiveStatus(item.activeExpiresAt, item.activeStatus).toLowerCase(),
       memberStatus: item.memberStatus,
       activeStartAt: toDateOnlyInputValue(item.activeStartAt),
       activeExpiresAt: toDateOnlyInputValue(item.activeExpiresAt),
@@ -198,7 +285,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         googleAccountId: Number(manualForm.googleAccountId),
         platform: manualForm.platform,
         noPesanan: manualForm.noPesanan,
-        buyerEmail: manualForm.buyerEmail,
+        buyerEmail: normalizeBuyerEmail(manualForm.buyerEmail),
         activeDurationDays: Number(manualForm.activeDurationDays),
         startDate: manualForm.startDate,
       });
@@ -234,7 +321,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       Bayar: formatDateTime(item.paidAt ?? item.createdAt),
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
-      "Masa Aktif": getActiveStatus(item.activeExpiresAt),
+      "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus),
       Status: item.memberStatus === "kick" ? "Kick" : "Anggota",
       Total: item.amount,
     }));
@@ -283,7 +370,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         }
         seenOrders.add(orderKey);
 
-        const buyerEmail = String(getCell(row, ["Email", "Email Buyer", "Buyer Email"])).trim();
+        const buyerEmail = normalizeBuyerEmail(getCell(row, ["Email", "Email Buyer", "Buyer Email"]));
         const platformRaw = String(getCell(row, ["Platform"])).trim().toLowerCase();
         const platform = platformRaw === "whatsapp" ? "whatsapp" : "shopee";
         const activeDurationDays = normalizeDuration(getCell(row, ["Masa Aktif", "Durasi", "Active Days"]));
@@ -329,19 +416,21 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   async function handleSaveEdit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingItem) return;
+
     setIsSaving(true);
     try {
       await appData.updateTransaction(editingItem.id, {
         googleAccountId: Number(editForm.googleAccountId),
         idTrx: editForm.idTrx,
-        buyerEmail: editForm.buyerEmail,
-        noBuyer: editForm.buyerEmail,
+        buyerEmail: normalizeBuyerEmail(editForm.buyerEmail),
+        noBuyer: normalizeBuyerEmail(editForm.buyerEmail),
         platform: editForm.platform,
+        activeStatus: editForm.activeStatus,
         memberStatus: editForm.memberStatus,
         amount: editingItem.amount,
-        activeStartAt: editForm.activeStartAt,
-        activeExpiresAt: editForm.activeExpiresAt,
-        warrantyExpiresAt: editForm.warrantyExpiresAt,
+        activeStartAt: normalizeDateTextInput(editForm.activeStartAt),
+        activeExpiresAt: normalizeDateTextInput(editForm.activeExpiresAt),
+        warrantyExpiresAt: normalizeDateTextInput(editForm.warrantyExpiresAt),
       });
       const nextItems = await appData.fetchTransactions();
       setItems(nextItems);
@@ -449,28 +538,28 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                       </td>
                     </tr>
                   ) : pageItems.map((item) => {
-                    const activeStatus = getActiveStatus(item.activeExpiresAt);
+                    const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus);
                     return (
                       <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
-                        <td className="break-all px-5 py-5 font-semibold leading-snug text-white">
+                        <td className="break-all px-5 py-3 font-semibold leading-snug text-white">
                           {item.idTrx}
                         </td>
-                        <td className="break-words px-5 py-5 text-text-primary">
+                        <td className="break-words px-5 py-3 text-text-primary">
                           {item.googleAccountEmail ?? "-"}
                         </td>
-                        <td className="px-5 py-5 text-text-primary">
+                        <td className="px-5 py-3 text-text-primary">
                           {item.platform || "whatsapp"}
                         </td>
-                        <td className="break-words px-5 py-5 text-text-primary">
+                        <td className="break-words px-5 py-3 text-text-primary">
                           {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
                         </td>
-                        <td className="px-5 py-5 text-text-primary">
+                        <td className="px-5 py-3 text-text-primary">
                           {formatShortDate(item.activeStartAt)}
                         </td>
-                        <td className="px-5 py-5 text-text-primary">
+                        <td className="px-5 py-3 text-text-primary">
                           {formatShortDate(item.activeExpiresAt)}
                         </td>
-                        <td className="px-5 py-5">
+                        <td className="px-5 py-3">
                           <span
                             className={
                               activeStatus === "Aktif"
@@ -481,7 +570,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                             {activeStatus}
                           </span>
                         </td>
-                        <td className="px-5 py-5">
+                        <td className="px-5 py-3">
                           <span
                             className={
                               item.memberStatus === "kick"
@@ -492,7 +581,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                             {item.memberStatus === "kick" ? "KICK" : "ANGGOTA"}
                           </span>
                         </td>
-                        <td className="px-5 py-5">
+                        <td className="px-5 py-3">
                           <div className="flex justify-end gap-2">
                         <button
                           className="inline-flex size-10 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
@@ -600,7 +689,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </label>
 
             <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">No Pesanan</span>
+              <span className="text-sm font-semibold text-text-secondary">idTrx</span>
               <input
                 value={manualForm.noPesanan}
                 onChange={(event) => setManualForm((current) => ({ ...current, noPesanan: event.target.value }))}
@@ -612,7 +701,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <span className="text-sm font-semibold text-text-secondary">Email</span>
               <input
                 value={manualForm.buyerEmail}
-                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: event.target.value }))}
+                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: normalizeBuyerEmail(event.target.value) }))}
                 placeholder="email buyer"
               />
             </label>
@@ -624,6 +713,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 onChange={(event) => setManualForm((current) => ({ ...current, activeDurationDays: event.target.value }))}
               >
                 <option value="30">1 Bulan</option>
+                <option value="60">2 Bulan</option>
+                <option value="90">3 Bulan</option>
               </select>
             </label>
 
@@ -694,7 +785,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <span className="text-sm font-semibold text-text-secondary">Email</span>
               <input
                 value={editForm.buyerEmail}
-                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: event.target.value }))}
+                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: normalizeBuyerEmail(event.target.value) }))}
                 placeholder="email buyer"
               />
             </label>
@@ -723,32 +814,26 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Start</span>
-              <input
-                type="date"
-                value={editForm.activeStartAt}
-                onChange={(event) => setEditForm((current) => ({ ...current, activeStartAt: event.target.value }))}
-              />
-            </label>
+            <EditableDateField
+              label="Start"
+              value={editForm.activeStartAt}
+              disabled
+              onChange={(value) => setEditForm((current) => ({ ...current, activeStartAt: value }))}
+            />
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Exp</span>
-              <input
-                type="date"
-                value={editForm.activeExpiresAt}
-                onChange={(event) => setEditForm((current) => ({ ...current, activeExpiresAt: event.target.value }))}
-              />
-            </label>
+            <EditableDateField
+              label="Exp"
+              value={editForm.activeExpiresAt}
+              disabled
+              onChange={(value) => setEditForm((current) => ({ ...current, activeExpiresAt: value }))}
+            />
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Garansi</span>
-              <input
-                type="date"
-                value={editForm.warrantyExpiresAt}
-                onChange={(event) => setEditForm((current) => ({ ...current, warrantyExpiresAt: event.target.value }))}
-              />
-            </label>
+            <EditableDateField
+              label="Garansi"
+              value={editForm.warrantyExpiresAt}
+              disabled
+              onChange={(value) => setEditForm((current) => ({ ...current, warrantyExpiresAt: value }))}
+            />
           </div>
 
           <button

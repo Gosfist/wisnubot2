@@ -335,6 +335,9 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
     buyerEmail: payload.buyerEmail ?? payload.buyer_email ? String(payload.buyerEmail ?? payload.buyer_email) : null,
     stockContent: payload.stockContent ?? payload.stock_content ? String(payload.stockContent ?? payload.stock_content) : null,
     platform: String(payload.platform ?? "whatsapp"),
+    activeStatus: payload.activeStatus ?? payload.active_status
+      ? (String(payload.activeStatus ?? payload.active_status).toLowerCase() === "expired" ? "expired" : "aktif")
+      : null,
     memberStatus: String(payload.memberStatus ?? payload.member_status ?? "anggota").toLowerCase() === "kick" ? "kick" : "anggota",
     isManual: Boolean(payload.isManual ?? payload.is_manual ?? false),
     activeDurationDays: payload.activeDurationDays ?? payload.active_duration_days ? Number(payload.activeDurationDays ?? payload.active_duration_days) : null,
