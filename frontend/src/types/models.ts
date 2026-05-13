@@ -131,6 +131,14 @@ export interface CsStockSummaryModel {
   used: number;
 }
 
+export interface GoogleAccountModel {
+  id: number;
+  email: string;
+  totalSlots: number;
+  usedSlots: number;
+  createdAt: string | null;
+}
+
 export interface TransactionModel {
   id: number;
   idTrx: string;
@@ -138,6 +146,8 @@ export interface TransactionModel {
   amount: number;
   status: string;
   commandName: string | null;
+  googleAccountEmail: string | null;
+  buyerEmail: string | null;
   stockContent: string | null;
   platform: string;
   isManual: boolean;

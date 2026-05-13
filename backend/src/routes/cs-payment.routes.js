@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  createManualTransaction,
   deleteTransaction,
   listPaidTransactions,
   pakasirWebhook,
@@ -11,6 +12,7 @@ import { authenticate } from "../middleware/auth.js";
 const router = Router();
 
 router.get("/transactions", authenticate, listPaidTransactions);
+router.post("/transactions", authenticate, createManualTransaction);
 router.put("/transactions/:transactionId", authenticate, updateTransaction);
 router.delete("/transactions/:transactionId", authenticate, deleteTransaction);
 router.get("/pakasir/webhook", pakasirWebhookInfo);

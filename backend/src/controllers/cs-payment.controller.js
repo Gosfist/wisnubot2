@@ -64,6 +64,16 @@ export async function listPaidTransactions(req, res) {
   }
 }
 
+export async function createManualTransaction(req, res) {
+  try {
+    const item = await csPaymentService.createManualTransactionForUser(req.user, req.body);
+    res.status(201).json({ message: "Transaksi berhasil disimpan", item });
+  } catch (err) {
+    logger.error(err, "Create manual transaction error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Gagal menyimpan transaksi" });
+  }
+}
+
 export async function updateTransaction(req, res) {
   try {
     const item = await csPaymentService.updateTransactionForUser(

@@ -1,12 +1,13 @@
-import { CheckCircle2, Edit2, ReceiptText, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Download, Edit2, Plus, ReceiptText, Search, Trash2, Upload } from "lucide-react";
+import * as XLSX from "xlsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
 import { formatCurrency } from "../../lib/format";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
-import type { TransactionModel } from "../../types/models";
+import type { GoogleAccountModel, TransactionModel } from "../../types/models";
 
 function formatDateTime(value: string | null) {
   if (!value) return "-";
@@ -29,6 +30,7 @@ function formatProductName(value: string | null | undefined) {
   if (!value) return "-";
   const normalized = value.replace(/^\/+/, "").trim();
   if (!normalized) return "-";
+  if (normalized.includes("@")) return normalized;
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -51,14 +53,66 @@ function toDateInputValue(value: string | null) {
   return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
+function toTodayInputValue() {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function formatDateInput(value: unknown) {
+  if (value instanceof Date) {
+    const offsetMs = value.getTimezoneOffset() * 60 * 1000;
+    return new Date(value.getTime() - offsetMs).toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return `${String(parsed.y).padStart(4, "0")}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    }
+  }
+
+  const raw = String(value ?? "").trim();
+  if (!raw) return toTodayInputValue();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  const offsetMs = parsed.getTimezoneOffset() * 60 * 1000;
+  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function getCell(row: Record<string, unknown>, keys: string[]) {
+  const entries = Object.entries(row);
+  for (const key of keys) {
+    const found = entries.find(([entryKey]) => entryKey.trim().toLowerCase() === key.toLowerCase());
+    if (found) return found[1];
+  }
+  return "";
+}
+
+function normalizeDuration(value: unknown) {
+  return 30;
+}
+
 export function TransactionsPage() {
   const appData = useAppData();
   const { showToast } = useToast();
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<TransactionModel[]>([]);
+  const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [isManualOpen, setIsManualOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionModel | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    googleAccountId: "",
+    platform: "shopee",
+    noPesanan: "",
+    buyerEmail: "",
+    activeDurationDays: "30",
+    startDate: toTodayInputValue(),
+  });
   const [editForm, setEditForm] = useState({
     idTrx: "",
     noBuyer: "",
@@ -73,8 +127,14 @@ export function TransactionsPage() {
     let mounted = true;
     (async () => {
       try {
-        const data = await appData.fetchTransactions();
-        if (mounted) setItems(data);
+        const [transactions, accounts] = await Promise.all([
+          appData.fetchTransactions(),
+          appData.fetchGoogleAccounts(),
+        ]);
+        if (mounted) {
+          setItems(transactions);
+          setGoogleAccounts(accounts);
+        }
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Gagal memuat transaksi", "danger");
       } finally {
@@ -108,6 +168,147 @@ export function TransactionsPage() {
       activeExpiresAt: toDateInputValue(item.activeExpiresAt),
       warrantyExpiresAt: toDateInputValue(item.warrantyExpiresAt),
     });
+  }
+
+  async function handleManualSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!manualForm.googleAccountId) {
+      showToast("Akun Google wajib dipilih.", "danger");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await appData.createManualTransaction({
+        googleAccountId: Number(manualForm.googleAccountId),
+        platform: manualForm.platform,
+        noPesanan: manualForm.noPesanan,
+        buyerEmail: manualForm.buyerEmail,
+        activeDurationDays: Number(manualForm.activeDurationDays),
+        startDate: manualForm.startDate,
+      });
+      const [nextItems, nextAccounts] = await Promise.all([
+        appData.fetchTransactions(),
+        appData.fetchGoogleAccounts(),
+      ]);
+      setItems(nextItems);
+      setGoogleAccounts(nextAccounts);
+      setManualForm({
+        googleAccountId: "",
+        platform: "shopee",
+        noPesanan: "",
+        buyerEmail: "",
+        activeDurationDays: "30",
+        startDate: toTodayInputValue(),
+      });
+      setIsManualOpen(false);
+      showToast("Transaksi manual berhasil disimpan.", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal menyimpan transaksi manual.", "danger");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleExportExcel() {
+    const rows = filteredItems.map((item) => ({
+      idTrx: item.idTrx,
+      Produk: formatProductName(item.commandName),
+      Platform: item.platform || "whatsapp",
+      "Akun Google": item.googleAccountEmail ?? "",
+      "Email Buyer": item.buyerEmail ?? formatCustomerJid(item.customerJid),
+      Bayar: formatDateTime(item.paidAt ?? item.createdAt),
+      Start: formatShortDate(item.activeStartAt),
+      Exp: formatShortDate(item.activeExpiresAt),
+      Status: "Sukses",
+      Total: item.amount,
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Transaksi");
+    XLSX.writeFile(workbook, `transaksi-${toTodayInputValue()}.xlsx`);
+  }
+
+  async function handleImportExcel(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setIsSaving(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      if (rows.length === 0) {
+        showToast("File Excel kosong.", "danger");
+        return;
+      }
+
+      const accountByEmail = new Map(
+        googleAccounts.map((account) => [account.email.trim().toLowerCase(), account]),
+      );
+      const existingOrders = new Set(items.map((item) => item.idTrx.trim().toLowerCase()));
+      const seenOrders = new Set<string>();
+      let imported = 0;
+      let skipped = 0;
+      for (const row of rows) {
+        const accountEmail = String(getCell(row, ["Akun Google", "Google Account", "akun_google"])).trim();
+        const account = accountByEmail.get(accountEmail.toLowerCase());
+        if (!account) {
+          throw new Error(`Akun Google tidak ditemukan: ${accountEmail}`);
+        }
+
+        const noPesanan = String(getCell(row, ["No Pesanan", "idTrx", "IDTRX", "No Order"])).trim();
+        const orderKey = noPesanan.toLowerCase();
+        if (!noPesanan || seenOrders.has(orderKey) || existingOrders.has(orderKey)) {
+          skipped += 1;
+          continue;
+        }
+        seenOrders.add(orderKey);
+
+        const buyerEmail = String(getCell(row, ["Email", "Email Buyer", "Buyer Email"])).trim();
+        const platformRaw = String(getCell(row, ["Platform"])).trim().toLowerCase();
+        const platform = platformRaw === "whatsapp" ? "whatsapp" : "shopee";
+        const activeDurationDays = normalizeDuration(getCell(row, ["Masa Aktif", "Durasi", "Active Days"]));
+        const startDate = formatDateInput(getCell(row, ["Start", "Tanggal Start", "Start Date"]));
+
+        try {
+          await appData.createManualTransaction({
+            googleAccountId: account.id,
+            platform,
+            noPesanan,
+            buyerEmail,
+            activeDurationDays,
+            startDate,
+          });
+          existingOrders.add(orderKey);
+          imported += 1;
+        } catch (err) {
+          if (err instanceof Error && err.message.toLowerCase().includes("no pesanan sudah ada")) {
+            skipped += 1;
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      const [nextItems, nextAccounts] = await Promise.all([
+        appData.fetchTransactions(),
+        appData.fetchGoogleAccounts(),
+      ]);
+      setItems(nextItems);
+      setGoogleAccounts(nextAccounts);
+      showToast(
+        `${imported} transaksi berhasil diimport${skipped ? `, ${skipped} duplikat dilewati` : ""}.`,
+        "success",
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal import Excel.", "danger");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function handleSaveEdit(event: React.FormEvent<HTMLFormElement>) {
@@ -149,7 +350,42 @@ export function TransactionsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Transaksi" />
+      <PageHeader
+        title="Transaksi"
+        actions={
+          <>
+            <input
+              ref={importInputRef}
+              className="hidden"
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(event) => void handleImportExcel(event)}
+            />
+            <button
+              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+              type="button"
+              disabled={isSaving}
+              onClick={() => importInputRef.current?.click()}
+            >
+              <Upload size={18} /> Import Excel
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+              type="button"
+              onClick={handleExportExcel}
+            >
+              <Download size={18} /> Export Excel
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
+              type="button"
+              onClick={() => setIsManualOpen(true)}
+            >
+              <Plus size={18} /> Tambah Transaksi
+            </button>
+          </>
+        }
+      />
 
       <div className="grid gap-4 md:grid-cols-2">
         <SurfaceCard className="flex items-center justify-between gap-3">
@@ -197,15 +433,13 @@ export function TransactionsPage() {
           <div className="overflow-hidden rounded-[18px] border border-[rgba(56,189,248,0.16)]">
             <table className="w-full table-fixed border-collapse text-left text-[13px]">
               <colgroup>
-                <col className="w-[17%]" />
-                <col className="w-[8%]" />
-                <col className="w-[9%]" />
-                <col className="w-[13%]" />
-                <col className="w-[13%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
-                <col className="w-[9%]" />
-                <col className="w-[9%]" />
+                <col className="w-[20%]" />
+                <col className="w-[16%]" />
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
                 <col className="w-[6%]" />
               </colgroup>
               <thead className="bg-[rgba(15,23,42,0.76)] text-[11px] font-bold uppercase tracking-[0.12em] text-text-muted">
@@ -213,8 +447,6 @@ export function TransactionsPage() {
                   <th className="px-3 py-4">idTrx</th>
                   <th className="px-3 py-4">Produk</th>
                   <th className="px-3 py-4">Platform</th>
-                  <th className="px-3 py-4">Bayar</th>
-                  <th className="px-3 py-4">Kirim</th>
                   <th className="px-3 py-4">Start</th>
                   <th className="px-3 py-4">Exp</th>
                   <th className="px-3 py-4">Status</th>
@@ -233,12 +465,6 @@ export function TransactionsPage() {
                     </td>
                     <td className="break-words px-3 py-4 text-text-secondary">
                       {item.platform || "whatsapp"}{item.isManual ? " - manual" : ""}
-                    </td>
-                    <td className="break-words px-3 py-4 text-text-secondary">
-                      {formatDateTime(item.paidAt ?? item.createdAt)}
-                    </td>
-                    <td className="break-words px-3 py-4 text-text-secondary">
-                      {formatDateTime(item.deliveredAt)}
                     </td>
                     <td className="break-words px-3 py-4 text-text-secondary">
                       {formatShortDate(item.activeStartAt)}
@@ -283,6 +509,94 @@ export function TransactionsPage() {
           </div>
         )}
       </SurfaceCard>
+
+      <Modal
+        open={isManualOpen}
+        title="Tambah Transaksi"
+        onClose={() => setIsManualOpen(false)}
+        wide
+      >
+        <form className="space-y-5" onSubmit={handleManualSubmit}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Akun Google</span>
+              <select
+                value={manualForm.googleAccountId}
+                onChange={(event) => setManualForm((current) => ({ ...current, googleAccountId: event.target.value }))}
+              >
+                <option value="">Pilih akun Google</option>
+                {googleAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Platform</span>
+              <select
+                value={manualForm.platform}
+                onChange={(event) => setManualForm((current) => ({ ...current, platform: event.target.value }))}
+              >
+                <option value="shopee">Shopee</option>
+                <option value="whatsapp">Whatsapp</option>
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">No Pesanan</span>
+              <input
+                value={manualForm.noPesanan}
+                onChange={(event) => setManualForm((current) => ({ ...current, noPesanan: event.target.value }))}
+                placeholder="2604xxxx"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Email</span>
+              <input
+                value={manualForm.buyerEmail}
+                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: event.target.value }))}
+                placeholder="email buyer"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
+              <select
+                value={manualForm.activeDurationDays}
+                onChange={(event) => setManualForm((current) => ({ ...current, activeDurationDays: event.target.value }))}
+              >
+                <option value="30">1 Bulan</option>
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Start</span>
+              <input
+                type="date"
+                value={manualForm.startDate}
+                onChange={(event) => setManualForm((current) => ({ ...current, startDate: event.target.value }))}
+              />
+            </label>
+          </div>
+
+          <div className="rounded-[14px] bg-[rgba(148,163,184,0.1)] px-4 py-3 text-sm leading-6 text-text-secondary">
+            Perhitungan termasuk hari start sebagai hari pertama.
+            <br />
+            Jika 30 hari, exp jatuh pada hari ke-30 dan garansi hari ke-15.
+          </div>
+
+          <button
+            className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+            type="submit"
+            disabled={isSaving}
+          >
+            {isSaving ? "Menyimpan..." : "Simpan Transaksi"}
+          </button>
+        </form>
+      </Modal>
 
       <Modal
         open={Boolean(editingItem)}

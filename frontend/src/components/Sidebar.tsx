@@ -49,10 +49,6 @@ export function Sidebar({
   }
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
-
     setExpandedGroups((current) => {
       const nextState = { ...current };
 
@@ -61,12 +57,14 @@ export function Sidebar({
           continue;
         }
 
-        nextState[item.label] = isGroupActive(item);
+        if (isGroupActive(item)) {
+          nextState[item.label] = true;
+        }
       }
 
       return nextState;
     });
-  }, [open, location.pathname, items]);
+  }, [location.pathname, items]);
 
   function handleFooterAction() {
     onClose();
@@ -116,7 +114,7 @@ export function Sidebar({
             const key = `${item.label}-${itemIndex}`;
 
             if (item.children?.length) {
-              const isExpanded = expandedGroups[item.label] ?? true;
+              const isExpanded = expandedGroups[item.label] ?? isGroupActive(item);
 
               return (
                 <div key={key} className="space-y-1">

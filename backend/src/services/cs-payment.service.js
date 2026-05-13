@@ -1222,11 +1222,13 @@ async function listPaidTransactionsForUser(user) {
             tx.status, tx.paid_at, tx.delivered_at, tx.created_at,
             tx.platform, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
-            tx.warranty_start_at, tx.warranty_expires_at,
-            cs.nama_perintah, st.content AS stock_content
+            tx.warranty_start_at, tx.warranty_expires_at, tx.buyer_email,
+            cs.nama_perintah, st.content AS stock_content,
+            ga.email AS google_account_email
        FROM cs_transactions tx
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
        LEFT JOIN cs_stocks st ON st.id = tx.stock_id
+       LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
       WHERE tx.user_id = ?
         AND tx.status = 'paid'
       ORDER BY COALESCE(tx.paid_at, tx.created_at) DESC`,
@@ -1239,7 +1241,9 @@ async function listPaidTransactionsForUser(user) {
     customerJid: String(row.customer_jid ?? ""),
     amount: Number(row.amount ?? 0),
     status: String(row.status ?? ""),
-    commandName: row.nama_perintah ? String(row.nama_perintah) : null,
+    commandName: row.nama_perintah ? String(row.nama_perintah) : row.google_account_email ? String(row.google_account_email) : null,
+    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
+    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     stockContent: row.stock_content ? String(row.stock_content) : null,
     platform: String(row.platform ?? "whatsapp"),
     isManual: Boolean(Number(row.is_manual ?? 0)),
@@ -1254,6 +1258,118 @@ async function listPaidTransactionsForUser(user) {
     deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
     createdAt: row.created_at ? String(row.created_at) : null,
   }));
+}
+
+function parseManualStartDate(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return new Date();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}T00:00:00+07:00`);
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+async function createManualTransactionForUser(user, payload) {
+  const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
+  const idTrx = String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
+  const buyerEmail = String(payload.buyerEmail ?? payload.email ?? payload.buyer_email ?? "").trim();
+  const platform = normalizePlatform(payload.platform || "shopee");
+  const activeDurationDays = normalizeDurationDays(payload.activeDurationDays ?? payload.masaAktif ?? 30) ?? 30;
+  const warrantyDurationDays = Math.max(1, Math.floor(activeDurationDays / 2));
+  const startAt = parseManualStartDate(payload.startDate ?? payload.start ?? payload.activeStartAt);
+  const lifecycle = buildLifecyclePatch(startAt, activeDurationDays, warrantyDurationDays);
+
+  if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
+  if (!idTrx) throw new Error("No pesanan wajib diisi");
+  if (!buyerEmail) throw new Error("Email buyer wajib diisi");
+  if (!["shopee", "whatsapp"].includes(platform)) {
+    throw new Error("Platform tidak valid");
+  }
+
+  const pool = getPool();
+  const [existingTransactions] = await pool.execute(
+    "SELECT id FROM cs_transactions WHERE pakasir_order_id = ? LIMIT 1",
+    [idTrx],
+  );
+  if (existingTransactions.length > 0) {
+    throw new Error(`No pesanan sudah ada: ${idTrx}`);
+  }
+
+  const [accounts] = await pool.execute(
+    "SELECT id, email FROM google_accounts WHERE id = ? AND user_id = ? LIMIT 1",
+    [googleAccountId, Number(user.id)],
+  );
+  if (accounts.length === 0) {
+    throw new Error("Akun Google tidak ditemukan");
+  }
+
+  const now = new Date();
+  const [insertResult] = await pool.execute(
+    `INSERT INTO cs_transactions
+       (user_id, cs_id, google_account_id, customer_jid, buyer_email,
+        pakasir_order_id, pakasir_payment_url, qris_string, amount, status,
+        paid_at, delivered_at, platform, is_manual, active_duration_days,
+        warranty_duration_days, completed_at, active_start_at, active_expires_at,
+        warranty_start_at, warranty_expires_at)
+     VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL, 0, 'paid', ?, NULL, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      Number(user.id),
+      googleAccountId,
+      buyerEmail,
+      buyerEmail,
+      idTrx,
+      now,
+      platform,
+      activeDurationDays,
+      warrantyDurationDays,
+      lifecycle.completedAt,
+      lifecycle.activeStartAt,
+      lifecycle.activeExpiresAt,
+      lifecycle.warrantyStartAt,
+      lifecycle.warrantyExpiresAt,
+    ],
+  );
+
+  const [rows] = await pool.execute(
+    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.buyer_email,
+            tx.amount, tx.status, tx.platform, tx.is_manual,
+            tx.active_duration_days, tx.warranty_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
+            tx.paid_at, tx.delivered_at, tx.created_at,
+            ga.email AS google_account_email
+       FROM cs_transactions tx
+       LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
+      WHERE tx.id = ? AND tx.user_id = ?
+      LIMIT 1`,
+    [Number(insertResult.insertId ?? 0), Number(user.id)],
+  );
+
+  const row = rows[0];
+  return {
+    id: Number(row.id),
+    idTrx: String(row.pakasir_order_id ?? ""),
+    customerJid: String(row.customer_jid ?? ""),
+    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
+    amount: Number(row.amount ?? 0),
+    status: String(row.status ?? ""),
+    commandName: row.google_account_email ? String(row.google_account_email) : null,
+    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
+    stockContent: null,
+    platform: String(row.platform ?? "shopee"),
+    isManual: Boolean(Number(row.is_manual ?? 0)),
+    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
+    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
+    completedAt: row.completed_at ? String(row.completed_at) : null,
+    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
+    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
+    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
+    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
+    paidAt: row.paid_at ? String(row.paid_at) : null,
+    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
+    createdAt: row.created_at ? String(row.created_at) : null,
+  };
 }
 
 function normalizePhone(value) {
@@ -1354,6 +1470,7 @@ export const csPaymentService = {
   handleOwnerDone,
   handleWebhookAndDeliver,
   listPaidTransactionsForUser,
+  createManualTransactionForUser,
   updateTransactionForUser,
   deleteTransactionForUser,
 };

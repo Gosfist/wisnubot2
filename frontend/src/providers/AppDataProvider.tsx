@@ -12,6 +12,7 @@ import type {
   CsDeliveryMode,
   CsStockModel,
   CsStockSummaryModel,
+  GoogleAccountModel,
   CustomerServiceItemModel,
   GroupModel,
   GroupPushExclusionModel,
@@ -53,6 +54,8 @@ interface AppDataContextValue {
   addStocks: (csId: number, contents: string | string[]) => Promise<{ added: number; message: string }>;
   deleteStock: (stockId: number) => Promise<string>;
   clearStocks: (csId: number) => Promise<string>;
+  fetchGoogleAccounts: () => Promise<GoogleAccountModel[]>;
+  createGoogleAccount: (payload: { email: string }) => Promise<GoogleAccountModel>;
   fetchPushTemplates: () => Promise<PushContactTemplateModel[]>;
   createPushTemplate: (payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
   updatePushTemplate: (templateId: number, payload: { title: string; messageText: string }) => Promise<PushContactTemplateModel>;
@@ -64,6 +67,7 @@ interface AppDataContextValue {
   addGroupPushExclusion: (groupId: string, payload: { phoneNumber: string; label?: string }) => Promise<GroupPushExclusionModel>;
   deleteGroupPushExclusion: (groupId: string, exclusionId: number) => Promise<string>;
   fetchTransactions: () => Promise<TransactionModel[]>;
+  createManualTransaction: (payload: Record<string, unknown>) => Promise<TransactionModel>;
   updateTransaction: (transactionId: number, payload: Record<string, unknown>) => Promise<TransactionModel>;
   deleteTransaction: (transactionId: number) => Promise<string>;
   fetchSettings: () => Promise<AppSettingsModel>;
@@ -307,6 +311,16 @@ function parseStockSummary(payload: Record<string, unknown>): CsStockSummaryMode
   };
 }
 
+function parseGoogleAccount(payload: Record<string, unknown>): GoogleAccountModel {
+  return {
+    id: Number(payload.id ?? 0),
+    email: String(payload.email ?? ""),
+    totalSlots: Number(payload.totalSlots ?? payload.total_slots ?? 5),
+    usedSlots: Number(payload.usedSlots ?? payload.used_slots ?? 0),
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
+  };
+}
+
 function parseTransaction(payload: Record<string, unknown>): TransactionModel {
   return {
     id: Number(payload.id ?? 0),
@@ -315,6 +329,8 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
     amount: Number(payload.amount ?? 0),
     status: String(payload.status ?? ""),
     commandName: payload.commandName ?? payload.command_name ? String(payload.commandName ?? payload.command_name) : null,
+    googleAccountEmail: payload.googleAccountEmail ?? payload.google_account_email ? String(payload.googleAccountEmail ?? payload.google_account_email) : null,
+    buyerEmail: payload.buyerEmail ?? payload.buyer_email ? String(payload.buyerEmail ?? payload.buyer_email) : null,
     stockContent: payload.stockContent ?? payload.stock_content ? String(payload.stockContent ?? payload.stock_content) : null,
     platform: String(payload.platform ?? "whatsapp"),
     isManual: Boolean(payload.isManual ?? payload.is_manual ?? false),
@@ -528,6 +544,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return String((data as { message: string }).message ?? "Stock dikosongkan");
   }
 
+  async function fetchGoogleAccounts(): Promise<GoogleAccountModel[]> {
+    const data = await apiFetch("/google-accounts");
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGoogleAccount);
+  }
+
+  async function createGoogleAccount(payload: { email: string }): Promise<GoogleAccountModel> {
+    const data = await apiFetch("/google-accounts", withJsonBody(payload));
+    return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
   async function fetchPushTemplates(): Promise<PushContactTemplateModel[]> {
     const data = await apiFetch("/push-contact/templates");
     return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parsePushTemplate);
@@ -591,6 +617,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   async function fetchTransactions(): Promise<TransactionModel[]> {
     const data = await apiFetch("/cs-payments/transactions");
     return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseTransaction);
+  }
+
+  async function createManualTransaction(payload: Record<string, unknown>): Promise<TransactionModel> {
+    const data = await apiFetch("/cs-payments/transactions", withJsonBody(payload));
+    return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
   }
 
   async function updateTransaction(transactionId: number, payload: Record<string, unknown>): Promise<TransactionModel> {
@@ -684,6 +715,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       addStocks,
       deleteStock,
       clearStocks,
+      fetchGoogleAccounts,
+      createGoogleAccount,
       fetchPushTemplates,
       createPushTemplate,
       updatePushTemplate,
@@ -695,6 +728,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       addGroupPushExclusion,
       deleteGroupPushExclusion,
       fetchTransactions,
+      createManualTransaction,
       updateTransaction,
       deleteTransaction,
       fetchSettings,

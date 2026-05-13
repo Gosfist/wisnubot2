@@ -14,6 +14,7 @@ import { BroadcastsPage } from "../pages/user/BroadcastsPage";
 import { CustomerServicePage } from "../pages/user/CustomerServicePage";
 import { DashboardPage } from "../pages/user/DashboardPage";
 import { DocumentationPage } from "../pages/user/DocumentationPage";
+import { GoogleAccountsPage } from "../pages/user/GoogleAccountsPage";
 import { GroupsPage } from "../pages/user/GroupsPage";
 import { ManageBotsPage } from "../pages/user/ManageBotsPage";
 import { PushContactsPage } from "../pages/user/PushContactsPage";
@@ -35,6 +36,7 @@ const navItems = [
   {
     label: "Penjualan",
     children: [
+      { to: "/google-accounts", label: "Google Account", end: true },
       { to: "/stock", label: "Stock", end: true },
       { to: "/transactions", label: "Transaksi", end: true },
     ],
@@ -113,6 +115,7 @@ export function App() {
       <Route element={<ProtectedShell />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/groups" element={<GroupsPage />} />
+        <Route path="/google-accounts" element={<GoogleAccountsPage />} />
         <Route path="/broadcasts" element={<BroadcastsPage />} />
         <Route path="/broadcasts/add" element={<AddBroadcastPage />} />
         <Route path="/push-kontak" element={<PushContactsPage />} />
