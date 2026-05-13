@@ -136,6 +136,7 @@ export interface GoogleAccountModel {
   email: string;
   totalSlots: number;
   usedSlots: number;
+  isSuspended: boolean;
   createdAt: string | null;
 }
 
@@ -156,7 +157,9 @@ export interface TransactionModel {
   geminiPricePlanId: number | null;
   customerJid: string;
   amount: number;
+  buyerCount: number;
   status: string;
+  orderStatus: string | null;
   commandName: string | null;
   googleAccountEmail: string | null;
   buyerEmail: string | null;

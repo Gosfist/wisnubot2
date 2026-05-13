@@ -1,6 +1,7 @@
 import { CalendarDays, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ImportConfirmModal } from "../../components/ImportConfirmModal";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -44,6 +45,28 @@ function getActiveStatus(value: string | null, manualStatus?: TransactionModel["
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Aktif";
   return parsed.getTime() >= Date.now() ? "Aktif" : "Expired";
+}
+
+function getGoogleAccountTotalSlots(item: GoogleAccountModel) {
+  return /\|\s*full\s+private\b/i.test(item.email) ? 1 : item.totalSlots;
+}
+
+function getGoogleAccountUsedSlots(item: GoogleAccountModel) {
+  return Math.min(Math.max(item.usedSlots, 0), getGoogleAccountTotalSlots(item));
+}
+
+function isGoogleAccountAvailable(item: GoogleAccountModel) {
+  return !item.isSuspended && getGoogleAccountUsedSlots(item) < getGoogleAccountTotalSlots(item);
+}
+
+function sortAvailableGoogleAccounts(items: GoogleAccountModel[]) {
+  return items
+    .filter(isGoogleAccountAvailable)
+    .sort((a, b) => {
+      const usedDiff = getGoogleAccountUsedSlots(b) - getGoogleAccountUsedSlots(a);
+      if (usedDiff !== 0) return usedDiff;
+      return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
+    });
 }
 
 function toDateOnlyInputValue(value: string | null) {
@@ -91,6 +114,42 @@ function formatDateInput(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw) return toTodayInputValue();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const idDateMatch = raw.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (idDateMatch) {
+    const [, day, monthName, year] = idDateMatch;
+    const monthMap: Record<string, string> = {
+      jan: "01",
+      januari: "01",
+      feb: "02",
+      februari: "02",
+      mar: "03",
+      maret: "03",
+      apr: "04",
+      april: "04",
+      mei: "05",
+      may: "05",
+      jun: "06",
+      juni: "06",
+      jul: "07",
+      juli: "07",
+      agu: "08",
+      ags: "08",
+      agustus: "08",
+      aug: "08",
+      sep: "09",
+      september: "09",
+      okt: "10",
+      oktober: "10",
+      oct: "10",
+      nov: "11",
+      november: "11",
+      des: "12",
+      desember: "12",
+      dec: "12",
+    };
+    const month = monthMap[monthName.toLowerCase()];
+    if (month) return `${year}-${month}-${day.padStart(2, "0")}`;
+  }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
   const offsetMs = parsed.getTimezoneOffset() * 60 * 1000;
@@ -107,7 +166,20 @@ function getCell(row: Record<string, unknown>, keys: string[]) {
 }
 
 function normalizeBuyerEmail(value: unknown) {
-  return String(value ?? "").trim().replace(/@gmail\.com$/i, "");
+  return [
+    ...new Set(
+      String(value ?? "")
+        .split(/[,;\n]+/)
+        .map((item) => item.trim().replace(/@gmail\.com$/i, ""))
+        .filter(Boolean),
+    ),
+  ].join(",");
+}
+
+function countBuyerEmails(value: unknown) {
+  const normalized = normalizeBuyerEmail(value);
+  if (!normalized) return 0;
+  return normalized.split(",").filter(Boolean).length;
 }
 
 function normalizeDuration(value: unknown) {
@@ -119,6 +191,39 @@ function normalizeDuration(value: unknown) {
 
   const numeric = Math.floor(Number(raw.replace(/[^\d]/g, "")));
   return [30, 60, 90].includes(numeric) ? numeric : 30;
+}
+
+function inferDurationFromDates(startDate: string, expDate: string) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const exp = new Date(`${expDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(exp.getTime())) return 30;
+  const days = Math.round((exp.getTime() - start.getTime()) / 86400000) + 1;
+  if (days >= 80) return 90;
+  if (days >= 50) return 60;
+  return 30;
+}
+
+function normalizeActiveStatusImport(value: unknown) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (["exp", "expired", "non aktif", "nonaktif"].includes(raw)) return "expired";
+  return "aktif";
+}
+
+function normalizeMemberStatusImport(value: unknown) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return raw === "kick" ? "kick" : "anggota";
+}
+
+function normalizeOrderStatusImport(value: unknown) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return raw === "dikirim" ? "dikirim" : "selesai";
+}
+
+function normalizePlatformImport(value: unknown) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "whatsapp" || raw === "wa") return "whatsapp";
+  if (raw === "pribadi") return "pribadi";
+  return "shopee";
 }
 
 function formatDurationLabel(days: number) {
@@ -201,6 +306,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const [isManualOpen, setIsManualOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TransactionModel | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [manualForm, setManualForm] = useState({
     googleAccountId: "",
     pricePlanId: "",
@@ -265,10 +371,28 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     () => pricePlans.filter((plan) => plan.isActive),
     [pricePlans],
   );
+  const availableGoogleAccounts = useMemo(
+    () => sortAvailableGoogleAccounts([...googleAccounts]),
+    [googleAccounts],
+  );
+  const defaultPricePlan = useMemo(
+    () => activePricePlans.find((plan) => plan.durationDays === 30) ?? activePricePlans[0] ?? null,
+    [activePricePlans],
+  );
 
   useEffect(() => {
     setCurrentPage(1);
   }, [query, items.length]);
+
+  useEffect(() => {
+    if (!manualForm.pricePlanId && defaultPricePlan) {
+      setManualForm((current) => ({
+        ...current,
+        pricePlanId: String(defaultPricePlan.id),
+        activeDurationDays: String(defaultPricePlan.durationDays),
+      }));
+    }
+  }, [defaultPricePlan, manualForm.pricePlanId]);
 
   function openEditModal(item: TransactionModel) {
     const matchedAccount = googleAccounts.find((account) => account.id === item.googleAccountId)
@@ -307,7 +431,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         platform: manualForm.platform,
         noPesanan: manualForm.noPesanan,
         buyerEmail: normalizeBuyerEmail(manualForm.buyerEmail),
-        amount: selectedPlan.price,
+        amount: selectedPlan.price * Math.max(1, countBuyerEmails(manualForm.buyerEmail)),
         activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
       });
@@ -321,11 +445,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       setPricePlans(nextPlans);
       setManualForm({
         googleAccountId: "",
-        pricePlanId: "",
+        pricePlanId: defaultPricePlan ? String(defaultPricePlan.id) : "",
         platform: "shopee",
         noPesanan: "",
         buyerEmail: "",
-        activeDurationDays: "30",
+        activeDurationDays: defaultPricePlan ? String(defaultPricePlan.durationDays) : "30",
         startDate: toTodayInputValue(),
       });
       setIsManualOpen(false);
@@ -347,7 +471,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
       "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus),
-      Status: item.memberStatus === "kick" ? "Kick" : "Anggota",
+      Status: item.orderStatus === "dikirim" ? "DIKIRIM" : "SELESAI",
+      "Status Akun": item.memberStatus === "kick" ? "kick" : "Anggota",
       Total: item.amount,
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -356,11 +481,14 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     XLSX.writeFile(workbook, `transaksi-${toTodayInputValue()}.xlsx`);
   }
 
-  async function handleImportExcel(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleImportExcel(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    setPendingImportFile(file);
+  }
 
+  async function processImportExcel(file: File) {
     setIsSaving(true);
     try {
       const buffer = await file.arrayBuffer();
@@ -377,17 +505,31 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         googleAccounts.map((account) => [account.email.trim().toLowerCase(), account]),
       );
       const existingOrders = new Set(items.map((item) => item.idTrx.trim().toLowerCase()));
+      const groupedRows = new Map<string, Record<string, unknown>>();
+      for (const row of rows) {
+        const noPesanan = String(getCell(row, ["No Pesanan", "ID TRX", "ID Trx", "idTrx", "IDTRX", "No Order"])).trim();
+        if (!noPesanan) continue;
+        const orderKey = noPesanan.toLowerCase();
+        const buyerEmail = normalizeBuyerEmail(getCell(row, ["Email", "Email Buyer", "Buyer Email"]));
+        const existingRow = groupedRows.get(orderKey);
+        if (!existingRow) {
+          groupedRows.set(orderKey, { ...row, __buyerEmails: buyerEmail });
+          continue;
+        }
+        const mergedEmails = normalizeBuyerEmail(`${String(existingRow.__buyerEmails ?? "")},${buyerEmail}`);
+        existingRow.__buyerEmails = mergedEmails;
+      }
       const seenOrders = new Set<string>();
       let imported = 0;
       let skipped = 0;
-      for (const row of rows) {
+      for (const row of groupedRows.values()) {
         const accountEmail = String(getCell(row, ["Akun Google", "Google Account", "akun_google"])).trim();
         const account = accountByEmail.get(accountEmail.toLowerCase());
         if (!account) {
           throw new Error(`Akun Google tidak ditemukan: ${accountEmail}`);
         }
 
-        const noPesanan = String(getCell(row, ["No Pesanan", "idTrx", "IDTRX", "No Order"])).trim();
+        const noPesanan = String(getCell(row, ["No Pesanan", "ID TRX", "ID Trx", "idTrx", "IDTRX", "No Order"])).trim();
         const orderKey = noPesanan.toLowerCase();
         if (!noPesanan || seenOrders.has(orderKey) || existingOrders.has(orderKey)) {
           skipped += 1;
@@ -395,15 +537,23 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         }
         seenOrders.add(orderKey);
 
-        const buyerEmail = normalizeBuyerEmail(getCell(row, ["Email", "Email Buyer", "Buyer Email"]));
-        const platformRaw = String(getCell(row, ["Platform"])).trim().toLowerCase();
-        const platform = platformRaw === "whatsapp" ? "whatsapp" : "shopee";
-        const activeDurationDays = normalizeDuration(getCell(row, ["Masa Aktif", "Durasi", "Active Days"]));
+        const buyerEmail = normalizeBuyerEmail(row.__buyerEmails ?? getCell(row, ["Email", "Email Buyer", "Buyer Email"]));
+        const buyerCount = Math.max(1, countBuyerEmails(buyerEmail));
+        const platform = normalizePlatformImport(getCell(row, ["Platform"]));
+        const startDate = formatDateInput(getCell(row, ["Start", "Tanggal Start", "Start Date"]));
+        const activeExpiresAt = formatDateInput(getCell(row, ["Exp", "Expired", "Tanggal Exp", "Active Exp"]));
+        const warrantyExpiresAt = formatDateInput(getCell(row, ["Garansi", "Warranty", "Tanggal Garansi"]));
+        const durationCell = getCell(row, ["Durasi", "Active Days"]);
+        const activeDurationDays = String(durationCell ?? "").trim()
+          ? normalizeDuration(durationCell)
+          : inferDurationFromDates(startDate, activeExpiresAt);
         const selectedPlan = activePricePlans.find((plan) => plan.durationDays === activeDurationDays);
         if (!selectedPlan) {
           throw new Error(`Paket harga aktif tidak ditemukan untuk durasi ${formatDurationLabel(activeDurationDays)}`);
         }
-        const startDate = formatDateInput(getCell(row, ["Start", "Tanggal Start", "Start Date"]));
+        const activeStatus = normalizeActiveStatusImport(getCell(row, ["Masa Aktif", "Status Masa Aktif", "Active Status"]));
+        const memberStatus = normalizeMemberStatusImport(getCell(row, ["Status Akun", "Status Member", "Member Status"]));
+        const orderStatus = normalizeOrderStatusImport(getCell(row, ["Status", "Status Order", "Status TRX"]));
 
         try {
           await appData.createManualTransaction({
@@ -412,9 +562,15 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             platform,
             noPesanan,
             buyerEmail,
-            amount: selectedPlan.price,
+            amount: selectedPlan.price * buyerCount,
             activeDurationDays: selectedPlan.durationDays,
             startDate,
+            activeStartAt: startDate,
+            activeExpiresAt,
+            warrantyExpiresAt,
+            activeStatus,
+            memberStatus,
+            orderStatus,
           });
           existingOrders.add(orderKey);
           imported += 1;
@@ -439,6 +595,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         `${imported} transaksi berhasil diimport${skipped ? `, ${skipped} duplikat dilewati` : ""}.`,
         "success",
       );
+      setPendingImportFile(null);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal import Excel.", "danger");
     } finally {
@@ -515,7 +672,16 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       <button
         className="inline-flex items-center gap-2 rounded-[18px] bg-linear-to-r from-primary to-accent px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110"
         type="button"
-        onClick={() => setIsManualOpen(true)}
+        onClick={() => {
+          if (defaultPricePlan) {
+            setManualForm((current) => ({
+              ...current,
+              pricePlanId: String(defaultPricePlan.id),
+              activeDurationDays: String(defaultPricePlan.durationDays),
+            }));
+          }
+          setIsManualOpen(true);
+        }}
       >
         <Plus size={18} /> Tambah Transaksi
       </button>
@@ -733,9 +899,9 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 onChange={(event) => setManualForm((current) => ({ ...current, googleAccountId: event.target.value }))}
               >
                 <option value="">Pilih akun Google</option>
-                {googleAccounts.map((account) => (
+                {availableGoogleAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
-                    {account.email}
+                    {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
                   </option>
                 ))}
               </select>
@@ -749,6 +915,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               >
                 <option value="shopee">Shopee</option>
                 <option value="whatsapp">Whatsapp</option>
+                <option value="pribadi">Pribadi</option>
               </select>
             </label>
 
@@ -765,8 +932,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <span className="text-sm font-semibold text-text-secondary">Email</span>
               <input
                 value={manualForm.buyerEmail}
-                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: normalizeBuyerEmail(event.target.value) }))}
-                placeholder="email buyer"
+                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: event.target.value.replace(/@gmail\.com/gi, "") }))}
+                placeholder="email1,email2,email3"
               />
             </label>
 
@@ -783,7 +950,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   }));
                 }}
               >
-                <option value="">Pilih harga</option>
+                <option value="" disabled>Pilih harga</option>
                 {activePricePlans.map((plan) => (
                   <option key={plan.id} value={plan.id}>
                     {plan.label} - {formatDurationLabel(plan.durationDays)} - Rp {formatCurrency(plan.price)}
@@ -832,7 +999,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <option value="">Pilih akun Google</option>
                 {googleAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
-                    {account.email} - {Math.max(account.totalSlots - account.usedSlots, 0)}/{account.totalSlots}
+                    {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
                   </option>
                 ))}
               </select>
@@ -846,6 +1013,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               >
                 <option value="shopee">shopee</option>
                 <option value="whatsapp">whatsapp</option>
+                <option value="pribadi">pribadi</option>
               </select>
             </label>
 
@@ -862,7 +1030,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <span className="text-sm font-semibold text-text-secondary">Email</span>
               <input
                 value={editForm.buyerEmail}
-                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: normalizeBuyerEmail(event.target.value) }))}
+                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: event.target.value.replace(/@gmail\.com/gi, "") }))}
                 placeholder="email buyer"
               />
             </label>
@@ -922,6 +1090,16 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           </button>
         </form>
       </Modal>
+
+      <ImportConfirmModal
+        file={pendingImportFile}
+        open={Boolean(pendingImportFile)}
+        loading={isSaving}
+        onCancel={() => setPendingImportFile(null)}
+        onConfirm={() => {
+          if (pendingImportFile) void processImportExcel(pendingImportFile);
+        }}
+      />
     </div>
   );
 }

@@ -14,6 +14,10 @@ function formatProductName(value: string | null) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function getGoogleAccountTotalSlots(item: GoogleAccountModel) {
+  return /\|\s*full\s+private\b/i.test(item.email) ? 1 : item.totalSlots;
+}
+
 export function SalesDashboardPage() {
   const appData = useAppData();
   const { showToast } = useToast();
@@ -54,9 +58,36 @@ export function SalesDashboardPage() {
   );
 
   const availableGoogleSlots = useMemo(
-    () => googleAccounts.reduce((sum, item) => sum + Math.max(item.totalSlots - item.usedSlots, 0), 0),
+    () =>
+      googleAccounts.reduce((sum, item) => {
+        if (item.isSuspended) return sum;
+        const totalSlots = getGoogleAccountTotalSlots(item);
+        const usedSlots = Math.min(Math.max(item.usedSlots, 0), totalSlots);
+        return sum + Math.max(totalSlots - usedSlots, 0);
+      }, 0),
     [googleAccounts],
   );
+
+  const totalBuyerCount = useMemo(
+    () => transactions.reduce((sum, item) => sum + Math.max(1, Number(item.buyerCount ?? 1)), 0),
+    [transactions],
+  );
+
+  const platformStats = useMemo(() => {
+    const initial = { shopee: 0, whatsapp: 0, pribadi: 0 };
+    return transactions.reduce((stats, item) => {
+      const platform = String(item.platform ?? "").trim().toLowerCase();
+      const count = Math.max(1, Number(item.buyerCount ?? 1));
+      if (platform === "whatsapp" || platform === "wa") {
+        stats.whatsapp += count;
+      } else if (platform === "pribadi") {
+        stats.pribadi += count;
+      } else {
+        stats.shopee += count;
+      }
+      return stats;
+    }, initial);
+  }, [transactions]);
 
   const recentTransactions = transactions.slice(0, 5);
 
@@ -70,9 +101,15 @@ export function SalesDashboardPage() {
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Total Penjualan" value={`Rp ${formatCurrency(totalRevenue)}`} />
-            <StatCard label="Jumlah TRX Gemini" value={String(transactions.length)} />
+            <StatCard label="Jumlah TRX Gemini" value={String(totalBuyerCount)} />
             <StatCard label="Akun Google" value={String(googleAccounts.length)} />
             <StatCard label="Slot Tersedia" value={String(availableGoogleSlots)} />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <StatCard label="TRX Shopee" value={String(platformStats.shopee)} />
+            <StatCard label="TRX WhatsApp" value={String(platformStats.whatsapp)} />
+            <StatCard label="TRX Pribadi" value={String(platformStats.pribadi)} />
           </div>
 
           <SurfaceCard className="space-y-4">

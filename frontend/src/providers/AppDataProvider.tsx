@@ -60,6 +60,7 @@ interface AppDataContextValue {
   clearStocks: (csId: number) => Promise<string>;
   fetchGoogleAccounts: () => Promise<GoogleAccountModel[]>;
   createGoogleAccount: (payload: { email: string }) => Promise<GoogleAccountModel>;
+  setGoogleAccountSuspended: (accountId: number, suspended: boolean) => Promise<GoogleAccountModel>;
   deleteGoogleAccount: (accountId: number) => Promise<string>;
   fetchGeminiPricePlans: () => Promise<GeminiPricePlanModel[]>;
   createGeminiPricePlan: (payload: Record<string, unknown>) => Promise<GeminiPricePlanModel>;
@@ -321,11 +322,14 @@ function parseStockSummary(payload: Record<string, unknown>): CsStockSummaryMode
 }
 
 function parseGoogleAccount(payload: Record<string, unknown>): GoogleAccountModel {
+  const email = String(payload.email ?? "");
+  const isFullPrivate = /\|\s*full\s+private\b/i.test(email);
   return {
     id: Number(payload.id ?? 0),
-    email: String(payload.email ?? ""),
-    totalSlots: Number(payload.totalSlots ?? payload.total_slots ?? 5),
+    email,
+    totalSlots: isFullPrivate ? 1 : Number(payload.totalSlots ?? payload.total_slots ?? 5),
     usedSlots: Number(payload.usedSlots ?? payload.used_slots ?? 0),
+    isSuspended: Boolean(payload.isSuspended ?? payload.is_suspended ?? false),
     createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
   };
 }
@@ -350,7 +354,9 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
     geminiPricePlanId: payload.geminiPricePlanId ?? payload.gemini_price_plan_id ? Number(payload.geminiPricePlanId ?? payload.gemini_price_plan_id) : null,
     customerJid: String(payload.customerJid ?? payload.customer_jid ?? ""),
     amount: Number(payload.amount ?? 0),
+    buyerCount: Math.max(1, Number(payload.buyerCount ?? payload.buyer_count ?? 1)),
     status: String(payload.status ?? ""),
+    orderStatus: payload.orderStatus ?? payload.order_status ? String(payload.orderStatus ?? payload.order_status) : null,
     commandName: payload.commandName ?? payload.command_name ? String(payload.commandName ?? payload.command_name) : null,
     googleAccountEmail: payload.googleAccountEmail ?? payload.google_account_email ? String(payload.googleAccountEmail ?? payload.google_account_email) : null,
     buyerEmail: payload.buyerEmail ?? payload.buyer_email ? String(payload.buyerEmail ?? payload.buyer_email) : null,
@@ -636,6 +642,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
   }
 
+  async function setGoogleAccountSuspended(accountId: number, suspended: boolean): Promise<GoogleAccountModel> {
+    const data = await apiFetch(
+      `/google-accounts/${accountId}/suspend`,
+      withJsonBody({ suspended }, "PATCH"),
+    );
+    invalidateTrxGeminiCache();
+    return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
   async function deleteGoogleAccount(accountId: number): Promise<string> {
     const data = await apiFetch(`/google-accounts/${accountId}`, { method: "DELETE" });
     invalidateTrxGeminiCache();
@@ -862,6 +877,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       clearStocks,
       fetchGoogleAccounts,
       createGoogleAccount,
+      setGoogleAccountSuspended,
       deleteGoogleAccount,
       fetchGeminiPricePlans,
       createGeminiPricePlan,

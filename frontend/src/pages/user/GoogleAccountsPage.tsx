@@ -1,6 +1,7 @@
 import { Download, Plus, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useEffect, useRef, useState } from "react";
+import { ImportConfirmModal } from "../../components/ImportConfirmModal";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { useAppData } from "../../hooks/useAppData";
@@ -12,21 +13,45 @@ function getInitials(email: string) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function getTransactionActiveStatus(item: TransactionModel) {
-  if (item.activeStatus === "aktif") return "aktif";
-  if (item.activeStatus === "expired") return "expired";
-  if (!item.activeExpiresAt) return "aktif";
-  const parsed = new Date(item.activeExpiresAt);
-  if (Number.isNaN(parsed.getTime())) return "aktif";
-  return parsed.getTime() >= Date.now() ? "aktif" : "expired";
+type SelectedMember = {
+  key: string;
+  transactionId: number;
+  buyerEmail: string;
+  idTrx: string;
+};
+
+function splitBuyerEmails(item: TransactionModel) {
+  const fallback = item.buyerEmail || item.customerJid;
+  return (fallback || "")
+    .split(/[,;\n]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
-function isUsedSlotTransaction(item: TransactionModel) {
-  return !(item.memberStatus === "kick" && getTransactionActiveStatus(item) === "expired");
+function getTotalSlots(item: GoogleAccountModel) {
+  return /\|\s*full\s+private\b/i.test(item.email) ? 1 : item.totalSlots;
 }
 
-function getRemainingSlots(item: GoogleAccountModel) {
-  return Math.max(item.totalSlots - item.usedSlots, 0);
+function getUsedSlots(item: GoogleAccountModel) {
+  return Math.min(Math.max(item.usedSlots, 0), getTotalSlots(item));
+}
+
+function isFullAccount(item: GoogleAccountModel) {
+  return getUsedSlots(item) >= getTotalSlots(item);
+}
+
+function sortGoogleAccounts(items: GoogleAccountModel[]) {
+  return [...items].sort((a, b) => {
+    if (a.isSuspended !== b.isSuspended) return a.isSuspended ? 1 : -1;
+    const aFull = isFullAccount(a);
+    const bFull = isFullAccount(b);
+    if (aFull !== bFull) return aFull ? 1 : -1;
+    if (!aFull && !bFull) {
+      const usedDiff = getUsedSlots(b) - getUsedSlots(a);
+      if (usedDiff !== 0) return usedDiff;
+    }
+    return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
+  });
 }
 
 export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean }) {
@@ -37,16 +62,17 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<GoogleAccountModel | null>(null);
-  const [selectedTransactions, setSelectedTransactions] = useState<TransactionModel[]>([]);
+  const [selectedTransactions, setSelectedTransactions] = useState<SelectedMember[]>([]);
   const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null);
   const [emailText, setEmailText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
   async function refresh() {
     setLoading(true);
     try {
       const data = await appData.fetchGoogleAccounts();
-      setItems(data);
+      setItems(sortGoogleAccounts(data));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal memuat Google Account", "danger");
     } finally {
@@ -81,7 +107,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
         const item = await appData.createGoogleAccount({ email });
         created.push(item);
       }
-      setItems((current) => [...created.reverse(), ...current]);
+      setItems((current) => sortGoogleAccounts([...created, ...current]));
       setEmailText("");
       setIsModalOpen(false);
       showToast(`${created.length} Google Account berhasil disimpan.`, "success");
@@ -95,8 +121,8 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   function handleExportExcel() {
     const rows = items.map((item) => ({
       Email: item.email,
-      "Sisa Slot": getRemainingSlots(item),
-      "Total Slot": item.totalSlots,
+      "Anggota Aktif": getUsedSlots(item),
+      "Total Slot": getTotalSlots(item),
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
@@ -104,11 +130,14 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     XLSX.writeFile(workbook, "google-accounts.xlsx");
   }
 
-  async function handleImportExcel(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleImportExcel(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    setPendingImportFile(file);
+  }
 
+  async function processImportExcel(file: File) {
     setSaving(true);
     try {
       const buffer = await file.arrayBuffer();
@@ -138,8 +167,9 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
         created.push(item);
       }
       const nextItems = await appData.fetchGoogleAccounts();
-      setItems(nextItems);
+      setItems(sortGoogleAccounts(nextItems));
       showToast(`${created.length} Google Account berhasil diimport.`, "success");
+      setPendingImportFile(null);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal import Google Account.", "danger");
     } finally {
@@ -151,13 +181,21 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     setCheckingAccountId(item.id);
     try {
       const transactions = await appData.fetchTransactions();
-      const usedSlotMembers = transactions.filter((transaction) => {
+      const accountMembers = transactions.filter((transaction) => {
           const sameAccount =
             transaction.googleAccountId === item.id ||
             transaction.googleAccountEmail?.trim().toLowerCase() === item.email.trim().toLowerCase();
-          return sameAccount && isUsedSlotTransaction(transaction);
+          return sameAccount;
+        }).flatMap((transaction) => {
+          const emails = splitBuyerEmails(transaction);
+          return emails.map((buyerEmail, index) => ({
+            key: `${transaction.id}-${index}`,
+            transactionId: transaction.id,
+            buyerEmail,
+            idTrx: transaction.idTrx,
+          }));
         });
-      setSelectedTransactions(usedSlotMembers);
+      setSelectedTransactions(accountMembers);
       setSelectedAccount(item);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal memuat anggota aktif.", "danger");
@@ -166,17 +204,20 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     }
   }
 
-  async function handleDeleteAccount(item: GoogleAccountModel) {
-    const confirmed = window.confirm(`Hapus Google Account ${item.email}?`);
-    if (!confirmed) return;
-
+  async function handleToggleAccountSuspend(item: GoogleAccountModel) {
+    const nextSuspended = !item.isSuspended;
     setSaving(true);
     try {
-      const message = await appData.deleteGoogleAccount(item.id);
-      setItems((current) => current.filter((account) => account.id !== item.id));
-      showToast(message, "success");
+      const updated = await appData.setGoogleAccountSuspended(item.id, nextSuspended);
+      const nextItems = await appData.fetchGoogleAccounts();
+      setItems(sortGoogleAccounts(nextItems));
+      setSelectedAccount(updated);
+      showToast(
+        nextSuspended ? "Google Account berhasil di-suspend." : "Google Account berhasil di-unsuspend.",
+        "success",
+      );
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Gagal menghapus Google Account.", "danger");
+      showToast(err instanceof Error ? err.message : "Gagal mengubah status Google Account.", "danger");
     } finally {
       setSaving(false);
     }
@@ -237,11 +278,18 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => {
-            const remaining = getRemainingSlots(item);
+            const usedSlots = getUsedSlots(item);
+            const full = isFullAccount(item);
             return (
               <article
                 key={item.id}
-                className="rounded-[18px] border border-[rgba(56,189,248,0.18)] bg-[rgba(30,41,59,0.86)] p-5 shadow-soft"
+                className={
+                  item.isSuspended
+                    ? "rounded-[18px] border border-[rgba(250,204,21,0.34)] bg-[rgba(113,63,18,0.26)] p-5 shadow-soft"
+                    : full
+                    ? "rounded-[18px] border border-[rgba(248,113,113,0.34)] bg-[rgba(127,29,29,0.22)] p-5 shadow-soft"
+                    : "rounded-[18px] border border-[rgba(74,222,128,0.3)] bg-[rgba(20,83,45,0.24)] p-5 shadow-soft"
+                }
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex min-w-0 items-center gap-3">
@@ -250,15 +298,17 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
                     </div>
                     <div className="min-w-0">
                       <h2 className="truncate text-base font-extrabold text-white">{item.email}</h2>
-                      <p className="mt-1 text-sm text-text-secondary">Google Account</p>
+                      <p className="mt-1 text-sm text-text-secondary">
+                        {item.isSuspended ? "Google Account Suspended" : "Google Account"}
+                      </p>
                     </div>
                   </div>
                   <div className="shrink-0 text-2xl font-extrabold text-white">
-                    {remaining}/{item.totalSlots}
+                    {usedSlots}/{getTotalSlots(item)}
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-2">
+                <div className="mt-5">
                   <button
                     className="w-full rounded-[14px] bg-[rgba(15,23,42,0.95)] px-4 py-3 text-sm font-bold text-white transition hover:bg-[rgba(15,23,42,0.78)]"
                     type="button"
@@ -266,14 +316,6 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
                     onClick={() => void openAccountCheckModal(item)}
                   >
                     {checkingAccountId === item.id ? "Mengecek..." : "Cek"}
-                  </button>
-                  <button
-                    className="w-full rounded-[14px] border border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.1)] px-4 py-3 text-sm font-bold text-danger transition hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-60"
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void handleDeleteAccount(item)}
-                  >
-                    Hapus
                   </button>
                 </div>
               </article>
@@ -322,7 +364,15 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
       >
         {selectedAccount ? (
           <div className="space-y-6">
-            <div className="rounded-[20px] border border-[rgba(239,68,68,0.38)] bg-[rgba(239,68,68,0.08)] p-5">
+            <div
+              className={
+                selectedAccount.isSuspended
+                  ? "rounded-[20px] border border-[rgba(250,204,21,0.34)] bg-[rgba(113,63,18,0.26)] p-5"
+                  : !isFullAccount(selectedAccount)
+                  ? "rounded-[20px] border border-[rgba(74,222,128,0.3)] bg-[rgba(20,83,45,0.24)] p-5"
+                  : "rounded-[20px] border border-[rgba(248,113,113,0.34)] bg-[rgba(127,29,29,0.22)] p-5"
+              }
+            >
               <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-4">
                   <div className="grid size-14 shrink-0 place-items-center rounded-full bg-[rgba(15,23,42,0.96)] text-base font-extrabold text-white">
@@ -330,11 +380,13 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
                   </div>
                   <div className="min-w-0">
                     <h3 className="truncate text-base font-extrabold text-white">{selectedAccount.email}</h3>
-                    <p className="mt-1 text-sm text-text-secondary">Google Account</p>
+                    <p className="mt-1 text-sm text-text-secondary">
+                      {selectedAccount.isSuspended ? "Google Account Suspended" : "Google Account"}
+                    </p>
                   </div>
                 </div>
                 <div className="shrink-0 text-3xl font-extrabold text-white">
-                  {getRemainingSlots(selectedAccount)}/{selectedAccount.totalSlots}
+                  {getUsedSlots(selectedAccount)}/{getTotalSlots(selectedAccount)}
                 </div>
               </div>
             </div>
@@ -343,17 +395,17 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
               <h3 className="text-lg font-extrabold text-white">List Anggota</h3>
               {selectedTransactions.length === 0 ? (
                 <div className="mt-4 rounded-[16px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.5)] px-4 py-5 text-sm text-text-secondary">
-                  Belum ada anggota aktif untuk akun ini.
+                  Belum ada anggota untuk akun ini.
                 </div>
               ) : (
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {selectedTransactions.map((transaction, index) => (
                     <div
-                      key={transaction.id}
+                      key={transaction.key}
                       className="rounded-[16px] border border-[rgba(56,189,248,0.14)] bg-[rgba(15,23,42,0.5)] p-4"
                     >
                       <h4 className="break-words text-sm font-extrabold text-white">
-                        {index + 1}. {transaction.buyerEmail || transaction.customerJid}
+                        {index + 1}. {transaction.buyerEmail}
                       </h4>
                       <p className="mt-4 text-sm text-text-secondary">
                         No Pesanan: <span>{transaction.idTrx}</span>
@@ -363,9 +415,32 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
                 </div>
               )}
             </div>
+
+            <button
+              className={
+                selectedAccount.isSuspended
+                  ? "w-full rounded-[14px] border border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.12)] px-4 py-3 text-sm font-bold text-success transition hover:bg-[rgba(34,197,94,0.18)] disabled:opacity-60"
+                  : "w-full rounded-[14px] border border-[rgba(250,204,21,0.34)] bg-[rgba(113,63,18,0.24)] px-4 py-3 text-sm font-bold text-warning transition hover:bg-[rgba(113,63,18,0.34)] disabled:opacity-60"
+              }
+              type="button"
+              disabled={saving}
+              onClick={() => void handleToggleAccountSuspend(selectedAccount)}
+            >
+              {selectedAccount.isSuspended ? "Unsuspend Akun" : "Suspend Akun"}
+            </button>
           </div>
         ) : null}
       </Modal>
+
+      <ImportConfirmModal
+        file={pendingImportFile}
+        open={Boolean(pendingImportFile)}
+        loading={saving}
+        onCancel={() => setPendingImportFile(null)}
+        onConfirm={() => {
+          if (pendingImportFile) void processImportExcel(pendingImportFile);
+        }}
+      />
     </div>
   );
 }
