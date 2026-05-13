@@ -214,11 +214,6 @@ function normalizeMemberStatusImport(value: unknown) {
   return raw === "kick" ? "kick" : "anggota";
 }
 
-function normalizeOrderStatusImport(value: unknown) {
-  const raw = String(value ?? "").trim().toLowerCase();
-  return raw === "dikirim" ? "dikirim" : "selesai";
-}
-
 function normalizePlatformImport(value: unknown) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw === "whatsapp" || raw === "wa") return "whatsapp";
@@ -471,7 +466,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
       "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus),
-      Status: item.orderStatus === "dikirim" ? "DIKIRIM" : "SELESAI",
       "Status Akun": item.memberStatus === "kick" ? "kick" : "Anggota",
       Total: item.amount,
     }));
@@ -553,7 +547,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         }
         const activeStatus = normalizeActiveStatusImport(getCell(row, ["Masa Aktif", "Status Masa Aktif", "Active Status"]));
         const memberStatus = normalizeMemberStatusImport(getCell(row, ["Status Akun", "Status Member", "Member Status"]));
-        const orderStatus = normalizeOrderStatusImport(getCell(row, ["Status", "Status Order", "Status TRX"]));
 
         try {
           await appData.createManualTransaction({
@@ -570,7 +563,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             warrantyExpiresAt,
             activeStatus,
             memberStatus,
-            orderStatus,
           });
           existingOrders.add(orderKey);
           imported += 1;
@@ -689,7 +681,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {embedded ? (
         <div className="flex flex-wrap justify-end gap-2">{headerActions}</div>
       ) : (
@@ -697,11 +689,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {loading ? null : (
-        <SurfaceCard>
-          <label className="relative mb-4 flex min-h-[64px] w-full items-center rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-5">
-            <Search size={20} className="pointer-events-none absolute left-6 text-text-secondary" />
+        <SurfaceCard className="p-3 lg:p-4">
+          <label className="relative mb-3 flex min-h-[48px] w-full items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4">
+            <Search size={18} className="pointer-events-none absolute left-5 text-text-secondary" />
             <input
-              className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-11 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
+              className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Cari idTrx"
@@ -711,41 +703,39 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             <div className="overflow-hidden rounded-[18px] border border-[rgba(56,189,248,0.16)]">
               <table className="w-full table-fixed border-collapse text-left text-sm">
                 <colgroup>
-                  <col className="w-[9%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[8%]" />
                   <col className="w-[13%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[8%]" />
                   <col className="w-[10%]" />
                   <col className="w-[10%]" />
                   <col className="w-[8%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[16%]" />
+                  <col className="w-[8%]" />
                 </colgroup>
                 <thead className="bg-[rgba(15,23,42,0.78)] text-[12px] font-extrabold text-white">
                   <tr>
-                    <th className="px-4 py-5">idTrx</th>
-                    <th className="px-4 py-5">Google</th>
-                    <th className="px-4 py-5">Platform</th>
-                    <th className="px-4 py-5">Email</th>
-                    <th className="px-4 py-5">Harga</th>
-                    <th className="px-4 py-5">Start</th>
-                    <th className="px-4 py-5">Exp</th>
-                    <th className="px-2 py-5 text-center">Masa Aktif</th>
-                    <th className="px-2 py-5 text-center">Status</th>
-                    <th className="px-4 py-5 text-right">Aksi</th>
+                    <th className="px-3 py-3">idTrx</th>
+                    <th className="px-3 py-3">Google</th>
+                    <th className="px-3 py-3">Platform</th>
+                    <th className="px-3 py-3">Email</th>
+                    <th className="px-3 py-3">Start</th>
+                    <th className="px-3 py-3">Exp</th>
+                    <th className="px-2 py-3 text-center">Masa Aktif</th>
+                    <th className="px-2 py-3 text-center">Status</th>
+                    <th className="px-2 py-3 text-center">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[rgba(56,189,248,0.1)] bg-[rgba(15,23,42,0.36)]">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="px-5 py-10 text-center text-sm text-text-secondary">
+                      <td colSpan={9} className="px-5 py-8 text-center text-sm text-text-secondary">
                         Belum ada transaksi sukses.
                       </td>
                     </tr>
                   ) : filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="px-5 py-10 text-center text-sm text-text-secondary">
+                      <td colSpan={9} className="px-5 py-8 text-center text-sm text-text-secondary">
                         idTrx tidak ditemukan.
                       </td>
                     </tr>
@@ -753,20 +743,20 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                     const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus);
                     return (
                       <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
-                        <td className="px-4 py-3 font-semibold leading-snug text-white">
-                          <span className="block truncate" title={item.idTrx}>{item.idTrx}</span>
+                        <td className="px-3 py-2.5 font-semibold leading-snug text-white">
+                          <span className="block whitespace-nowrap text-xs xl:text-sm" title={item.idTrx}>{item.idTrx}</span>
                         </td>
-                        <td className="px-4 py-3 text-text-primary">
+                        <td className="px-3 py-2.5 text-text-primary">
                           <span className="block truncate" title={item.googleAccountEmail ?? "-"}>
                             {item.googleAccountEmail ?? "-"}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-text-primary">
+                        <td className="px-3 py-2.5 text-text-primary">
                           <span className="block truncate" title={item.platform || "whatsapp"}>
                             {item.platform || "whatsapp"}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-text-primary">
+                        <td className="px-3 py-2.5 text-text-primary">
                           <span
                             className="block truncate"
                             title={item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
@@ -774,47 +764,42 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                             {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-text-primary">
-                          <span className="block truncate" title={`Rp ${formatCurrency(item.amount)}`}>
-                            Rp {formatCurrency(item.amount)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-text-primary">
+                        <td className="px-3 py-2.5 text-text-primary">
                           <span className="block truncate" title={formatShortDate(item.activeStartAt)}>
                             {formatShortDate(item.activeStartAt)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-text-primary">
+                        <td className="px-3 py-2.5 text-text-primary">
                           <span className="block truncate" title={formatShortDate(item.activeExpiresAt)}>
                             {formatShortDate(item.activeExpiresAt)}
                           </span>
                         </td>
-                        <td className="px-2 py-3 text-center">
+                        <td className="px-2 py-2.5 text-center">
                           <span
                             className={
                               activeStatus === "Aktif"
-                                ? "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(34,197,94,0.16)] px-3 py-2 text-xs font-extrabold uppercase text-success"
-                                : "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-3 py-2 text-xs font-extrabold uppercase text-danger"
+                                ? "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(34,197,94,0.16)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-success"
+                                : "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(239,68,68,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-danger"
                             }
                           >
                             {activeStatus}
                           </span>
                         </td>
-                        <td className="px-2 py-3 text-center">
+                        <td className="px-2 py-2.5 text-center">
                           <span
                             className={
                               item.memberStatus === "kick"
-                                ? "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(239,68,68,0.14)] px-3 py-2 text-xs font-extrabold uppercase text-danger"
-                                : "inline-flex min-w-[76px] justify-center rounded-[12px] bg-[rgba(56,189,248,0.14)] px-3 py-2 text-xs font-extrabold uppercase text-accent"
+                                ? "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(239,68,68,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-danger"
+                                : "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(56,189,248,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-accent"
                             }
                           >
                             {item.memberStatus === "kick" ? "KICK" : "ANGGOTA"}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2 pr-1">
+                        <td className="px-2 py-2.5">
+                          <div className="flex justify-center gap-2">
                         <button
-                          className="inline-flex size-9 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(56,189,248,0.22)] text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
                           type="button"
                           onClick={() => openEditModal(item)}
                           aria-label="Edit transaksi"
@@ -823,7 +808,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                           <Edit2 size={15} />
                         </button>
                         <button
-                          className="inline-flex size-9 items-center justify-center rounded-[12px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
                           type="button"
                           onClick={() => void handleDelete(item)}
                           aria-label="Hapus transaksi"
@@ -841,13 +826,13 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </div>
 
             {filteredItems.length > 0 ? (
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-text-secondary">
               <span>
                 Menampilkan {pageStart} - {pageEnd} dari {filteredItems.length} data
               </span>
               <div className="flex items-center gap-2">
                 <button
-                  className="rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-45"
+                  className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-45"
                   type="button"
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
@@ -855,14 +840,14 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   Prev
                 </button>
                 <button
-                  className="rounded-[12px] bg-[rgba(37,99,235,0.24)] px-4 py-2 font-bold text-white"
+                  className="rounded-[10px] bg-[rgba(37,99,235,0.24)] px-3 py-1.5 font-bold text-white"
                   type="button"
                 >
                   {currentPage}
                 </button>
                 {totalPages > 1 && currentPage !== totalPages ? (
                   <button
-                    className="rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)]"
+                    className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)]"
                     type="button"
                     onClick={() => setCurrentPage(totalPages)}
                   >
@@ -870,7 +855,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   </button>
                 ) : null}
                 <button
-                  className="rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2 text-white transition hover:bg-[rgba(56,189,248,0.08)] disabled:text-text-muted disabled:opacity-45"
+                  className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-white transition hover:bg-[rgba(56,189,248,0.08)] disabled:text-text-muted disabled:opacity-45"
                   type="button"
                   disabled={currentPage === totalPages}
                   onClick={() => setCurrentPage((page) => Math.min(page + 1, totalPages))}
