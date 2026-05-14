@@ -82,12 +82,37 @@ function normalizeResult(result, sql) {
   return [meta];
 }
 
+const insertIdTables = new Set([
+  'users',
+  'bots',
+  'groups',
+  'broadcasts',
+  'activity_logs',
+  'customer_service',
+  'customer_service_contacts',
+  'cs_buttons',
+  'cs_stocks',
+  'cs_transactions',
+  'cs_relay_sessions',
+  'push_contact_templates',
+  'group_push_exclusions',
+  'push_contact_runs',
+  'google_accounts',
+  'gemini_price_plans',
+]);
+
+function getInsertTableName(sql) {
+  const match = String(sql).trim().match(/^insert\s+into\s+(?:"([^"]+)"|`([^`]+)`|([A-Za-z_][A-Za-z0-9_]*))/i);
+  return (match?.[1] ?? match?.[2] ?? match?.[3] ?? '').toLowerCase();
+}
+
 function shouldAppendReturningId(sql) {
   const normalized = String(sql).trim().toLowerCase();
   return (
     normalized.startsWith('insert into ') &&
     !normalized.includes(' returning ') &&
-    !normalized.includes(' on conflict ')
+    !normalized.includes(' on conflict ') &&
+    insertIdTables.has(getInsertTableName(sql))
   );
 }
 

@@ -1,17 +1,21 @@
-import { useEffect, useState } from "react";
-import { CreditCard, Key, Lock, Megaphone, PencilLine, Save, User } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CreditCard, Database, Download, Key, Lock, Megaphone, PencilLine, Save, Upload, User } from "lucide-react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
 import { useAppData } from "../../hooks/useAppData";
 import { useAuth } from "../../hooks/useAuth";
 import { useToast } from "../../hooks/useToast";
+import { appConfig } from "../../lib/config";
+import { apiFetch, withJsonBody } from "../../lib/http";
+import { getToken } from "../../lib/storage";
 
 export function SettingsPage() {
   const auth = useAuth();
   const appData = useAppData();
   const { showToast } = useToast();
   const currentUser = appData.user ?? auth.user;
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const [showEditUsernameModal, setShowEditUsernameModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -29,6 +33,8 @@ export function SettingsPage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(true);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [isExportingDb, setIsExportingDb] = useState(false);
+  const [isImportingDb, setIsImportingDb] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -132,6 +138,79 @@ export function SettingsPage() {
       showToast(error instanceof Error ? error.message : "Gagal menyimpan setting Pakasir.", "danger");
     } finally {
       setIsSavingPayment(false);
+    }
+  }
+
+  async function handleExportDatabase() {
+    setIsExportingDb(true);
+    try {
+      const headers = new Headers();
+      const token = getToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+
+      const response = await fetch(`${appConfig.apiBaseUrl}/settings/export`, {
+        method: "GET",
+        headers,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(String(payload?.error ?? "Gagal export database."));
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] ?? `wisnubot2-db-${new Date().toISOString().slice(0, 10)}.json`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showToast("Export database berhasil dibuat", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Gagal export database.", "danger");
+    } finally {
+      setIsExportingDb(false);
+    }
+  }
+
+  async function handleImportDatabase(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!window.confirm("Import akan mengganti seluruh database WisnuBot2 dengan isi file export. Lanjutkan?")) {
+      return;
+    }
+
+    setIsImportingDb(true);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const result = await apiFetch<{ message: string; counts?: Record<string, number> }>(
+        "/settings/import",
+        withJsonBody(payload),
+      );
+      const [settings] = await Promise.all([
+        appData.fetchSettings(),
+        appData.refreshBroadcasts(),
+        appData.refreshCustomerService(),
+        appData.fetchGoogleAccounts(),
+        appData.fetchGeminiPricePlans(),
+        appData.fetchTransactions(),
+      ]);
+      setPakasirSlug(settings.pakasirSlug);
+      setPakasirApiKey("");
+      setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
+      setTestimonialChannelLink(settings.testimonialChannelLink);
+      setTestimonialChannelStatus(settings.testimonialChannelStatus);
+      showToast(result.message || "Import database berhasil", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Gagal import database.", "danger");
+    } finally {
+      setIsImportingDb(false);
     }
   }
 
@@ -242,6 +321,45 @@ export function SettingsPage() {
             </button>
           </form>
         )}
+      </SurfaceCard>
+
+      <SurfaceCard>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="text-lg font-bold">Backup Database</h3>
+          <Database size={18} className="text-accent" />
+        </div>
+
+        <input
+          ref={importInputRef}
+          className="hidden"
+          type="file"
+          accept="application/json,.json"
+          onChange={handleImportDatabase}
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            className="flex items-center justify-center gap-2 rounded-[20px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.64)] px-4 py-3.5 text-sm font-bold text-text-primary transition hover:border-[rgba(56,189,248,0.34)] hover:bg-[rgba(15,23,42,0.78)] disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={handleExportDatabase}
+            disabled={isExportingDb || isImportingDb}
+          >
+            <Download size={16} />
+            {isExportingDb ? "EXPORT..." : "EXPORT DB"}
+          </button>
+          <button
+            className="flex items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            disabled={isExportingDb || isImportingDb}
+          >
+            <Upload size={16} />
+            {isImportingDb ? "IMPORT..." : "IMPORT DB"}
+          </button>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-text-secondary">
+          File export memakai format JSON WisnuBot2. Import full backup akan mengganti seluruh database, termasuk bot WA, grup, transaksi, Gemini, broadcast, dan pengaturan.
+        </p>
       </SurfaceCard>
 
       <Modal open={showEditUsernameModal} title="Ganti Username" onClose={() => setShowEditUsernameModal(false)}>

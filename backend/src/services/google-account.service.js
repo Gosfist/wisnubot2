@@ -24,6 +24,37 @@ function mapAccount(row) {
   };
 }
 
+async function findForUserByEmail(pool, userId, email) {
+  const [rows] = await pool.execute(
+    `SELECT ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at,
+            COALESCE(SUM(CASE WHEN tx.id IS NULL THEN 0 ELSE GREATEST(COALESCE(tx.buyer_count, 1), 1) END), 0) AS used_slots
+       FROM google_accounts ga
+       LEFT JOIN cs_transactions tx
+         ON tx.google_account_id = ga.id
+        AND tx.user_id = ga.user_id
+        AND tx.status = 'paid'
+        AND NOT (
+          tx.member_status = 'kick'
+          AND COALESCE(
+            tx.active_status,
+            CASE
+              WHEN COALESCE(tx.platform, '') <> 'pribadi'
+               AND tx.active_expires_at IS NOT NULL
+               AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
+              ELSE 'aktif'
+            END
+          ) = 'expired'
+        )
+      WHERE ga.user_id = ?
+        AND lower(ga.email) = lower(?)
+      GROUP BY ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at
+      LIMIT 1`,
+    [Number(userId), email],
+  );
+
+  return rows[0] ? mapAccount(rows[0]) : null;
+}
+
 async function listForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
@@ -62,18 +93,38 @@ async function createForUser(user, payload) {
 
   const pool = getPool();
   const totalSlots = isFullPrivateAccount(email) ? 1 : 5;
-  const [result] = await pool.execute(
-    `INSERT INTO google_accounts (user_id, email, total_slots)
-     VALUES (?, ?, ?)`,
-    [Number(user.id), email, totalSlots],
-  );
+  const userId = Number(user.id);
+  const existingAccount = await findForUserByEmail(pool, userId, email);
+  if (existingAccount) {
+    return existingAccount;
+  }
+
+  let insertId = 0;
+  try {
+    const [result] = await pool.execute(
+      `INSERT INTO google_accounts (user_id, email, total_slots)
+       VALUES (?, ?, ?)`,
+      [userId, email, totalSlots],
+    );
+    insertId = Number(result.insertId ?? 0);
+  } catch (err) {
+    if (err?.code !== "23505" && !String(err?.message ?? "").includes("ux_google_accounts_user_email")) {
+      throw err;
+    }
+
+    const account = await findForUserByEmail(pool, userId, email);
+    if (account) {
+      return account;
+    }
+    throw err;
+  }
 
   const [rows] = await pool.execute(
     `SELECT id, email, total_slots, is_suspended, created_at, 0 AS used_slots
        FROM google_accounts
       WHERE id = ? AND user_id = ?
       LIMIT 1`,
-    [Number(result.insertId ?? 0), Number(user.id)],
+    [insertId, userId],
   );
 
   return mapAccount(rows[0]);

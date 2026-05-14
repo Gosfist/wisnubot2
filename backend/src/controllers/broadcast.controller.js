@@ -124,6 +124,58 @@ function normalizeScheduleEntries(scheduleTimeInput, scheduleDaysInput) {
   return parseScheduleEntries(scheduleTimeInput, scheduleDaysInput);
 }
 
+async function replaceBroadcastNormalizedRelations(
+  pool,
+  broadcastId,
+  { targetGroupIds = [], targetExcludedGroupIds = [], targetBotIds = [], scheduleEntries = [] },
+) {
+  await pool.execute("DELETE FROM broadcast_target_groups WHERE broadcast_id = ?", [broadcastId]);
+  await pool.execute("DELETE FROM broadcast_excluded_groups WHERE broadcast_id = ?", [broadcastId]);
+  await pool.execute("DELETE FROM broadcast_target_bots WHERE broadcast_id = ?", [broadcastId]);
+  await pool.execute("DELETE FROM broadcast_schedule_entries WHERE broadcast_id = ?", [broadcastId]);
+
+  for (const groupId of parseIdList(targetGroupIds)) {
+    await pool.execute(
+      `INSERT INTO broadcast_target_groups (broadcast_id, group_id)
+       VALUES (?, ?)
+       ON CONFLICT DO NOTHING`,
+      [broadcastId, groupId],
+    );
+  }
+
+  for (const groupId of parseIdList(targetExcludedGroupIds)) {
+    await pool.execute(
+      `INSERT INTO broadcast_excluded_groups (broadcast_id, group_id)
+       VALUES (?, ?)
+       ON CONFLICT DO NOTHING`,
+      [broadcastId, groupId],
+    );
+  }
+
+  for (const botId of parseIdList(targetBotIds)) {
+    await pool.execute(
+      `INSERT INTO broadcast_target_bots (broadcast_id, bot_id)
+       VALUES (?, ?)
+       ON CONFLICT DO NOTHING`,
+      [broadcastId, botId],
+    );
+  }
+
+  for (const [position, entry] of scheduleEntries.entries()) {
+    const time = String(entry.time ?? "").trim();
+    if (!time) continue;
+
+    for (const dayKey of parseStringList(entry.days)) {
+      await pool.execute(
+        `INSERT INTO broadcast_schedule_entries (broadcast_id, schedule_time, day_key, position)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT DO NOTHING`,
+        [broadcastId, time, dayKey, position],
+      );
+    }
+  }
+}
+
 function parseTimeToMinutes(time) {
   const [hour, minute] = String(time).split(":").map((item) => Number(item));
   return hour * 60 + minute;
@@ -514,6 +566,12 @@ export async function createBroadcast(req, res) {
     );
 
     const broadcastId = result.insertId;
+    await replaceBroadcastNormalizedRelations(pool, broadcastId, {
+      targetGroupIds: normalizedTargetGroupIds,
+      targetExcludedGroupIds: normalizedTargetExcludedGroupIds,
+      targetBotIds: normalizedTargetBotIds,
+      scheduleEntries,
+    });
 
     if (scheduleEntries.length > 0) {
       schedulerService.registerJob(
@@ -761,6 +819,13 @@ export async function updateBroadcast(req, res) {
         broadcastId,
       ],
     );
+
+    await replaceBroadcastNormalizedRelations(pool, Number(broadcastId), {
+      targetGroupIds: effectiveTargetGroupIds,
+      targetExcludedGroupIds: effectiveTargetExcludedGroupIds,
+      targetBotIds: effectiveTargetBotIds,
+      scheduleEntries: effectiveScheduleEntries,
+    });
 
     schedulerService.unregisterJob(parseInt(broadcastId, 10));
     if (effectiveScheduleEntries.length > 0 && effectiveIsActive) {

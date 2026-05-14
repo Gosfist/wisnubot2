@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { body } from "express-validator";
 import {
+  exportDatabase,
   getSettings,
+  importDatabase,
   updateSettings,
 } from "../controllers/settings.controller.js";
 import { authenticate } from "../middleware/auth.js";
@@ -11,6 +13,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get("/", getSettings);
+router.get("/export", exportDatabase);
+router.post("/import", importDatabase);
 router.put(
   "/",
   [
