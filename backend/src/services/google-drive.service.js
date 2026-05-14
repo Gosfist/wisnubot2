@@ -1,71 +1,45 @@
-import crypto from "node:crypto";
+function normalizeFolderId(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
 
-function base64Url(value) {
-  return Buffer.from(value)
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
+  const folderMatch = raw.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch) return folderMatch[1];
+
+  const idParamMatch = raw.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParamMatch) return idParamMatch[1];
+
+  return raw
+    .replace(/^["']|["']$/g, "")
+    .replace(/[.\s]+$/g, "");
 }
 
-function normalizePrivateKey(value) {
-  return String(value ?? "").replace(/\\n/g, "\n");
-}
-
-function parseCredentials(raw) {
-  const text = String(raw ?? "").trim();
-  if (!text) throw new Error("Credential Google Drive belum diisi di Settings");
-
-  let credentials;
-  try {
-    credentials = JSON.parse(text);
-  } catch {
-    throw new Error("Credential Google Drive harus berupa JSON service account");
+async function getOAuthAccessToken({ clientId, clientSecret, refreshToken }) {
+  const id = String(clientId ?? "").trim();
+  const secret = String(clientSecret ?? "").trim();
+  const token = String(refreshToken ?? "").trim();
+  if (!id || !secret || !token) {
+    throw new Error("OAuth Google Drive belum lengkap: Client ID, Client Secret, dan Refresh Token wajib diisi");
   }
-
-  if (!credentials.client_email || !credentials.private_key) {
-    throw new Error("Credential Google Drive tidak valid: client_email/private_key tidak ditemukan");
-  }
-
-  return credentials;
-}
-
-async function getAccessToken(rawCredentials) {
-  const credentials = parseCredentials(rawCredentials);
-  const now = Math.floor(Date.now() / 1000);
-  const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claim = base64Url(JSON.stringify({
-    iss: credentials.client_email,
-    scope: "https://www.googleapis.com/auth/drive.file",
-    aud: "https://oauth2.googleapis.com/token",
-    exp: now + 3600,
-    iat: now,
-  }));
-  const input = `${header}.${claim}`;
-  const signature = crypto
-    .sign("RSA-SHA256", Buffer.from(input), normalizePrivateKey(credentials.private_key))
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: `${input}.${signature}`,
+      client_id: id,
+      client_secret: secret,
+      refresh_token: token,
+      grant_type: "refresh_token",
     }),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(String(data?.error_description ?? data?.error ?? "Gagal autentikasi Google Drive"));
+    throw new Error(String(data?.error_description ?? data?.error ?? "Gagal autentikasi OAuth Google Drive"));
   }
   return String(data.access_token ?? "");
 }
 
 async function makeFilePublic(accessToken, fileId) {
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions`, {
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -79,11 +53,23 @@ async function makeFilePublic(accessToken, fileId) {
   }
 }
 
-async function uploadImage({ credentialsJson, folderId, buffer, mimeType, filename }) {
-  const driveFolderId = String(folderId ?? "").trim();
+async function uploadImage({
+  oauthClientId,
+  oauthClientSecret,
+  oauthRefreshToken,
+  folderId,
+  buffer,
+  mimeType,
+  filename,
+}) {
+  const driveFolderId = normalizeFolderId(folderId);
   if (!driveFolderId) throw new Error("ID folder Google Drive belum diisi di Settings");
 
-  const accessToken = await getAccessToken(credentialsJson);
+  const accessToken = await getOAuthAccessToken({
+    clientId: oauthClientId,
+    clientSecret: oauthClientSecret,
+    refreshToken: oauthRefreshToken,
+  });
   const boundary = `wisnubot2_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const metadata = {
     name: filename,
@@ -97,7 +83,7 @@ async function uploadImage({ credentialsJson, folderId, buffer, mimeType, filena
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
 
-  const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink", {
+  const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -108,7 +94,14 @@ async function uploadImage({ credentialsJson, folderId, buffer, mimeType, filena
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(String(data?.error?.message ?? "Gagal upload bukti ke Google Drive"));
+    const message = String(data?.error?.message ?? "Gagal upload bukti ke Google Drive");
+    if (response.status === 404 || /file not found/i.test(message)) {
+      throw new Error(
+        `Folder Google Drive tidak ditemukan/ belum bisa diakses: ${driveFolderId}. ` +
+        "Pastikan ID folder benar dan akun Google yang dipakai OAuth punya akses Editor ke folder tersebut.",
+      );
+    }
+    throw new Error(message);
   }
 
   const fileId = String(data.id ?? "");
@@ -121,5 +114,6 @@ async function uploadImage({ credentialsJson, folderId, buffer, mimeType, filena
 }
 
 export const googleDriveService = {
+  normalizeFolderId,
   uploadImage,
 };

@@ -10,6 +10,15 @@ import { appConfig } from "../../lib/config";
 import { apiFetch, withJsonBody } from "../../lib/http";
 import { getToken } from "../../lib/storage";
 
+function normalizeGoogleDriveFolderId(value: string) {
+  const raw = value.trim();
+  const folderMatch = raw.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch) return folderMatch[1];
+  const idParamMatch = raw.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParamMatch) return idParamMatch[1];
+  return raw.replace(/^["']|["']$/g, "").replace(/[.\s]+$/g, "");
+}
+
 export function SettingsPage() {
   const auth = useAuth();
   const appData = useAppData();
@@ -32,9 +41,12 @@ export function SettingsPage() {
   const [pakasirApiKeyMasked, setPakasirApiKeyMasked] = useState<string | null>(null);
   const [testimonialChannelLink, setTestimonialChannelLink] = useState("");
   const [testimonialChannelStatus, setTestimonialChannelStatus] = useState<{ ok: boolean; message: string } | null>(null);
-  const [googleDriveCredentialsJson, setGoogleDriveCredentialsJson] = useState("");
-  const [googleDriveCredentialsMasked, setGoogleDriveCredentialsMasked] = useState<string | null>(null);
-  const [googleDriveServiceEmail, setGoogleDriveServiceEmail] = useState("");
+  const [googleDriveClientId, setGoogleDriveClientId] = useState("");
+  const [googleDriveClientSecret, setGoogleDriveClientSecret] = useState("");
+  const [googleDriveClientSecretMasked, setGoogleDriveClientSecretMasked] = useState<string | null>(null);
+  const [googleDriveRefreshToken, setGoogleDriveRefreshToken] = useState("");
+  const [googleDriveRefreshTokenMasked, setGoogleDriveRefreshTokenMasked] = useState<string | null>(null);
+  const [googleDriveAuthMode, setGoogleDriveAuthMode] = useState("none");
   const [googleDriveFolderId, setGoogleDriveFolderId] = useState("");
   const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -55,8 +67,10 @@ export function SettingsPage() {
         setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
         setTestimonialChannelLink(settings.testimonialChannelLink);
         setTestimonialChannelStatus(settings.testimonialChannelStatus);
-        setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
-        setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+        setGoogleDriveClientId(settings.googleDriveClientId);
+        setGoogleDriveClientSecretMasked(settings.googleDriveClientSecretMasked);
+        setGoogleDriveRefreshTokenMasked(settings.googleDriveRefreshTokenMasked);
+        setGoogleDriveAuthMode(settings.googleDriveAuthMode);
         setGoogleDriveFolderId(settings.googleDriveFolderId);
       } catch (error) {
         showToast(error instanceof Error ? error.message : "Gagal memuat setting Pakasir.", "danger");
@@ -161,12 +175,17 @@ export function SettingsPage() {
         pakasirSlug: pakasirSlug.trim(),
         pakasirApiKey: "",
         testimonialChannelLink: testimonialChannelLink.trim(),
-        googleDriveCredentialsJson: googleDriveCredentialsJson.trim(),
-        googleDriveFolderId: googleDriveFolderId.trim(),
+        googleDriveClientId: googleDriveClientId.trim(),
+        googleDriveClientSecret: googleDriveClientSecret.trim(),
+        googleDriveRefreshToken: googleDriveRefreshToken.trim(),
+        googleDriveFolderId: normalizeGoogleDriveFolderId(googleDriveFolderId),
       });
-      setGoogleDriveCredentialsJson("");
-      setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
-      setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+      setGoogleDriveClientId(settings.googleDriveClientId);
+      setGoogleDriveClientSecret("");
+      setGoogleDriveClientSecretMasked(settings.googleDriveClientSecretMasked);
+      setGoogleDriveRefreshToken("");
+      setGoogleDriveRefreshTokenMasked(settings.googleDriveRefreshTokenMasked);
+      setGoogleDriveAuthMode(settings.googleDriveAuthMode);
       setGoogleDriveFolderId(settings.googleDriveFolderId);
       showToast("Setting Google Drive berhasil disimpan", "success");
     } catch (error) {
@@ -245,9 +264,10 @@ export function SettingsPage() {
       setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
       setTestimonialChannelLink(settings.testimonialChannelLink);
       setTestimonialChannelStatus(settings.testimonialChannelStatus);
-      setGoogleDriveCredentialsJson("");
-      setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
-      setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+      setGoogleDriveClientId(settings.googleDriveClientId);
+      setGoogleDriveClientSecretMasked(settings.googleDriveClientSecretMasked);
+      setGoogleDriveRefreshTokenMasked(settings.googleDriveRefreshTokenMasked);
+      setGoogleDriveAuthMode(settings.googleDriveAuthMode);
       setGoogleDriveFolderId(settings.googleDriveFolderId);
       setImportProgress({
         percent: 100,
@@ -495,18 +515,51 @@ export function SettingsPage() {
       <Modal open={showGoogleDriveModal} title="Google Drive" onClose={() => setShowGoogleDriveModal(false)} wide>
         {isLoadingPayment ? null : (
           <form className="space-y-4" onSubmit={handleSaveGoogleDrive}>
+            <div className="rounded-[18px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.46)] p-4 text-sm text-text-secondary">
+              <strong className="block text-text-primary">Google Drive personal pakai OAuth.</strong>
+              <span>Isi Client ID, Client Secret, Refresh Token, dan ID folder supaya upload bukti memakai kuota Google Drive personal kamu.</span>
+            </div>
+
             <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">SERVICE ACCOUNT GOOGLE DRIVE</span>
-              <textarea
-                className="min-h-32"
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">OAUTH CLIENT ID</span>
+              <input
                 autoComplete="off"
-                name="google_drive_credentials_json"
-                value={googleDriveCredentialsJson}
-                onChange={(event) => setGoogleDriveCredentialsJson(event.target.value)}
-                placeholder={googleDriveCredentialsMasked ? `Tersimpan: ${googleDriveCredentialsMasked}` : "Paste JSON service account Google Drive"}
+                name="google_drive_client_id"
+                value={googleDriveClientId}
+                onChange={(event) => setGoogleDriveClientId(event.target.value)}
+                placeholder="Client ID dari Google Cloud OAuth"
               />
               <span className="text-xs text-text-secondary">
-                Kosongkan jika tidak ingin mengganti credential. Email service account: {googleDriveServiceEmail || "-"}
+                Status auth: {googleDriveAuthMode === "oauth" ? "OAuth Google personal aktif" : "Belum lengkap"}
+              </span>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">OAUTH CLIENT SECRET</span>
+              <input
+                autoComplete="off"
+                name="google_drive_client_secret"
+                value={googleDriveClientSecret}
+                onChange={(event) => setGoogleDriveClientSecret(event.target.value)}
+                placeholder={googleDriveClientSecretMasked ? `Tersimpan: ${googleDriveClientSecretMasked}` : "Client Secret dari Google Cloud OAuth"}
+              />
+              <span className="text-xs text-text-secondary">
+                Kosongkan jika tidak ingin mengganti client secret yang sudah tersimpan.
+              </span>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">REFRESH TOKEN GOOGLE DRIVE</span>
+              <textarea
+                className="min-h-24"
+                autoComplete="off"
+                name="google_drive_refresh_token"
+                value={googleDriveRefreshToken}
+                onChange={(event) => setGoogleDriveRefreshToken(event.target.value)}
+                placeholder={googleDriveRefreshTokenMasked ? `Tersimpan: ${googleDriveRefreshTokenMasked}` : "Refresh token OAuth Google Drive"}
+              />
+              <span className="text-xs text-text-secondary">
+                Token ini membuat upload memakai kuota Google Drive personal kamu.
               </span>
             </label>
 
@@ -517,10 +570,11 @@ export function SettingsPage() {
                 name="google_drive_folder_id"
                 value={googleDriveFolderId}
                 onChange={(event) => setGoogleDriveFolderId(event.target.value)}
+                onBlur={(event) => setGoogleDriveFolderId(normalizeGoogleDriveFolderId(event.target.value))}
                 placeholder="ID folder untuk bukti transaksi"
               />
               <span className="text-xs text-text-secondary">
-                Folder harus dibagikan ke email service account agar upload bukti transaksi berhasil.
+                Boleh paste link folder penuh; sistem akan menyimpan ID foldernya saja.
               </span>
             </label>
 

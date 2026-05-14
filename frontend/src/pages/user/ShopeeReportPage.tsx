@@ -1,4 +1,4 @@
-import { Download, ExternalLink, RefreshCw } from "lucide-react";
+import { Check, CheckCheck, Download, ExternalLink } from "lucide-react";
 import * as XLSX from "xlsx-js-style";
 import { useEffect, useMemo, useState } from "react";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -14,6 +14,8 @@ export function ShopeeReportPage() {
   const { showToast } = useToast();
   const [items, setItems] = useState<TransactionModel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [finishingId, setFinishingId] = useState<number | null>(null);
+  const [finishingAll, setFinishingAll] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
   async function refresh() {
@@ -108,80 +110,131 @@ export function ShopeeReportPage() {
     XLSX.writeFile(workbook, REPORT_FILENAME);
   }
 
-  return (
-    <SurfaceCard>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-bold">Laporan Shopee</h3>
-          <p className="mt-1 text-sm text-text-secondary">{reportItems.length} transaksi Gemini via Shopee</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="inline-flex items-center gap-2 rounded-[12px] border border-[rgba(56,189,248,0.18)] px-4 py-2.5 text-sm font-bold text-text-primary transition hover:bg-[rgba(56,189,248,0.08)]"
-            type="button"
-            onClick={() => void refresh()}
-            disabled={loading}
-          >
-            <RefreshCw size={16} />
-            Refresh
-          </button>
-          <button
-            className="inline-flex items-center gap-2 rounded-[12px] bg-[rgba(37,99,235,0.24)] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[rgba(37,99,235,0.34)] disabled:opacity-60"
-            type="button"
-            onClick={handleExport}
-            disabled={loading || reportItems.length === 0}
-          >
-            <Download size={16} />
-            Export Excel
-          </button>
-        </div>
-      </div>
+  async function handleFinishOne(item: TransactionModel) {
+    setFinishingId(item.id);
+    try {
+      await appData.updateTransactionReport(item.id, { reportStatus: "selesai" });
+      setItems((current) => current.map((row) => (
+        row.id === item.id ? { ...row, reportStatus: "selesai" } : row
+      )));
+      showToast(`Laporan ${item.idTrx} ditandai selesai`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal mengubah status laporan", "danger");
+    } finally {
+      setFinishingId(null);
+    }
+  }
 
-      {loading ? null : (
-        <>
-          <div className="overflow-x-auto">
-            <table className="min-w-[760px] table-fixed border-collapse text-left text-sm">
-              <colgroup>
-                <col className="w-[28%]" />
-                <col className="w-[72%]" />
-              </colgroup>
-              <thead className="text-[12px] font-extrabold text-white">
-                <tr>
-                  <th className="px-3 py-3">No Pesanan</th>
-                  <th className="px-3 py-3">Link URL Drive</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[rgba(56,189,248,0.1)]">
-                {reportItems.length === 0 ? (
+  async function handleFinishAll() {
+    if (reportItems.length === 0) return;
+    setFinishingAll(true);
+    try {
+      await Promise.all(reportItems.map((item) => (
+        appData.updateTransactionReport(item.id, { reportStatus: "selesai" })
+      )));
+      const finishedIds = new Set(reportItems.map((item) => item.id));
+      setItems((current) => current.map((row) => (
+        finishedIds.has(row.id) ? { ...row, reportStatus: "selesai" } : row
+      )));
+      showToast(`${reportItems.length} laporan Shopee ditandai selesai`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal menyelesaikan semua laporan", "danger");
+      await refresh();
+    } finally {
+      setFinishingAll(false);
+    }
+  }
+
+  const headerActions = (
+    <div className="flex flex-wrap justify-end gap-2">
+      <button
+        className="inline-flex items-center gap-2 rounded-[12px] border border-[rgba(34,197,94,0.28)] px-4 py-2.5 text-sm font-bold text-success transition hover:bg-[rgba(34,197,94,0.08)] disabled:opacity-50"
+        type="button"
+        onClick={() => void handleFinishAll()}
+        disabled={loading || finishingAll || reportItems.length === 0}
+      >
+        <CheckCheck size={16} />
+        {finishingAll ? "Memproses..." : "Selesaikan Semua"}
+      </button>
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:opacity-60"
+        type="button"
+        onClick={handleExport}
+        disabled={loading || reportItems.length === 0}
+      >
+        <Download size={16} />
+        Export Excel
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {headerActions}
+
+      <SurfaceCard>
+        <div className="mb-4">
+          <h3 className="text-lg font-bold">Laporan Shopee</h3>
+        </div>
+
+        {loading ? null : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-[21%]" />
+                  <col className="w-[61%]" />
+                  <col className="w-[18%]" />
+                </colgroup>
+                <thead className="text-[12px] font-extrabold text-white">
                   <tr>
-                    <td colSpan={2} className="px-5 py-8 text-center text-sm text-text-secondary">
-                      Belum ada transaksi Shopee untuk laporan.
-                    </td>
+                    <th className="px-3 py-3">No Pesanan</th>
+                    <th className="px-3 py-3">Link URL Drive</th>
+                    <th className="px-3 py-3 text-right">Aksi</th>
                   </tr>
-                ) : pageItems.map((item) => (
-                  <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
-                    <td className="px-3 py-2.5 font-semibold text-white">{item.idTrx}</td>
-                    <td className="px-3 py-2.5">
-                      {item.proofDriveUrl ? (
-                        <a
-                          className="inline-flex max-w-full items-center gap-2 text-accent hover:text-white"
-                          href={item.proofDriveUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={item.proofDriveUrl}
+                </thead>
+                <tbody className="divide-y divide-[rgba(56,189,248,0.1)]">
+                  {reportItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-5 py-8 text-center text-sm text-text-secondary">
+                        Belum ada transaksi Shopee untuk laporan.
+                      </td>
+                    </tr>
+                  ) : pageItems.map((item) => (
+                    <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
+                      <td className="px-3 py-2.5 font-semibold text-white">{item.idTrx}</td>
+                      <td className="px-3 py-2.5">
+                        {item.proofDriveUrl ? (
+                          <a
+                            className="inline-flex max-w-full items-center gap-2 text-accent hover:text-white"
+                            href={item.proofDriveUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={item.proofDriveUrl}
+                          >
+                            <ExternalLink size={15} className="shrink-0" />
+                            <span className="truncate">{item.proofDriveUrl}</span>
+                          </a>
+                        ) : (
+                          <span className="text-text-secondary">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <button
+                          className="inline-flex items-center gap-1.5 rounded-[10px] border border-[rgba(34,197,94,0.26)] px-3 py-1.5 text-xs font-bold text-success transition hover:bg-[rgba(34,197,94,0.08)] disabled:cursor-not-allowed disabled:opacity-50"
+                          type="button"
+                          onClick={() => void handleFinishOne(item)}
+                          disabled={finishingAll || finishingId === item.id}
                         >
-                          <ExternalLink size={15} className="shrink-0" />
-                          <span className="truncate">{item.proofDriveUrl}</span>
-                        </a>
-                      ) : (
-                        <span className="text-text-secondary">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          <Check size={14} />
+                          {finishingId === item.id ? "Proses..." : "Selesai"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
           {reportItems.length > 0 ? (
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-sm text-text-secondary">
@@ -218,8 +271,9 @@ export function ShopeeReportPage() {
               </button>
             </div>
           ) : null}
-        </>
-      )}
-    </SurfaceCard>
+          </>
+        )}
+      </SurfaceCard>
+    </div>
   );
 }

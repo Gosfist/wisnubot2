@@ -414,6 +414,16 @@ function parseAppSettings(payload: Record<string, unknown>): AppSettingsModel {
       ? String(payload.googleDriveCredentialsMasked ?? payload.google_drive_credentials_masked)
       : null,
     googleDriveServiceEmail: String(payload.googleDriveServiceEmail ?? payload.google_drive_service_email ?? ""),
+    googleDriveClientId: String(payload.googleDriveClientId ?? payload.google_drive_client_id ?? ""),
+    googleDriveClientSecret: String(payload.googleDriveClientSecret ?? payload.google_drive_client_secret ?? ""),
+    googleDriveClientSecretMasked: payload.googleDriveClientSecretMasked ?? payload.google_drive_client_secret_masked
+      ? String(payload.googleDriveClientSecretMasked ?? payload.google_drive_client_secret_masked)
+      : null,
+    googleDriveRefreshToken: String(payload.googleDriveRefreshToken ?? payload.google_drive_refresh_token ?? ""),
+    googleDriveRefreshTokenMasked: payload.googleDriveRefreshTokenMasked ?? payload.google_drive_refresh_token_masked
+      ? String(payload.googleDriveRefreshTokenMasked ?? payload.google_drive_refresh_token_masked)
+      : null,
+    googleDriveAuthMode: String(payload.googleDriveAuthMode ?? payload.google_drive_auth_mode ?? "none"),
     googleDriveFolderId: String(payload.googleDriveFolderId ?? payload.google_drive_folder_id ?? ""),
     updatedAt: payload.updatedAt ? String(payload.updatedAt) : null,
   };

@@ -85,6 +85,12 @@ function normalizeReportStatus(value) {
   return status === "selesai" ? "selesai" : "proses";
 }
 
+function normalizeReportStatusForPlatform(platform, value) {
+  return normalizePlatform(platform) === "shopee"
+    ? normalizeReportStatus(value)
+    : "selesai";
+}
+
 function mapPaidTransactionRow(row) {
   return {
     id: Number(row.id),
@@ -1366,7 +1372,7 @@ async function createManualTransactionForUser(user, payload) {
   const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
   const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
   const orderStatus = normalizeOrderStatus(payload.orderStatus ?? payload.order_status ?? payload.statusText);
-  const reportStatus = normalizeReportStatus(payload.reportStatus ?? payload.report_status);
+  const reportStatus = normalizeReportStatusForPlatform(platform, payload.reportStatus ?? payload.report_status);
   const now = new Date();
 
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
@@ -1375,20 +1381,6 @@ async function createManualTransactionForUser(user, payload) {
   if (!buyerEmail) throw new Error("Email buyer wajib diisi");
   if (!isValidManualPlatform(platform)) {
     throw new Error("Platform tidak valid");
-  }
-
-  let proofUpload = null;
-  if (payload.proofImage?.buffer) {
-    const settings = await appSettingsService.getRawForUserId(user.id);
-    const originalName = String(payload.proofImage.originalname ?? "bukti-transaksi.jpg");
-    const extension = originalName.includes(".") ? originalName.split(".").pop() : "jpg";
-    proofUpload = await googleDriveService.uploadImage({
-      credentialsJson: settings.googleDriveCredentialsJson,
-      folderId: settings.googleDriveFolderId,
-      buffer: payload.proofImage.buffer,
-      mimeType: String(payload.proofImage.mimetype ?? "image/jpeg"),
-      filename: `${idTrx}-bukti.${extension}`,
-    });
   }
 
   const pool = getPool();
@@ -1408,6 +1400,22 @@ async function createManualTransactionForUser(user, payload) {
     throw new Error("Akun Google tidak ditemukan");
   }
 
+  let proofUpload = null;
+  if (payload.proofImage?.buffer) {
+    const settings = await appSettingsService.getRawForUserId(user.id);
+    const originalName = String(payload.proofImage.originalname ?? "bukti-transaksi.jpg");
+    const extension = originalName.includes(".") ? originalName.split(".").pop() : "jpg";
+    proofUpload = await googleDriveService.uploadImage({
+      oauthClientId: settings.googleDriveClientId,
+      oauthClientSecret: settings.googleDriveClientSecret,
+      oauthRefreshToken: settings.googleDriveRefreshToken,
+      folderId: settings.googleDriveFolderId,
+      buffer: payload.proofImage.buffer,
+      mimeType: String(payload.proofImage.mimetype ?? "image/jpeg"),
+      filename: `${idTrx}.${extension}`,
+    });
+  }
+
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, google_account_id, gemini_price_plan_id, customer_jid, buyer_email,
@@ -1415,7 +1423,7 @@ async function createManualTransactionForUser(user, payload) {
         paid_at, delivered_at, platform, active_status, member_status, is_manual, active_duration_days,
         warranty_duration_days, completed_at, active_start_at, active_expires_at,
         warranty_start_at, warranty_expires_at, report_status, proof_drive_file_id, proof_drive_url, proof_uploaded_at)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, NULL, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, NULL, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(user.id),
       googleAccountId,
@@ -1502,7 +1510,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
   const customerJid = buyerEmail || normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
   const platform = normalizePlatform(payload.platform || "shopee");
   const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
-  const reportStatus = normalizeReportStatus(payload.reportStatus ?? payload.report_status);
+  const reportStatus = normalizeReportStatusForPlatform(platform, payload.reportStatus ?? payload.report_status);
   const amountRaw = payload.amount === undefined ? null : Number(payload.amount);
   const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
   const activeStartAt = nullableDate(payload.activeStartAt ?? payload.active_start_at);

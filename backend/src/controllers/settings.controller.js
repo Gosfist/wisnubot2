@@ -20,6 +20,9 @@ export async function updateSettings(req, res) {
       pakasirApiKey: req.body?.pakasirApiKey,
       testimonialChannelLink: req.body?.testimonialChannelLink,
       googleDriveCredentialsJson: req.body?.googleDriveCredentialsJson,
+      googleDriveClientId: req.body?.googleDriveClientId,
+      googleDriveClientSecret: req.body?.googleDriveClientSecret,
+      googleDriveRefreshToken: req.body?.googleDriveRefreshToken,
       googleDriveFolderId: req.body?.googleDriveFolderId,
     }, {
       sock: baileysManager.getSocket(req.user.id),

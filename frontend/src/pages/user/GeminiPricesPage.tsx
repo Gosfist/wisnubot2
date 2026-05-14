@@ -120,7 +120,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
       type="button"
       onClick={openCreateModal}
     >
-      <Plus size={18} /> Tambah Harga
+      <Plus size={18} /> Add Harga
     </button>
   );
 

@@ -1,4 +1,4 @@
-import { CalendarDays, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
+import { CalendarDays, ChevronDown, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImportConfirmModal } from "../../components/ImportConfirmModal";
@@ -525,7 +525,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         amount: selectedPlan.price * Math.max(1, countBuyerEmails(manualForm.buyerEmail)),
         activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
-        reportStatus: "proses",
         proofImage: proofImageFile,
       });
       const [nextItems, nextAccounts, nextPlans] = await Promise.all([
@@ -784,7 +783,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           setIsManualOpen(true);
         }}
       >
-        <Plus size={18} /> Tambah Transaksi
+        <Plus size={18} /> Add Transaksi
       </button>
     </>
   );
@@ -809,46 +808,58 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 placeholder="Cari idTrx"
               />
             </label>
-            <select
-              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
-              value={expFilter}
-              onChange={(event) => setExpFilter(event.target.value)}
-              aria-label="Filter exp"
-            >
-              <option value="all">Exp</option>
-              <option value="7">Exp: 7 hari</option>
-              <option value="expired">Exp: Lewat</option>
-            </select>
-            <select
-              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
-              value={reportStatusFilter}
-              onChange={(event) => setReportStatusFilter(event.target.value)}
-              aria-label="Filter laporan"
-            >
-              <option value="all">Laporan</option>
-              <option value="proses">Proses</option>
-              <option value="selesai">Selesai</option>
-            </select>
-            <select
-              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
-              value={activeStatusFilter}
-              onChange={(event) => setActiveStatusFilter(event.target.value)}
-              aria-label="Filter masa aktif"
-            >
-              <option value="all">Masa Aktif</option>
-              <option value="aktif">Aktif</option>
-              <option value="expired">Expired</option>
-            </select>
-            <select
-              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
-              value={memberStatusFilter}
-              onChange={(event) => setMemberStatusFilter(event.target.value)}
-              aria-label="Filter status akun"
-            >
-              <option value="all">Status</option>
-              <option value="anggota">Anggota</option>
-              <option value="kick">Kick</option>
-            </select>
+            <label className="relative block">
+              <select
+                className="min-h-[48px] w-full appearance-none rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] py-0 pl-4 pr-11 text-sm text-white outline-none"
+                value={expFilter}
+                onChange={(event) => setExpFilter(event.target.value)}
+                aria-label="Filter exp"
+              >
+                <option value="all">Exp</option>
+                <option value="7">Exp: 7 hari</option>
+                <option value="expired">Exp: Lewat</option>
+              </select>
+              <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+            </label>
+            <label className="relative block">
+              <select
+                className="min-h-[48px] w-full appearance-none rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] py-0 pl-4 pr-11 text-sm text-white outline-none"
+                value={reportStatusFilter}
+                onChange={(event) => setReportStatusFilter(event.target.value)}
+                aria-label="Filter laporan"
+              >
+                <option value="all">Laporan</option>
+                <option value="proses">Proses</option>
+                <option value="selesai">Selesai</option>
+              </select>
+              <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+            </label>
+            <label className="relative block">
+              <select
+                className="min-h-[48px] w-full appearance-none rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] py-0 pl-4 pr-11 text-sm text-white outline-none"
+                value={activeStatusFilter}
+                onChange={(event) => setActiveStatusFilter(event.target.value)}
+                aria-label="Filter masa aktif"
+              >
+                <option value="all">Masa Aktif</option>
+                <option value="aktif">Aktif</option>
+                <option value="expired">Expired</option>
+              </select>
+              <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+            </label>
+            <label className="relative block">
+              <select
+                className="min-h-[48px] w-full appearance-none rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] py-0 pl-4 pr-11 text-sm text-white outline-none"
+                value={memberStatusFilter}
+                onChange={(event) => setMemberStatusFilter(event.target.value)}
+                aria-label="Filter status akun"
+              >
+                <option value="all">Status</option>
+                <option value="anggota">Anggota</option>
+                <option value="kick">Kick</option>
+              </select>
+              <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+            </label>
             <button
               className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 text-sm font-bold text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] hover:text-white"
               type="button"
@@ -1053,29 +1064,37 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Akun Google</span>
-              <select
-                value={manualForm.googleAccountId}
-                onChange={(event) => setManualForm((current) => ({ ...current, googleAccountId: event.target.value }))}
-              >
-                <option value="">Pilih akun Google</option>
-                {availableGoogleAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={manualForm.googleAccountId}
+                  onChange={(event) => setManualForm((current) => ({ ...current, googleAccountId: event.target.value }))}
+                >
+                  <option value="">Pilih akun Google</option>
+                  {availableGoogleAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Platform</span>
-              <select
-                value={manualForm.platform}
-                onChange={(event) => setManualForm((current) => ({ ...current, platform: event.target.value }))}
-              >
-                <option value="shopee">Shopee</option>
-                <option value="whatsapp">Whatsapp</option>
-                <option value="pribadi">Pribadi</option>
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={manualForm.platform}
+                  onChange={(event) => setManualForm((current) => ({ ...current, platform: event.target.value }))}
+                >
+                  <option value="shopee">Shopee</option>
+                  <option value="whatsapp">Whatsapp</option>
+                  <option value="pribadi">Pribadi</option>
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
 
             <label className="block space-y-2">
@@ -1098,24 +1117,28 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Harga & Masa Aktif</span>
-              <select
-                value={manualForm.pricePlanId}
-                onChange={(event) => {
-                  const selectedPlan = activePricePlans.find((plan) => String(plan.id) === event.target.value);
-                  setManualForm((current) => ({
-                    ...current,
-                    pricePlanId: event.target.value,
-                    activeDurationDays: selectedPlan ? String(selectedPlan.durationDays) : current.activeDurationDays,
-                  }));
-                }}
-              >
-                <option value="" disabled>Pilih harga</option>
-                {activePricePlans.map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.label} - Rp {formatCurrency(plan.price)}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={manualForm.pricePlanId}
+                  onChange={(event) => {
+                    const selectedPlan = activePricePlans.find((plan) => String(plan.id) === event.target.value);
+                    setManualForm((current) => ({
+                      ...current,
+                      pricePlanId: event.target.value,
+                      activeDurationDays: selectedPlan ? String(selectedPlan.durationDays) : current.activeDurationDays,
+                    }));
+                  }}
+                >
+                  <option value="" disabled>Pilih harga</option>
+                  {activePricePlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.label} - Rp {formatCurrency(plan.price)}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
               {activePricePlans.length === 0 ? (
                 <span className="block text-xs text-danger">Belum ada harga aktif. Tambahkan di tab Harga.</span>
               ) : null}
@@ -1206,40 +1229,52 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Akun Google</span>
-              <select
-                value={editForm.googleAccountId}
-                onChange={(event) => setEditForm((current) => ({ ...current, googleAccountId: event.target.value }))}
-              >
-                <option value="">Pilih akun Google</option>
-                {googleAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={editForm.googleAccountId}
+                  onChange={(event) => setEditForm((current) => ({ ...current, googleAccountId: event.target.value }))}
+                >
+                  <option value="">Pilih akun Google</option>
+                  {googleAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Platform</span>
-              <select
-                value={editForm.platform}
-                onChange={(event) => setEditForm((current) => ({ ...current, platform: event.target.value }))}
-              >
-                <option value="shopee">shopee</option>
-                <option value="whatsapp">whatsapp</option>
-                <option value="pribadi">pribadi</option>
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={editForm.platform}
+                  onChange={(event) => setEditForm((current) => ({ ...current, platform: event.target.value }))}
+                >
+                  <option value="shopee">shopee</option>
+                  <option value="whatsapp">whatsapp</option>
+                  <option value="pribadi">pribadi</option>
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Laporan</span>
-              <select
-                value={editForm.reportStatus}
-                onChange={(event) => setEditForm((current) => ({ ...current, reportStatus: event.target.value }))}
-              >
-                <option value="proses">PROSES</option>
-                <option value="selesai">SELESAI</option>
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={editForm.reportStatus}
+                  onChange={(event) => setEditForm((current) => ({ ...current, reportStatus: event.target.value }))}
+                >
+                  <option value="proses">PROSES</option>
+                  <option value="selesai">SELESAI</option>
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
 
             <label className="block space-y-2">
@@ -1262,24 +1297,32 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
-              <select
-                value={editForm.activeStatus}
-                onChange={(event) => setEditForm((current) => ({ ...current, activeStatus: event.target.value }))}
-              >
-                <option value="aktif">AKTIF</option>
-                <option value="expired">EXPIRED</option>
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={editForm.activeStatus}
+                  onChange={(event) => setEditForm((current) => ({ ...current, activeStatus: event.target.value }))}
+                >
+                  <option value="aktif">AKTIF</option>
+                  <option value="expired">EXPIRED</option>
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Status</span>
-              <select
-                value={editForm.memberStatus}
-                onChange={(event) => setEditForm((current) => ({ ...current, memberStatus: event.target.value }))}
-              >
-                <option value="anggota">ANGGOTA</option>
-                <option value="kick">KICK</option>
-              </select>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none pr-11"
+                  value={editForm.memberStatus}
+                  onChange={(event) => setEditForm((current) => ({ ...current, memberStatus: event.target.value }))}
+                >
+                  <option value="anggota">ANGGOTA</option>
+                  <option value="kick">KICK</option>
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
+              </div>
             </label>
           </div>
 

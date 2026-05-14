@@ -196,6 +196,12 @@ export interface AppSettingsModel {
   googleDriveCredentialsJson: string;
   googleDriveCredentialsMasked: string | null;
   googleDriveServiceEmail: string;
+  googleDriveClientId: string;
+  googleDriveClientSecret: string;
+  googleDriveClientSecretMasked: string | null;
+  googleDriveRefreshToken: string;
+  googleDriveRefreshTokenMasked: string | null;
+  googleDriveAuthMode: string;
   googleDriveFolderId: string;
   updatedAt: string | null;
 }
