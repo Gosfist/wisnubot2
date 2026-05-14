@@ -19,6 +19,9 @@ export function SettingsPage() {
 
   const [showEditUsernameModal, setShowEditUsernameModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showPakasirModal, setShowPakasirModal] = useState(false);
+  const [showGoogleDriveModal, setShowGoogleDriveModal] = useState(false);
+  const [showBackupModal, setShowBackupModal] = useState(false);
   const [newUsername, setNewUsername] = useState("");
   const [usernameSecretKey, setUsernameSecretKey] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -37,6 +40,7 @@ export function SettingsPage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(true);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [isSavingGoogleDrive, setIsSavingGoogleDrive] = useState(false);
   const [isExportingDb, setIsExportingDb] = useState(false);
   const [isImportingDb, setIsImportingDb] = useState(false);
   const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
@@ -132,17 +136,11 @@ export function SettingsPage() {
         pakasirSlug: pakasirSlug.trim(),
         pakasirApiKey: pakasirApiKey.trim(),
         testimonialChannelLink: testimonialChannelLink.trim(),
-        googleDriveCredentialsJson: googleDriveCredentialsJson.trim(),
-        googleDriveFolderId: googleDriveFolderId.trim(),
       });
       setPakasirApiKey("");
       setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
       setTestimonialChannelLink(settings.testimonialChannelLink);
       setTestimonialChannelStatus(settings.testimonialChannelStatus);
-      setGoogleDriveCredentialsJson("");
-      setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
-      setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
-      setGoogleDriveFolderId(settings.googleDriveFolderId);
       if (settings.testimonialChannelStatus && !settings.testimonialChannelStatus.ok) {
         showToast(settings.testimonialChannelStatus.message, "danger");
       } else {
@@ -152,6 +150,29 @@ export function SettingsPage() {
       showToast(error instanceof Error ? error.message : "Gagal menyimpan setting Pakasir.", "danger");
     } finally {
       setIsSavingPayment(false);
+    }
+  }
+
+  async function handleSaveGoogleDrive(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSavingGoogleDrive(true);
+    try {
+      const settings = await appData.updateSettings({
+        pakasirSlug: pakasirSlug.trim(),
+        pakasirApiKey: "",
+        testimonialChannelLink: testimonialChannelLink.trim(),
+        googleDriveCredentialsJson: googleDriveCredentialsJson.trim(),
+        googleDriveFolderId: googleDriveFolderId.trim(),
+      });
+      setGoogleDriveCredentialsJson("");
+      setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
+      setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+      setGoogleDriveFolderId(settings.googleDriveFolderId);
+      showToast("Setting Google Drive berhasil disimpan", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Gagal menyimpan setting Google Drive.", "danger");
+    } finally {
+      setIsSavingGoogleDrive(false);
     }
   }
 
@@ -286,145 +307,46 @@ export function SettingsPage() {
 
       <SurfaceCard>
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-bold">Pakasir</h3>
-          <CreditCard size={18} className="text-accent" />
+          <h3 className="text-lg font-bold">Integrasi & Data</h3>
         </div>
 
-        {isLoadingPayment ? (
-          null
-        ) : (
-          <form className="space-y-4" onSubmit={handleSavePayment}>
-            <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">SLUG PAKASIR</span>
-              <input
-                autoComplete="off"
-                data-lpignore="true"
-                name="pakasir_project_slug"
-                value={pakasirSlug}
-                onChange={(event) => setPakasirSlug(event.target.value)}
-                placeholder="wisnubot"
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">API KEY PAKASIR</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                data-lpignore="true"
-                name="pakasir_secret_key"
-                value={pakasirApiKey}
-                onChange={(event) => setPakasirApiKey(event.target.value)}
-                placeholder={pakasirApiKeyMasked ? `Tersimpan: ${pakasirApiKeyMasked}` : "Masukkan API key Pakasir"}
-              />
-              <span className="text-xs text-text-secondary">
-                Kosongkan jika tidak ingin mengganti API key yang sudah tersimpan.
-              </span>
-            </label>
-
-            <label className="block space-y-2">
-              <span className="flex items-center gap-2 text-xs font-bold tracking-[0.22em] text-text-muted">
-                <Megaphone size={14} />
-                LINK SALURAN TESTIMONI
-              </span>
-              <input
-                autoComplete="off"
-                name="testimonial_channel_link"
-                value={testimonialChannelLink}
-                onChange={(event) => {
-                  setTestimonialChannelLink(event.target.value);
-                  setTestimonialChannelStatus(null);
-                }}
-                placeholder="https://whatsapp.com/channel/..."
-              />
-              <span className={testimonialChannelStatus?.ok ? "text-xs text-success" : "text-xs text-text-secondary"}>
-                {testimonialChannelStatus?.message || "Bot utama harus masuk ke saluran dan dijadikan admin agar testimoni otomatis terkirim."}
-              </span>
-            </label>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block space-y-2 md:col-span-2">
-                <span className="flex items-center gap-2 text-xs font-bold tracking-[0.22em] text-text-muted">
-                  <Folder size={14} />
-                  SERVICE ACCOUNT GOOGLE DRIVE
-                </span>
-                <textarea
-                  className="min-h-32"
-                  autoComplete="off"
-                  name="google_drive_credentials_json"
-                  value={googleDriveCredentialsJson}
-                  onChange={(event) => setGoogleDriveCredentialsJson(event.target.value)}
-                  placeholder={googleDriveCredentialsMasked ? `Tersimpan: ${googleDriveCredentialsMasked}` : "Paste JSON service account Google Drive"}
-                />
-                <span className="text-xs text-text-secondary">
-                  Kosongkan jika tidak ingin mengganti credential. Email service account: {googleDriveServiceEmail || "-"}
-                </span>
-              </label>
-
-              <label className="block space-y-2 md:col-span-2">
-                <span className="text-xs font-bold tracking-[0.22em] text-text-muted">ID FOLDER GOOGLE DRIVE</span>
-                <input
-                  autoComplete="off"
-                  name="google_drive_folder_id"
-                  value={googleDriveFolderId}
-                  onChange={(event) => setGoogleDriveFolderId(event.target.value)}
-                  placeholder="ID folder untuk bukti transaksi"
-                />
-                <span className="text-xs text-text-secondary">
-                  Folder harus dibagikan ke email service account agar upload bukti transaksi berhasil.
-                </span>
-              </label>
+        <div className="grid gap-3 md:grid-cols-3">
+          <button
+            className="flex items-center justify-between gap-4 rounded-[20px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.56)] px-4 py-4 text-left transition hover:border-[rgba(56,189,248,0.28)] hover:bg-[rgba(15,23,42,0.72)]"
+            type="button"
+            onClick={() => setShowPakasirModal(true)}
+          >
+            <div>
+              <span className="block text-xs font-bold tracking-[0.2em] text-text-muted">PAYMENT</span>
+              <strong className="mt-2 block text-sm font-semibold">Pakasir</strong>
             </div>
-
-            <button
-              className="flex w-full items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              type="submit"
-              disabled={isSavingPayment}
-            >
-              <Save size={16} />
-              {isSavingPayment ? "MENYIMPAN..." : "SIMPAN SETTING PAYMENT"}
-            </button>
-          </form>
-        )}
-      </SurfaceCard>
-
-      <SurfaceCard>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-bold">Backup Database</h3>
-          <Database size={18} className="text-accent" />
-        </div>
-
-        <input
-          ref={importInputRef}
-          className="hidden"
-          type="file"
-          accept="application/json,.json"
-          onChange={handleImportDatabase}
-        />
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <button
-            className="flex items-center justify-center gap-2 rounded-[20px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.64)] px-4 py-3.5 text-sm font-bold text-text-primary transition hover:border-[rgba(56,189,248,0.34)] hover:bg-[rgba(15,23,42,0.78)] disabled:cursor-not-allowed disabled:opacity-60"
-            type="button"
-            onClick={handleExportDatabase}
-            disabled={isExportingDb || isImportingDb}
-          >
-            <Download size={16} />
-            {isExportingDb ? "EXPORT..." : "EXPORT DB"}
+            <CreditCard size={16} className="text-accent" />
           </button>
+
           <button
-            className="flex items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex items-center justify-between gap-4 rounded-[20px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.56)] px-4 py-4 text-left transition hover:border-[rgba(56,189,248,0.28)] hover:bg-[rgba(15,23,42,0.72)]"
             type="button"
-            onClick={() => importInputRef.current?.click()}
-            disabled={isExportingDb || isImportingDb}
+            onClick={() => setShowGoogleDriveModal(true)}
           >
-            <Upload size={16} />
-            {isImportingDb ? "IMPORT..." : "IMPORT DB"}
+            <div>
+              <span className="block text-xs font-bold tracking-[0.2em] text-text-muted">UPLOAD BUKTI</span>
+              <strong className="mt-2 block text-sm font-semibold">Google Drive</strong>
+            </div>
+            <Folder size={16} className="text-accent" />
+          </button>
+
+          <button
+            className="flex items-center justify-between gap-4 rounded-[20px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.56)] px-4 py-4 text-left transition hover:border-[rgba(56,189,248,0.28)] hover:bg-[rgba(15,23,42,0.72)]"
+            type="button"
+            onClick={() => setShowBackupModal(true)}
+          >
+            <div>
+              <span className="block text-xs font-bold tracking-[0.2em] text-text-muted">DATABASE</span>
+              <strong className="mt-2 block text-sm font-semibold">Backup Data</strong>
+            </div>
+            <Database size={16} className="text-accent" />
           </button>
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-text-secondary">
-          File export memakai format JSON WisnuBot2. Import full backup akan mengganti seluruh database, termasuk bot WA, grup, transaksi, Gemini, broadcast, dan pengaturan.
-        </p>
       </SurfaceCard>
 
       <Modal open={showEditUsernameModal} title="Ganti Username" onClose={() => setShowEditUsernameModal(false)}>
@@ -505,6 +427,147 @@ export function SettingsPage() {
             {isChangingPassword ? "MEMPROSES..." : "UBAH PASSWORD"}
           </button>
         </form>
+      </Modal>
+
+      <Modal open={showPakasirModal} title="Pakasir" onClose={() => setShowPakasirModal(false)} wide>
+        {isLoadingPayment ? null : (
+          <form className="space-y-4" onSubmit={handleSavePayment}>
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">SLUG PAKASIR</span>
+              <input
+                autoComplete="off"
+                data-lpignore="true"
+                name="pakasir_project_slug"
+                value={pakasirSlug}
+                onChange={(event) => setPakasirSlug(event.target.value)}
+                placeholder="wisnubot"
+              />
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">API KEY PAKASIR</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                data-lpignore="true"
+                name="pakasir_secret_key"
+                value={pakasirApiKey}
+                onChange={(event) => setPakasirApiKey(event.target.value)}
+                placeholder={pakasirApiKeyMasked ? `Tersimpan: ${pakasirApiKeyMasked}` : "Masukkan API key Pakasir"}
+              />
+              <span className="text-xs text-text-secondary">
+                Kosongkan jika tidak ingin mengganti API key yang sudah tersimpan.
+              </span>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="flex items-center gap-2 text-xs font-bold tracking-[0.22em] text-text-muted">
+                <Megaphone size={14} />
+                LINK SALURAN TESTIMONI
+              </span>
+              <input
+                autoComplete="off"
+                name="testimonial_channel_link"
+                value={testimonialChannelLink}
+                onChange={(event) => {
+                  setTestimonialChannelLink(event.target.value);
+                  setTestimonialChannelStatus(null);
+                }}
+                placeholder="https://whatsapp.com/channel/..."
+              />
+              <span className={testimonialChannelStatus?.ok ? "text-xs text-success" : "text-xs text-text-secondary"}>
+                {testimonialChannelStatus?.message || "Bot utama harus masuk ke saluran dan dijadikan admin agar testimoni otomatis terkirim."}
+              </span>
+            </label>
+
+            <button
+              className="flex w-full items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              type="submit"
+              disabled={isSavingPayment}
+            >
+              <Save size={16} />
+              {isSavingPayment ? "MENYIMPAN..." : "SIMPAN SETTING PAYMENT"}
+            </button>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={showGoogleDriveModal} title="Google Drive" onClose={() => setShowGoogleDriveModal(false)} wide>
+        {isLoadingPayment ? null : (
+          <form className="space-y-4" onSubmit={handleSaveGoogleDrive}>
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">SERVICE ACCOUNT GOOGLE DRIVE</span>
+              <textarea
+                className="min-h-32"
+                autoComplete="off"
+                name="google_drive_credentials_json"
+                value={googleDriveCredentialsJson}
+                onChange={(event) => setGoogleDriveCredentialsJson(event.target.value)}
+                placeholder={googleDriveCredentialsMasked ? `Tersimpan: ${googleDriveCredentialsMasked}` : "Paste JSON service account Google Drive"}
+              />
+              <span className="text-xs text-text-secondary">
+                Kosongkan jika tidak ingin mengganti credential. Email service account: {googleDriveServiceEmail || "-"}
+              </span>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">ID FOLDER GOOGLE DRIVE</span>
+              <input
+                autoComplete="off"
+                name="google_drive_folder_id"
+                value={googleDriveFolderId}
+                onChange={(event) => setGoogleDriveFolderId(event.target.value)}
+                placeholder="ID folder untuk bukti transaksi"
+              />
+              <span className="text-xs text-text-secondary">
+                Folder harus dibagikan ke email service account agar upload bukti transaksi berhasil.
+              </span>
+            </label>
+
+            <button
+              className="flex w-full items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              type="submit"
+              disabled={isSavingGoogleDrive}
+            >
+              <Save size={16} />
+              {isSavingGoogleDrive ? "MENYIMPAN..." : "SIMPAN SETTING GOOGLE DRIVE"}
+            </button>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={showBackupModal} title="Backup Data" onClose={() => setShowBackupModal(false)}>
+        <input
+          ref={importInputRef}
+          className="hidden"
+          type="file"
+          accept="application/json,.json"
+          onChange={handleImportDatabase}
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            className="flex items-center justify-center gap-2 rounded-[20px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.64)] px-4 py-3.5 text-sm font-bold text-text-primary transition hover:border-[rgba(56,189,248,0.34)] hover:bg-[rgba(15,23,42,0.78)] disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={handleExportDatabase}
+            disabled={isExportingDb || isImportingDb}
+          >
+            <Download size={16} />
+            {isExportingDb ? "EXPORT..." : "EXPORT DB"}
+          </button>
+          <button
+            className="flex items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            disabled={isExportingDb || isImportingDb}
+          >
+            <Upload size={16} />
+            {isImportingDb ? "IMPORT..." : "IMPORT DB"}
+          </button>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-text-secondary">
+          File export memakai format JSON WisnuBot2. Import full backup akan mengganti seluruh database, termasuk bot WA, grup, transaksi, Gemini, broadcast, dan pengaturan.
+        </p>
       </Modal>
 
       {importProgress ? (
