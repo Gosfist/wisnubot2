@@ -4,15 +4,17 @@ import { cn } from "../../lib/cn";
 import { GoogleAccountsPage } from "./GoogleAccountsPage";
 import { GeminiPricesPage } from "./GeminiPricesPage";
 import { ShopeeReportPage } from "./ShopeeReportPage";
+import { TransactionMessageTemplatePage } from "./TransactionMessageTemplatePage";
 import { TransactionsPage } from "./TransactionsPage";
 
-type TrxGeminiTab = "trx" | "account" | "price" | "report";
+type TrxGeminiTab = "trx" | "account" | "price" | "report" | "template";
 
 const tabs: { id: TrxGeminiTab; label: string }[] = [
   { id: "trx", label: "Transaksi Manual" },
   { id: "account", label: "Google Account" },
   { id: "price", label: "Harga" },
   { id: "report", label: "Laporan" },
+  { id: "template", label: "Template Pesan" },
 ];
 
 export function TrxGeminiPage() {
@@ -46,8 +48,10 @@ export function TrxGeminiPage() {
         <GoogleAccountsPage embedded />
       ) : activeTab === "price" ? (
         <GeminiPricesPage embedded />
-      ) : (
+      ) : activeTab === "report" ? (
         <ShopeeReportPage />
+      ) : (
+        <TransactionMessageTemplatePage />
       )}
     </div>
   );

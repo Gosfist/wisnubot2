@@ -1,11 +1,16 @@
-import { CalendarDays, ChevronDown, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
+import { CalendarDays, ChevronDown, Copy, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImportConfirmModal } from "../../components/ImportConfirmModal";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
+import { cn } from "../../lib/cn";
 import { formatCurrency } from "../../lib/format";
+import {
+  DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+  renderTransactionMessageTemplate,
+} from "../../lib/transactionMessageTemplate";
 import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
 import type { GeminiPricePlanModel, GoogleAccountModel, TransactionModel } from "../../types/models";
@@ -254,20 +259,22 @@ function EditableDateField({
   value,
   onChange,
   disabled = false,
+  compact = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const pickerRef = useRef<HTMLInputElement | null>(null);
 
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-text-secondary">{label}</span>
+    <label className={compact ? "block space-y-1.5" : "block space-y-2"}>
+      <span className={compact ? "text-xs font-semibold text-text-secondary" : "text-sm font-semibold text-text-secondary"}>{label}</span>
       <div className="relative">
         <input
-          className="pr-12"
+          className={cn("pr-12", compact ? "rounded-[12px] px-3.5 py-2.5 text-sm" : "")}
           type="text"
           inputMode="numeric"
           value={value}
@@ -330,6 +337,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [proofImageFile, setProofImageFile] = useState<File | null>(null);
   const [proofImagePreview, setProofImagePreview] = useState<string | null>(null);
+  const [successMessagePreview, setSuccessMessagePreview] = useState("");
   const [manualForm, setManualForm] = useState({
     googleAccountId: "",
     pricePlanId: "",
@@ -433,6 +441,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     () => activePricePlans.find((plan) => plan.durationDays === 30) ?? activePricePlans[0] ?? null,
     [activePricePlans],
   );
+  const editControlClass = "w-full rounded-[12px] px-3.5 py-2.5 text-sm";
 
   useEffect(() => {
     setCurrentPage(1);
@@ -513,10 +522,14 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       showToast("Paket harga wajib dipilih.", "danger");
       return;
     }
+    if (!proofImageFile) {
+      showToast("Gambar bukti wajib diisi.", "danger");
+      return;
+    }
 
     setIsSaving(true);
     try {
-      await appData.createManualTransaction({
+      const created = await appData.createManualTransaction({
         googleAccountId: Number(manualForm.googleAccountId),
         pricePlanId: selectedPlan.id,
         platform: manualForm.platform,
@@ -527,6 +540,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         startDate: manualForm.startDate,
         proofImage: proofImageFile,
       });
+      const settings = await appData.fetchSettings().catch(() => null);
+      setSuccessMessagePreview(renderTransactionMessageTemplate(
+        settings?.transactionMessageTemplate || DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+        created,
+      ));
       const [nextItems, nextAccounts, nextPlans] = await Promise.all([
         appData.fetchTransactions(),
         appData.fetchGoogleAccounts(),
@@ -743,6 +761,35 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal menghapus transaksi.", "danger");
     }
+  }
+
+  async function handleCopySuccessMessage() {
+    await navigator.clipboard.writeText(successMessagePreview);
+    showToast("Template pesan berhasil disalin.", "success");
+  }
+
+  async function handleCopyEditTemplate() {
+    if (!editingItem) return;
+    const previewTransaction: TransactionModel = {
+      ...editingItem,
+      idTrx: editForm.idTrx,
+      buyerEmail: normalizeBuyerEmail(editForm.buyerEmail),
+      customerJid: normalizeBuyerEmail(editForm.buyerEmail) || editingItem.customerJid,
+      platform: editForm.platform,
+      reportStatus: editForm.reportStatus === "selesai" ? "selesai" : "proses",
+      activeStatus: editForm.activeStatus === "expired" ? "expired" : "aktif",
+      memberStatus: editForm.memberStatus === "kick" ? "kick" : "anggota",
+      activeStartAt: normalizeDateTextInput(editForm.activeStartAt) || editingItem.activeStartAt,
+      activeExpiresAt: normalizeDateTextInput(editForm.activeExpiresAt) || editingItem.activeExpiresAt,
+      warrantyExpiresAt: normalizeDateTextInput(editForm.warrantyExpiresAt) || editingItem.warrantyExpiresAt,
+    };
+    const settings = await appData.fetchSettings().catch(() => null);
+    const text = renderTransactionMessageTemplate(
+      settings?.transactionMessageTemplate || DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+      previewTransaction,
+    );
+    await navigator.clipboard.writeText(text);
+    showToast("Template pesan berhasil disalin.", "success");
   }
 
   const headerActions = (
@@ -1159,7 +1206,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             onPaste={handleProofPaste}
           >
             <div className="mb-3 flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-text-secondary">Gambar Bukti</span>
+              <span className="text-sm font-semibold text-text-secondary">Gambar Bukti <span className="text-danger">*</span></span>
               <button
                 className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(56,189,248,0.22)] px-3 py-2 text-xs font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
                 type="button"
@@ -1189,7 +1236,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             ) : (
               <div className="rounded-[10px] border border-dashed border-[rgba(56,189,248,0.2)] px-4 py-5 text-sm text-text-secondary">
-                Pilih file atau tekan Ctrl + V saat area ini aktif.
+                Gambar bukti wajib diisi. Pilih file atau tekan Ctrl + V saat area ini aktif.
               </div>
             )}
             <input
@@ -1225,13 +1272,13 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         onClose={() => setEditingItem(null)}
         wide
       >
-        <form className="space-y-4" onSubmit={handleSaveEdit}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Akun Google</span>
+        <form className="space-y-3" onSubmit={handleSaveEdit}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">Akun Google</span>
               <div className="relative">
                 <select
-                  className="w-full appearance-none pr-11"
+                  className={cn(editControlClass, "appearance-none pr-11")}
                   value={editForm.googleAccountId}
                   onChange={(event) => setEditForm((current) => ({ ...current, googleAccountId: event.target.value }))}
                 >
@@ -1246,11 +1293,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Platform</span>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">Platform</span>
               <div className="relative">
                 <select
-                  className="w-full appearance-none pr-11"
+                  className={cn(editControlClass, "appearance-none pr-11")}
                   value={editForm.platform}
                   onChange={(event) => setEditForm((current) => ({ ...current, platform: event.target.value }))}
                 >
@@ -1262,11 +1309,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Laporan</span>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">Laporan</span>
               <div className="relative">
                 <select
-                  className="w-full appearance-none pr-11"
+                  className={cn(editControlClass, "appearance-none pr-11")}
                   value={editForm.reportStatus}
                   onChange={(event) => setEditForm((current) => ({ ...current, reportStatus: event.target.value }))}
                 >
@@ -1277,29 +1324,31 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">No Pesanan</span>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">No Pesanan</span>
               <input
+                className={editControlClass}
                 value={editForm.idTrx}
                 onChange={(event) => setEditForm((current) => ({ ...current, idTrx: event.target.value }))}
                 placeholder="2604xxxx"
               />
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Email</span>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">Email</span>
               <input
+                className={editControlClass}
                 value={editForm.buyerEmail}
                 onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: event.target.value.replace(/@gmail\.com/gi, "") }))}
                 placeholder="email buyer"
               />
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">Masa Aktif</span>
               <div className="relative">
                 <select
-                  className="w-full appearance-none pr-11"
+                  className={cn(editControlClass, "appearance-none pr-11")}
                   value={editForm.activeStatus}
                   onChange={(event) => setEditForm((current) => ({ ...current, activeStatus: event.target.value }))}
                 >
@@ -1310,11 +1359,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Status</span>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-semibold text-text-secondary">Status</span>
               <div className="relative">
                 <select
-                  className="w-full appearance-none pr-11"
+                  className={cn(editControlClass, "appearance-none pr-11")}
                   value={editForm.memberStatus}
                   onChange={(event) => setEditForm((current) => ({ ...current, memberStatus: event.target.value }))}
                 >
@@ -1326,11 +1375,12 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </label>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-3">
             <EditableDateField
               label="Start"
               value={editForm.activeStartAt}
               disabled
+              compact
               onChange={(value) => setEditForm((current) => ({ ...current, activeStartAt: value }))}
             />
 
@@ -1338,6 +1388,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               label="Exp"
               value={editForm.activeExpiresAt}
               disabled
+              compact
               onChange={(value) => setEditForm((current) => ({ ...current, activeExpiresAt: value }))}
             />
 
@@ -1345,18 +1396,51 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               label="Garansi"
               value={editForm.warrantyExpiresAt}
               disabled
+              compact
               onChange={(value) => setEditForm((current) => ({ ...current, warrantyExpiresAt: value }))}
             />
           </div>
 
           <button
-            className="inline-flex w-full items-center justify-center rounded-[18px] bg-[rgba(15,23,42,0.96)] px-4 py-3.5 text-sm font-bold text-white disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
             type="submit"
             disabled={isSaving}
           >
             {isSaving ? "Menyimpan..." : "Update Transaksi"}
           </button>
+
+          <button
+            className="inline-flex w-full items-center justify-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-2.5 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-60"
+            type="button"
+            disabled={isSaving}
+            onClick={() => void handleCopyEditTemplate()}
+          >
+            <Copy size={16} />
+            Copy Template
+          </button>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(successMessagePreview)}
+        title="Template Pesan"
+        onClose={() => setSuccessMessagePreview("")}
+        wide
+      >
+        <div className="space-y-5">
+          <div className="whitespace-pre-wrap rounded-[18px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.56)] px-5 py-5 text-base leading-8 text-text-primary">
+            {successMessagePreview}
+          </div>
+
+          <button
+            className="inline-flex w-full items-center justify-center gap-2 rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+            type="button"
+            onClick={() => void handleCopySuccessMessage()}
+          >
+            <Copy size={16} />
+            Copy
+          </button>
+        </div>
       </Modal>
 
       <ImportConfirmModal

@@ -385,7 +385,8 @@ async function exportScopedForUser(user) {
 
   const [settingsRows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
-            testimonial_channel_jid, testimonial_channel_name, updated_at
+            testimonial_channel_jid, testimonial_channel_name,
+            transaction_message_template, updated_at
        FROM app_settings
       WHERE user_id = ?
       LIMIT 1`,
@@ -651,9 +652,10 @@ async function importSettings(connection, userId, data) {
   await connection.execute(
     `INSERT INTO app_settings (
        user_id, pakasir_slug, pakasir_api_key, testimonial_channel_link,
-       testimonial_channel_jid, testimonial_channel_name, updated_at
+       testimonial_channel_jid, testimonial_channel_name,
+       transaction_message_template, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
     [
       userId,
       settings.pakasir_slug ?? null,
@@ -661,6 +663,7 @@ async function importSettings(connection, userId, data) {
       settings.testimonial_channel_link ?? null,
       settings.testimonial_channel_jid ?? null,
       settings.testimonial_channel_name ?? null,
+      settings.transaction_message_template ?? null,
       settings.updated_at ?? null,
     ],
   );

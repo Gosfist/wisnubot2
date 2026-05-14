@@ -32,6 +32,7 @@ function rowToModel(row, { mask = true } = {}) {
       testimonialChannelJid: "",
       testimonialChannelName: "",
       testimonialChannelStatus: null,
+      transactionMessageTemplate: "",
       googleDriveCredentialsJson: "",
       googleDriveCredentialsMasked: null,
       googleDriveServiceEmail: "",
@@ -54,6 +55,7 @@ function rowToModel(row, { mask = true } = {}) {
     testimonialChannelJid: row.testimonial_channel_jid ? String(row.testimonial_channel_jid) : "",
     testimonialChannelName: row.testimonial_channel_name ? String(row.testimonial_channel_name) : "",
     testimonialChannelStatus: row.testimonial_channel_status ?? null,
+    transactionMessageTemplate: row.transaction_message_template ? String(row.transaction_message_template) : "",
     googleDriveCredentialsJson: mask ? "" : googleDriveCredentials,
     googleDriveCredentialsMasked: googleDriveCredentials ? "Tersimpan" : null,
     googleDriveServiceEmail,
@@ -134,6 +136,7 @@ async function getForUser(user) {
   const [rows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
+            transaction_message_template,
             google_drive_credentials_json, google_drive_client_id,
             google_drive_client_secret, google_drive_refresh_token,
             google_drive_folder_id, updated_at
@@ -151,6 +154,7 @@ async function getRawForUserId(userId) {
   const [rows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
+            transaction_message_template,
             google_drive_credentials_json, google_drive_client_id,
             google_drive_client_secret, google_drive_refresh_token,
             google_drive_folder_id, updated_at
@@ -163,15 +167,36 @@ async function getRawForUserId(userId) {
 }
 
 async function upsertForUser(user, payload, options = {}) {
-  const pakasirSlug = String(payload?.pakasirSlug ?? "").trim();
-  const apiKey = String(payload?.pakasirApiKey ?? "").trim();
-  const testimonialChannelLink = String(payload?.testimonialChannelLink ?? "").trim();
-  const googleDriveCredentialsJson = String(payload?.googleDriveCredentialsJson ?? "").trim();
-  const googleDriveClientId = String(payload?.googleDriveClientId ?? "").trim();
-  const googleDriveClientSecret = String(payload?.googleDriveClientSecret ?? "").trim();
-  const googleDriveRefreshToken = String(payload?.googleDriveRefreshToken ?? "").trim();
-  const googleDriveFolderId = googleDriveService.normalizeFolderId(payload?.googleDriveFolderId);
   const pool = getPool();
+  const [existingRows] = await pool.execute(
+    `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
+            testimonial_channel_jid, testimonial_channel_name,
+            transaction_message_template,
+            google_drive_credentials_json, google_drive_client_id,
+            google_drive_client_secret, google_drive_refresh_token,
+            google_drive_folder_id
+       FROM app_settings
+      WHERE user_id = ?
+      LIMIT 1`,
+    [Number(user.id)],
+  );
+  const existing = existingRows[0] ?? {};
+  const field = (key, column, fallback = "") => (
+    Object.prototype.hasOwnProperty.call(payload ?? {}, key)
+      ? String(payload?.[key] ?? "").trim()
+      : String(existing?.[column] ?? fallback)
+  );
+  const pakasirSlug = field("pakasirSlug", "pakasir_slug");
+  const apiKey = field("pakasirApiKey", "pakasir_api_key");
+  const testimonialChannelLink = field("testimonialChannelLink", "testimonial_channel_link");
+  const transactionMessageTemplate = field("transactionMessageTemplate", "transaction_message_template");
+  const googleDriveCredentialsJson = field("googleDriveCredentialsJson", "google_drive_credentials_json");
+  const googleDriveClientId = field("googleDriveClientId", "google_drive_client_id");
+  const googleDriveClientSecret = field("googleDriveClientSecret", "google_drive_client_secret");
+  const googleDriveRefreshToken = field("googleDriveRefreshToken", "google_drive_refresh_token");
+  const googleDriveFolderId = Object.prototype.hasOwnProperty.call(payload ?? {}, "googleDriveFolderId")
+    ? googleDriveService.normalizeFolderId(payload?.googleDriveFolderId)
+    : String(existing?.google_drive_folder_id ?? "");
   const channel = testimonialChannelLink
     ? await resolveTestimonialChannel(options.sock, testimonialChannelLink)
     : {
@@ -181,14 +206,6 @@ async function upsertForUser(user, payload, options = {}) {
       };
 
   if (testimonialChannelLink && !channel.jid) {
-    const [existingRows] = await pool.execute(
-      `SELECT testimonial_channel_link, testimonial_channel_jid, testimonial_channel_name
-         FROM app_settings
-        WHERE user_id = ?
-        LIMIT 1`,
-      [user.id],
-    );
-    const existing = existingRows[0] ?? null;
     if (existing && String(existing.testimonial_channel_link ?? "") === testimonialChannelLink) {
       channel.jid = existing.testimonial_channel_jid || null;
       channel.name = existing.testimonial_channel_name || null;
@@ -199,16 +216,18 @@ async function upsertForUser(user, payload, options = {}) {
     `INSERT INTO app_settings (
        user_id, pakasir_slug, pakasir_api_key,
        testimonial_channel_link, testimonial_channel_jid, testimonial_channel_name,
+       transaction_message_template,
        google_drive_credentials_json, google_drive_client_id, google_drive_client_secret,
        google_drive_refresh_token, google_drive_folder_id
      )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id) DO UPDATE SET
          pakasir_slug = EXCLUDED.pakasir_slug,
          pakasir_api_key = COALESCE(EXCLUDED.pakasir_api_key, app_settings.pakasir_api_key),
          testimonial_channel_link = EXCLUDED.testimonial_channel_link,
          testimonial_channel_jid = EXCLUDED.testimonial_channel_jid,
          testimonial_channel_name = EXCLUDED.testimonial_channel_name,
+         transaction_message_template = EXCLUDED.transaction_message_template,
          google_drive_credentials_json = COALESCE(EXCLUDED.google_drive_credentials_json, app_settings.google_drive_credentials_json),
          google_drive_client_id = COALESCE(EXCLUDED.google_drive_client_id, app_settings.google_drive_client_id),
          google_drive_client_secret = COALESCE(EXCLUDED.google_drive_client_secret, app_settings.google_drive_client_secret),
@@ -222,6 +241,7 @@ async function upsertForUser(user, payload, options = {}) {
       testimonialChannelLink || null,
       channel.jid || null,
       channel.name || null,
+      transactionMessageTemplate || null,
       googleDriveCredentialsJson || null,
       googleDriveClientId || null,
       googleDriveClientSecret || null,

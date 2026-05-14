@@ -19,6 +19,7 @@ export async function updateSettings(req, res) {
       pakasirSlug: req.body?.pakasirSlug,
       pakasirApiKey: req.body?.pakasirApiKey,
       testimonialChannelLink: req.body?.testimonialChannelLink,
+      transactionMessageTemplate: req.body?.transactionMessageTemplate,
       googleDriveCredentialsJson: req.body?.googleDriveCredentialsJson,
       googleDriveClientId: req.body?.googleDriveClientId,
       googleDriveClientSecret: req.body?.googleDriveClientSecret,
