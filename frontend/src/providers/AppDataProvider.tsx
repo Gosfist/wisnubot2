@@ -77,6 +77,11 @@ interface AppDataContextValue {
   addGroupPushExclusion: (groupId: string, payload: { phoneNumber: string; label?: string }) => Promise<GroupPushExclusionModel>;
   deleteGroupPushExclusion: (groupId: string, exclusionId: number) => Promise<string>;
   fetchTransactions: () => Promise<TransactionModel[]>;
+  refreshTrxGeminiData: () => Promise<{
+    googleAccounts: GoogleAccountModel[];
+    geminiPricePlans: GeminiPricePlanModel[];
+    transactions: TransactionModel[];
+  }>;
   createManualTransaction: (payload: Record<string, unknown>) => Promise<TransactionModel>;
   updateTransaction: (transactionId: number, payload: Record<string, unknown>) => Promise<TransactionModel>;
   deleteTransaction: (transactionId: number) => Promise<string>;
@@ -775,6 +780,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return trxGeminiInflightRef.current.transactions;
   }
 
+  async function refreshTrxGeminiData(): Promise<{
+    googleAccounts: GoogleAccountModel[];
+    geminiPricePlans: GeminiPricePlanModel[];
+    transactions: TransactionModel[];
+  }> {
+    invalidateTrxGeminiCache();
+    const [googleAccounts, geminiPricePlans, transactions] = await Promise.all([
+      fetchGoogleAccounts(),
+      fetchGeminiPricePlans(),
+      fetchTransactions(),
+    ]);
+    return { googleAccounts, geminiPricePlans, transactions };
+  }
+
   async function createManualTransaction(payload: Record<string, unknown>): Promise<TransactionModel> {
     const data = await apiFetch("/cs-payments/transactions", withJsonBody(payload));
     invalidateTrxGeminiCache();
@@ -894,6 +913,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       addGroupPushExclusion,
       deleteGroupPushExclusion,
       fetchTransactions,
+      refreshTrxGeminiData,
       createManualTransaction,
       updateTransaction,
       deleteTransaction,

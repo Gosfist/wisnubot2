@@ -35,6 +35,7 @@ export function SettingsPage() {
   const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [isExportingDb, setIsExportingDb] = useState(false);
   const [isImportingDb, setIsImportingDb] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -186,29 +187,42 @@ export function SettingsPage() {
     }
 
     setIsImportingDb(true);
+    setImportProgress({ percent: 3, label: "Membaca file export..." });
     try {
       const text = await file.text();
+      setImportProgress({ percent: 12, label: "Memvalidasi isi file JSON..." });
       const payload = JSON.parse(text);
+      setImportProgress({ percent: 25, label: "Mengirim data import ke backend..." });
       const result = await apiFetch<{ message: string; counts?: Record<string, number> }>(
         "/settings/import",
         withJsonBody(payload),
       );
-      const [settings] = await Promise.all([
-        appData.fetchSettings(),
+      setImportProgress({ percent: 72, label: "Import backend selesai, memuat ulang setting..." });
+      const settings = await appData.fetchSettings();
+      setImportProgress({ percent: 82, label: "Memuat ulang broadcast dan customer service..." });
+      await Promise.all([
         appData.refreshBroadcasts(),
         appData.refreshCustomerService(),
-        appData.fetchGoogleAccounts(),
-        appData.fetchGeminiPricePlans(),
-        appData.fetchTransactions(),
       ]);
+      setImportProgress({ percent: 92, label: "Memuat ulang TRX Gemini dari database..." });
+      const trxGeminiData = await appData.refreshTrxGeminiData();
       setPakasirSlug(settings.pakasirSlug);
       setPakasirApiKey("");
       setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
       setTestimonialChannelLink(settings.testimonialChannelLink);
       setTestimonialChannelStatus(settings.testimonialChannelStatus);
-      showToast(result.message || "Import database berhasil", "success");
+      setImportProgress({
+        percent: 100,
+        label: `Import selesai, ${trxGeminiData.transactions.length} TRX Gemini dimuat.`,
+      });
+      window.setTimeout(() => {
+        setImportProgress(null);
+        showToast(result.message || "Import database berhasil", "success");
+      }, 900);
     } catch (error) {
+      setImportProgress({ percent: 100, label: "Import gagal. Cek pesan error." });
       showToast(error instanceof Error ? error.message : "Gagal import database.", "danger");
+      window.setTimeout(() => setImportProgress(null), 1600);
     } finally {
       setIsImportingDb(false);
     }
@@ -441,6 +455,22 @@ export function SettingsPage() {
           </button>
         </form>
       </Modal>
+
+      {importProgress ? (
+        <div className="fixed bottom-6 right-6 z-[120] w-[min(360px,calc(100vw-32px))] rounded-[18px] border border-[rgba(56,189,248,0.26)] bg-[rgba(15,23,42,0.96)] p-4 text-text-primary shadow-2xl shadow-black/40 backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-bold tracking-[0.22em] text-text-muted">IMPORT DB</span>
+            <strong className="text-sm font-bold text-accent">{importProgress.percent}%</strong>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[rgba(148,163,184,0.2)]">
+            <div
+              className="h-full rounded-full bg-linear-to-r from-primary to-accent transition-[width] duration-500 ease-out"
+              style={{ width: `${importProgress.percent}%` }}
+            />
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-text-secondary">{importProgress.label}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
