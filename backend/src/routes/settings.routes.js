@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { body } from "express-validator";
 import {
+  createGoogleDriveOAuthUrl,
   exportDatabase,
   getSettings,
+  handleGoogleDriveOAuthCallback,
   importDatabase,
   updateSettings,
 } from "../controllers/settings.controller.js";
@@ -10,11 +12,24 @@ import { authenticate } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 
 const router = Router();
+
+router.get("/google-drive/oauth/callback", handleGoogleDriveOAuthCallback);
+
 router.use(authenticate);
 
 router.get("/", getSettings);
 router.get("/export", exportDatabase);
 router.post("/import", importDatabase);
+router.post(
+  "/google-drive/oauth-url",
+  [
+    body("clientId").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
+    body("clientSecret").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
+    body("targetOrigin").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
+    validate,
+  ],
+  createGoogleDriveOAuthUrl,
+);
 router.put(
   "/",
   [

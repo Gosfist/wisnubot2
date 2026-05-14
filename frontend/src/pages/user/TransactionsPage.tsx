@@ -1402,7 +1402,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           </div>
 
           <button
-            className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:opacity-60"
             type="submit"
             disabled={isSaving}
           >

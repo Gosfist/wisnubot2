@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, Database, Download, Folder, Key, Lock, Megaphone, PencilLine, Save, Upload, User } from "lucide-react";
+import { CreditCard, Database, Download, ExternalLink, Folder, Key, Lock, Megaphone, PencilLine, Save, Upload, User } from "lucide-react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -53,6 +53,8 @@ export function SettingsPage() {
   const [isLoadingPayment, setIsLoadingPayment] = useState(true);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [isSavingGoogleDrive, setIsSavingGoogleDrive] = useState(false);
+  const [isLoggingInGoogleDrive, setIsLoggingInGoogleDrive] = useState(false);
+  const [googleDriveOAuthUrl, setGoogleDriveOAuthUrl] = useState("");
   const [isExportingDb, setIsExportingDb] = useState(false);
   const [isImportingDb, setIsImportingDb] = useState(false);
   const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
@@ -82,6 +84,27 @@ export function SettingsPage() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    function handleGoogleDriveOAuthMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin && event.origin !== new URL(appConfig.apiBaseUrl).origin) return;
+      const data = event.data as { type?: string; payload?: { ok?: boolean; refreshToken?: string; error?: string } };
+      if (data?.type !== "wisnubot2:google-drive-oauth") return;
+
+      if (data.payload?.ok && data.payload.refreshToken) {
+        setGoogleDriveRefreshToken(data.payload.refreshToken);
+        setGoogleDriveRefreshTokenMasked(null);
+        setGoogleDriveAuthMode("oauth");
+        showToast("Login Google berhasil. Klik Simpan Setting Google Drive untuk menyimpan token.", "success");
+      } else {
+        showToast(data.payload?.error || "Login Google gagal.", "danger");
+      }
+      setIsLoggingInGoogleDrive(false);
+    }
+
+    window.addEventListener("message", handleGoogleDriveOAuthMessage);
+    return () => window.removeEventListener("message", handleGoogleDriveOAuthMessage);
+  }, [showToast]);
 
   async function handleSaveUsername(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -192,6 +215,40 @@ export function SettingsPage() {
       showToast(error instanceof Error ? error.message : "Gagal menyimpan setting Google Drive.", "danger");
     } finally {
       setIsSavingGoogleDrive(false);
+    }
+  }
+
+  async function handleGoogleDriveLogin() {
+    const clientId = googleDriveClientId.trim();
+    const clientSecret = googleDriveClientSecret.trim();
+    if (!clientId) {
+      showToast("OAuth Client ID wajib diisi.", "danger");
+      return;
+    }
+    if (!clientSecret && !googleDriveClientSecretMasked) {
+      showToast("OAuth Client Secret wajib diisi.", "danger");
+      return;
+    }
+
+    setIsLoggingInGoogleDrive(true);
+    setGoogleDriveOAuthUrl("");
+    try {
+      const result = await apiFetch<{ authUrl: string; redirectUri: string }>(
+        "/settings/google-drive/oauth-url",
+        withJsonBody({
+          clientId,
+          clientSecret,
+          targetOrigin: window.location.origin,
+        }),
+      );
+      setGoogleDriveOAuthUrl(result.authUrl);
+      const popup = window.open(result.authUrl, "wisnubot2-google-drive-oauth", "width=520,height=720");
+      if (!popup) {
+        showToast("Popup diblokir. Klik link Login Google manual yang muncul.", "danger");
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Gagal membuat link Login Google.", "danger");
+      setIsLoggingInGoogleDrive(false);
     }
   }
 
@@ -515,77 +572,106 @@ export function SettingsPage() {
       <Modal open={showGoogleDriveModal} title="Google Drive" onClose={() => setShowGoogleDriveModal(false)} wide>
         {isLoadingPayment ? null : (
           <form className="space-y-4" onSubmit={handleSaveGoogleDrive}>
-            <div className="rounded-[18px] border border-[rgba(56,189,248,0.18)] bg-[rgba(15,23,42,0.46)] p-4 text-sm text-text-secondary">
-              <strong className="block text-text-primary">Google Drive personal pakai OAuth.</strong>
-              <span>Isi Client ID, Client Secret, Refresh Token, dan ID folder supaya upload bukti memakai kuota Google Drive personal kamu.</span>
+            <label className="grid gap-2 md:grid-cols-[150px_minmax(0,1fr)] md:items-center">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">CLIENT ID :</span>
+              <div className="space-y-2">
+                <input
+                  className="min-h-[46px] px-4 py-2.5 text-sm"
+                  autoComplete="off"
+                  name="google_drive_client_id"
+                  value={googleDriveClientId}
+                  onChange={(event) => setGoogleDriveClientId(event.target.value)}
+                  placeholder="Client ID dari Google Cloud OAuth"
+                />
+                <span className="block text-xs text-text-secondary">
+                  Status auth: {googleDriveAuthMode === "oauth" ? "OAuth Google personal aktif" : "Belum lengkap"}
+                </span>
+              </div>
+            </label>
+
+            <label className="grid gap-2 md:grid-cols-[150px_minmax(0,1fr)] md:items-center">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">CLIENT SECRET :</span>
+              <div className="space-y-2">
+                <input
+                  className="min-h-[46px] px-4 py-2.5 text-sm"
+                  autoComplete="off"
+                  name="google_drive_client_secret"
+                  value={googleDriveClientSecret}
+                  onChange={(event) => setGoogleDriveClientSecret(event.target.value)}
+                  placeholder={googleDriveClientSecretMasked ? `Tersimpan: ${googleDriveClientSecretMasked}` : "Client Secret dari Google Cloud OAuth"}
+                />
+                <span className="block text-xs text-text-secondary">
+                  Kosongkan jika tidak ingin mengganti client secret yang sudah tersimpan.
+                </span>
+              </div>
+            </label>
+
+            <label className="grid gap-2 md:grid-cols-[150px_minmax(0,1fr)] md:items-center">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">TOKEN :</span>
+              <div className="space-y-2">
+                <input
+                  className="min-h-[46px] px-4 py-2.5 text-sm"
+                  autoComplete="off"
+                  name="google_drive_refresh_token"
+                  value={googleDriveRefreshToken}
+                  onChange={(event) => setGoogleDriveRefreshToken(event.target.value)}
+                  placeholder={googleDriveRefreshTokenMasked ? `Tersimpan: ${googleDriveRefreshTokenMasked}` : "Refresh token OAuth Google Drive"}
+                />
+                <span className="block text-xs text-text-secondary">
+                  Token ini membuat upload memakai kuota Google Drive personal kamu.
+                </span>
+              </div>
+            </label>
+
+            <label className="grid gap-2 md:grid-cols-[150px_minmax(0,1fr)] md:items-center">
+              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">ID FOLDER :</span>
+              <div className="space-y-2">
+                <input
+                  className="min-h-[46px] px-4 py-2.5 text-sm"
+                  autoComplete="off"
+                  name="google_drive_folder_id"
+                  value={googleDriveFolderId}
+                  onChange={(event) => setGoogleDriveFolderId(event.target.value)}
+                  onBlur={(event) => setGoogleDriveFolderId(normalizeGoogleDriveFolderId(event.target.value))}
+                  placeholder="ID folder untuk bukti transaksi"
+                />
+                <span className="block text-xs text-text-secondary">
+                  Boleh paste link folder penuh; sistem akan menyimpan ID foldernya saja.
+                </span>
+              </div>
+            </label>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <button
+                className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[16px] border border-[rgba(56,189,248,0.24)] bg-[rgba(56,189,248,0.1)] px-4 py-2.5 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.16)] disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                disabled={isLoggingInGoogleDrive}
+                onClick={handleGoogleDriveLogin}
+              >
+                <ExternalLink size={16} />
+                {isLoggingInGoogleDrive ? "MENUNGGU LOGIN..." : "LOGIN GOOGLE"}
+              </button>
+              <button
+                className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-[16px] bg-linear-to-r from-primary to-accent px-4 py-2.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                type="submit"
+                disabled={isSavingGoogleDrive}
+              >
+                <Save size={16} />
+                {isSavingGoogleDrive ? "MENYIMPAN..." : "SIMPAN SETTING"}
+              </button>
             </div>
-
-            <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">OAUTH CLIENT ID</span>
-              <input
-                autoComplete="off"
-                name="google_drive_client_id"
-                value={googleDriveClientId}
-                onChange={(event) => setGoogleDriveClientId(event.target.value)}
-                placeholder="Client ID dari Google Cloud OAuth"
-              />
-              <span className="text-xs text-text-secondary">
-                Status auth: {googleDriveAuthMode === "oauth" ? "OAuth Google personal aktif" : "Belum lengkap"}
-              </span>
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">OAUTH CLIENT SECRET</span>
-              <input
-                autoComplete="off"
-                name="google_drive_client_secret"
-                value={googleDriveClientSecret}
-                onChange={(event) => setGoogleDriveClientSecret(event.target.value)}
-                placeholder={googleDriveClientSecretMasked ? `Tersimpan: ${googleDriveClientSecretMasked}` : "Client Secret dari Google Cloud OAuth"}
-              />
-              <span className="text-xs text-text-secondary">
-                Kosongkan jika tidak ingin mengganti client secret yang sudah tersimpan.
-              </span>
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">REFRESH TOKEN GOOGLE DRIVE</span>
-              <textarea
-                className="min-h-24"
-                autoComplete="off"
-                name="google_drive_refresh_token"
-                value={googleDriveRefreshToken}
-                onChange={(event) => setGoogleDriveRefreshToken(event.target.value)}
-                placeholder={googleDriveRefreshTokenMasked ? `Tersimpan: ${googleDriveRefreshTokenMasked}` : "Refresh token OAuth Google Drive"}
-              />
-              <span className="text-xs text-text-secondary">
-                Token ini membuat upload memakai kuota Google Drive personal kamu.
-              </span>
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-xs font-bold tracking-[0.22em] text-text-muted">ID FOLDER GOOGLE DRIVE</span>
-              <input
-                autoComplete="off"
-                name="google_drive_folder_id"
-                value={googleDriveFolderId}
-                onChange={(event) => setGoogleDriveFolderId(event.target.value)}
-                onBlur={(event) => setGoogleDriveFolderId(normalizeGoogleDriveFolderId(event.target.value))}
-                placeholder="ID folder untuk bukti transaksi"
-              />
-              <span className="text-xs text-text-secondary">
-                Boleh paste link folder penuh; sistem akan menyimpan ID foldernya saja.
-              </span>
-            </label>
-
-            <button
-              className="flex w-full items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              type="submit"
-              disabled={isSavingGoogleDrive}
-            >
-              <Save size={16} />
-              {isSavingGoogleDrive ? "MENYIMPAN..." : "SIMPAN SETTING GOOGLE DRIVE"}
-            </button>
+            {googleDriveOAuthUrl ? (
+              <button
+                className="block break-all text-left text-xs text-text-secondary underline decoration-[rgba(56,189,248,0.45)] underline-offset-4 hover:text-accent"
+                type="button"
+                onClick={() => {
+                  setIsLoggingInGoogleDrive(true);
+                  window.open(googleDriveOAuthUrl, "wisnubot2-google-drive-oauth", "width=520,height=720");
+                }}
+              >
+                Buka link Login Google manual
+              </button>
+            ) : null}
           </form>
         )}
       </Modal>
