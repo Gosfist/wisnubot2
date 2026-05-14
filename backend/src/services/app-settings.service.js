@@ -8,6 +8,15 @@ function maskApiKey(value) {
   return `${str.slice(0, 4)}••••${str.slice(-4)}`;
 }
 
+function normalizePhoneNumber(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("62")) return digits;
+  if (digits.startsWith("0") && digits.length > 1) return `62${digits.slice(1)}`;
+  if (digits.startsWith("8")) return `62${digits}`;
+  return digits;
+}
+
 function rowToModel(row, { mask = true } = {}) {
   const googleDriveCredentials = row?.google_drive_credentials_json ? String(row.google_drive_credentials_json) : "";
   const googleDriveClientId = row?.google_drive_client_id ? String(row.google_drive_client_id) : "";
@@ -32,6 +41,8 @@ function rowToModel(row, { mask = true } = {}) {
       testimonialChannelJid: "",
       testimonialChannelName: "",
       testimonialChannelStatus: null,
+      contactOwnerPhoneNumber: "",
+      botInfoPhoneNumber: "",
       transactionMessageTemplate: "",
       googleDriveCredentialsJson: "",
       googleDriveCredentialsMasked: null,
@@ -55,6 +66,8 @@ function rowToModel(row, { mask = true } = {}) {
     testimonialChannelJid: row.testimonial_channel_jid ? String(row.testimonial_channel_jid) : "",
     testimonialChannelName: row.testimonial_channel_name ? String(row.testimonial_channel_name) : "",
     testimonialChannelStatus: row.testimonial_channel_status ?? null,
+    contactOwnerPhoneNumber: row.contact_owner_phone_number ? String(row.contact_owner_phone_number) : "",
+    botInfoPhoneNumber: row.bot_info_phone_number ? String(row.bot_info_phone_number) : "",
     transactionMessageTemplate: row.transaction_message_template ? String(row.transaction_message_template) : "",
     googleDriveCredentialsJson: mask ? "" : googleDriveCredentials,
     googleDriveCredentialsMasked: googleDriveCredentials ? "Tersimpan" : null,
@@ -136,6 +149,7 @@ async function getForUser(user) {
   const [rows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
+            contact_owner_phone_number, bot_info_phone_number,
             transaction_message_template,
             google_drive_credentials_json, google_drive_client_id,
             google_drive_client_secret, google_drive_refresh_token,
@@ -154,6 +168,7 @@ async function getRawForUserId(userId) {
   const [rows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
+            contact_owner_phone_number, bot_info_phone_number,
             transaction_message_template,
             google_drive_credentials_json, google_drive_client_id,
             google_drive_client_secret, google_drive_refresh_token,
@@ -171,6 +186,7 @@ async function upsertForUser(user, payload, options = {}) {
   const [existingRows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
+            contact_owner_phone_number, bot_info_phone_number,
             transaction_message_template,
             google_drive_credentials_json, google_drive_client_id,
             google_drive_client_secret, google_drive_refresh_token,
@@ -189,6 +205,12 @@ async function upsertForUser(user, payload, options = {}) {
   const pakasirSlug = field("pakasirSlug", "pakasir_slug");
   const apiKey = field("pakasirApiKey", "pakasir_api_key");
   const testimonialChannelLink = field("testimonialChannelLink", "testimonial_channel_link");
+  const contactOwnerPhoneNumber = Object.prototype.hasOwnProperty.call(payload ?? {}, "contactOwnerPhoneNumber")
+    ? normalizePhoneNumber(payload?.contactOwnerPhoneNumber)
+    : String(existing?.contact_owner_phone_number ?? "");
+  const botInfoPhoneNumber = Object.prototype.hasOwnProperty.call(payload ?? {}, "botInfoPhoneNumber")
+    ? normalizePhoneNumber(payload?.botInfoPhoneNumber)
+    : String(existing?.bot_info_phone_number ?? "");
   const transactionMessageTemplate = field("transactionMessageTemplate", "transaction_message_template");
   const googleDriveCredentialsJson = field("googleDriveCredentialsJson", "google_drive_credentials_json");
   const googleDriveClientId = field("googleDriveClientId", "google_drive_client_id");
@@ -216,17 +238,20 @@ async function upsertForUser(user, payload, options = {}) {
     `INSERT INTO app_settings (
        user_id, pakasir_slug, pakasir_api_key,
        testimonial_channel_link, testimonial_channel_jid, testimonial_channel_name,
+       contact_owner_phone_number, bot_info_phone_number,
        transaction_message_template,
        google_drive_credentials_json, google_drive_client_id, google_drive_client_secret,
        google_drive_refresh_token, google_drive_folder_id
      )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id) DO UPDATE SET
          pakasir_slug = EXCLUDED.pakasir_slug,
          pakasir_api_key = COALESCE(EXCLUDED.pakasir_api_key, app_settings.pakasir_api_key),
          testimonial_channel_link = EXCLUDED.testimonial_channel_link,
          testimonial_channel_jid = EXCLUDED.testimonial_channel_jid,
          testimonial_channel_name = EXCLUDED.testimonial_channel_name,
+         contact_owner_phone_number = EXCLUDED.contact_owner_phone_number,
+         bot_info_phone_number = EXCLUDED.bot_info_phone_number,
          transaction_message_template = EXCLUDED.transaction_message_template,
          google_drive_credentials_json = COALESCE(EXCLUDED.google_drive_credentials_json, app_settings.google_drive_credentials_json),
          google_drive_client_id = COALESCE(EXCLUDED.google_drive_client_id, app_settings.google_drive_client_id),
@@ -241,6 +266,8 @@ async function upsertForUser(user, payload, options = {}) {
       testimonialChannelLink || null,
       channel.jid || null,
       channel.name || null,
+      contactOwnerPhoneNumber || null,
+      botInfoPhoneNumber || null,
       transactionMessageTemplate || null,
       googleDriveCredentialsJson || null,
       googleDriveClientId || null,

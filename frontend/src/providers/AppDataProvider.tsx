@@ -409,6 +409,8 @@ function parseAppSettings(payload: Record<string, unknown>): AppSettingsModel {
           message: String(status.message ?? ""),
         }
       : null,
+    contactOwnerPhoneNumber: String(payload.contactOwnerPhoneNumber ?? payload.contact_owner_phone_number ?? ""),
+    botInfoPhoneNumber: String(payload.botInfoPhoneNumber ?? payload.bot_info_phone_number ?? ""),
     transactionMessageTemplate: String(payload.transactionMessageTemplate ?? payload.transaction_message_template ?? ""),
     googleDriveCredentialsJson: String(payload.googleDriveCredentialsJson ?? payload.google_drive_credentials_json ?? ""),
     googleDriveCredentialsMasked: payload.googleDriveCredentialsMasked ?? payload.google_drive_credentials_masked

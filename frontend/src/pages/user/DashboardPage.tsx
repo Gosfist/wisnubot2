@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { Bell, Bolt, PlusCircle, RefreshCw } from "lucide-react";
+import { Bell, Bolt, Info, PlusCircle, RefreshCw, Save } from "lucide-react";
 import { OwnerBotConnectModal } from "../../components/OwnerBotConnectModal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -19,6 +19,9 @@ export function DashboardPage() {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [connectPurpose, setConnectPurpose] = useState<DashboardBotPurpose>("main");
   const [activityLogs, setActivityLogs] = useState<ActivityLogModel[]>([]);
+  const [contactOwnerPhoneNumber, setContactOwnerPhoneNumber] = useState("");
+  const [botInfoPhoneNumber, setBotInfoPhoneNumber] = useState("");
+  const [isSavingInfo, setIsSavingInfo] = useState(false);
 
   async function refreshActivityLogs() {
     try {
@@ -32,12 +35,17 @@ export function DashboardPage() {
   async function loadData(silent = false) {
     try {
       if (!silent) setIsLoading(true);
-      const [logsResult, botsResult] = await Promise.allSettled([
+      const [logsResult, botsResult, settingsResult] = await Promise.allSettled([
         appData.fetchActivityLogs(),
         appData.refreshBots(),
+        appData.fetchSettings(),
       ]);
       if (logsResult.status === "fulfilled") {
         setActivityLogs(logsResult.value);
+      }
+      if (settingsResult.status === "fulfilled") {
+        setContactOwnerPhoneNumber(settingsResult.value.contactOwnerPhoneNumber);
+        setBotInfoPhoneNumber(settingsResult.value.botInfoPhoneNumber);
       }
       if (botsResult.status === "rejected") {
         throw botsResult.reason;
@@ -119,6 +127,23 @@ export function DashboardPage() {
     setShowConnectModal(true);
   }
 
+  async function handleSaveBotInfo() {
+    setIsSavingInfo(true);
+    try {
+      const nextSettings = await appData.updateSettings({
+        contactOwnerPhoneNumber,
+        botInfoPhoneNumber,
+      });
+      setContactOwnerPhoneNumber(nextSettings.contactOwnerPhoneNumber);
+      setBotInfoPhoneNumber(nextSettings.botInfoPhoneNumber);
+      showToast("Info bot berhasil disimpan.", "success");
+    } catch (nextError) {
+      showToast(nextError instanceof Error ? nextError.message : "Gagal menyimpan info bot.", "danger");
+    } finally {
+      setIsSavingInfo(false);
+    }
+  }
+
   function BotPanel({
     bot,
     purpose,
@@ -187,6 +212,56 @@ export function DashboardPage() {
     );
   }
 
+  function renderInfoBotPanel() {
+    const inputClass = "h-11 w-full rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-3 text-sm font-semibold text-white outline-none transition placeholder:text-text-muted focus:border-[rgba(56,189,248,0.4)]";
+    return (
+      <div className="flex flex-col gap-4 rounded-[18px] border border-[rgba(56,189,248,0.12)] bg-[rgba(15,23,42,0.38)] p-4 lg:flex-row lg:items-end">
+        <div className="flex min-w-[240px] items-center gap-3">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[rgba(56,189,248,0.14)] text-accent">
+            <Info size={18} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold">Info Bot</h3>
+            <p className="mt-1 text-xs text-text-secondary">Contact owner dan notifikasi internal</p>
+          </div>
+        </div>
+        <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px] md:items-end">
+          <label className="grid gap-1">
+            <span className="text-xs font-semibold text-text-secondary">Contact Owner</span>
+            <input
+              className={inputClass}
+              type="text"
+              inputMode="numeric"
+              placeholder="Nomor untuk pembeli"
+              value={contactOwnerPhoneNumber}
+              onChange={(event) => setContactOwnerPhoneNumber(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-xs font-semibold text-text-secondary">Informasi Bot</span>
+            <input
+              className={inputClass}
+              type="text"
+              inputMode="numeric"
+              placeholder="Nomor notifikasi bot"
+              value={botInfoPhoneNumber}
+              onChange={(event) => setBotInfoPhoneNumber(event.target.value)}
+            />
+          </label>
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.2)] bg-[rgba(37,99,235,0.12)] px-3 text-sm font-semibold text-accent transition hover:border-[rgba(56,189,248,0.38)] hover:bg-[rgba(37,99,235,0.2)] disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            onClick={() => void handleSaveBotInfo()}
+            disabled={isSavingInfo}
+          >
+            <Save size={15} />
+            {isSavingInfo ? "Menyimpan..." : "Update Info"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <PageHeader title="Bot Wa" />
@@ -219,6 +294,9 @@ export function DashboardPage() {
             title="Bot 2"
             description="Khusus push kontak"
           />
+        </div>
+        <div className="mt-3">
+          {renderInfoBotPanel()}
         </div>
 
         {isLoading ? (

@@ -148,7 +148,7 @@ function normalizeJid(value) {
 }
 
 function isOwnerMessage(context, remoteJid) {
-  const ownerJid = normalizeJid(context?.userPhoneNumber);
+  const ownerJid = normalizeJid(context?.botInfoPhoneNumber ?? context?.userPhoneNumber);
   return Boolean(ownerJid && ownerJid === String(remoteJid));
 }
 

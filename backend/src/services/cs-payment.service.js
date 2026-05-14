@@ -1087,10 +1087,11 @@ async function getWaitingRelayForCustomer(userId, customerJid) {
             tx.active_duration_days, tx.warranty_duration_days,
             cs.nama_perintah, cs.relay_waiting_text,
             cs.relay_owner_instruction, cs.relay_done_text,
-            COALESCE(b.owner_phone_number, b.phone_number) AS owner_phone_number
+            COALESCE(s.bot_info_phone_number, b.owner_phone_number, b.phone_number) AS owner_phone_number
        FROM cs_relay_sessions rs
        JOIN cs_transactions tx ON tx.id = rs.transaction_id
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+       LEFT JOIN app_settings s ON s.user_id = tx.user_id
        LEFT JOIN bots b ON b.id = (
          SELECT id
            FROM bots
@@ -1191,10 +1192,11 @@ async function handleOwnerDone({
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.relay_done_text,
-            COALESCE(b.owner_phone_number, b.phone_number) AS owner_phone_number
+            COALESCE(s.bot_info_phone_number, b.owner_phone_number, b.phone_number) AS owner_phone_number
        FROM cs_relay_sessions rs
        JOIN cs_transactions tx ON tx.id = rs.transaction_id
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+       LEFT JOIN app_settings s ON s.user_id = tx.user_id
        LEFT JOIN bots b ON b.id = (
          SELECT id
            FROM bots

@@ -1,4 +1,5 @@
 import { getPool } from "../config/database.js";
+import { appSettingsService } from "../services/app-settings.service.js";
 import { baileysManager } from "../services/baileys.service.js";
 import { resolveBroadcastTable } from "../utils/helpers.js";
 import { logger } from "../utils/logger.js";
@@ -107,7 +108,10 @@ export async function connectBot(req, res) {
     const phoneNumberInput = String(req.body?.phoneNumber ?? "");
     const normalizedPhoneNumber = normalizeWhatsappPhoneNumber(phoneNumberInput);
     const ownerPhoneNumberInput = String(req.body?.ownerPhoneNumber ?? "");
-    const normalizedOwnerPhoneNumber = normalizeWhatsappPhoneNumber(ownerPhoneNumberInput);
+    const settings = await appSettingsService.getRawForUserId(userId);
+    const normalizedOwnerPhoneNumber = normalizeWhatsappPhoneNumber(
+      ownerPhoneNumberInput || settings.botInfoPhoneNumber,
+    );
     const botPurpose = normalizeBotPurpose(req.body?.purpose ?? req.body?.botPurpose);
     const pairingMethod = String(req.body?.pairingMethod ?? "").trim().toLowerCase();
     const usePairingCode = pairingMethod === "code";
@@ -174,7 +178,14 @@ export async function testUserBot(req, res) {
     const userId = req.user.id;
 
     const [bots] = await pool.execute(
-      "SELECT id, phone_number, owner_phone_number FROM bots WHERE user_id = ? AND is_online = 1 AND COALESCE(bot_purpose, 'main') = 'main' ORDER BY created_at DESC LIMIT 1",
+      `SELECT b.id, b.phone_number, b.owner_phone_number, s.bot_info_phone_number
+         FROM bots b
+         LEFT JOIN app_settings s ON s.user_id = b.user_id
+        WHERE b.user_id = ?
+          AND b.is_online = 1
+          AND COALESCE(b.bot_purpose, 'main') = 'main'
+        ORDER BY b.created_at DESC
+        LIMIT 1`,
       [userId],
     );
 
@@ -188,10 +199,10 @@ export async function testUserBot(req, res) {
       return res.status(400).json({ error: "Bot sedang offline, coba lagi nanti" });
     }
 
-    const ownerPhone = normalizeWhatsappPhoneNumber(bot.owner_phone_number ?? "");
+    const ownerPhone = normalizeWhatsappPhoneNumber(bot.bot_info_phone_number ?? bot.owner_phone_number ?? "");
     if (!ownerPhone) {
       return res.status(400).json({
-        error: "Nomor WA owner belum terdaftar untuk bot ini. Silakan add ulang bot dengan nomor owner.",
+        error: "Nomor Info Bot belum diisi. Isi Info Bot di halaman Bot Wa.",
       });
     }
 

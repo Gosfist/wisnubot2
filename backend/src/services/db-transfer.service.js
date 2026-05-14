@@ -392,6 +392,7 @@ async function exportScopedForUser(user) {
   const [settingsRows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
+            contact_owner_phone_number, bot_info_phone_number,
             transaction_message_template,
             google_drive_credentials_json, google_drive_client_id,
             google_drive_client_secret, google_drive_refresh_token,
@@ -662,11 +663,12 @@ async function importSettings(connection, userId, data) {
     `INSERT INTO app_settings (
        user_id, pakasir_slug, pakasir_api_key, testimonial_channel_link,
        testimonial_channel_jid, testimonial_channel_name,
+       contact_owner_phone_number, bot_info_phone_number,
        transaction_message_template, google_drive_credentials_json,
        google_drive_client_id, google_drive_client_secret,
        google_drive_refresh_token, google_drive_folder_id, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
     [
       userId,
       settings.pakasir_slug ?? null,
@@ -674,6 +676,8 @@ async function importSettings(connection, userId, data) {
       settings.testimonial_channel_link ?? null,
       settings.testimonial_channel_jid ?? null,
       settings.testimonial_channel_name ?? null,
+      settings.contact_owner_phone_number ?? null,
+      settings.bot_info_phone_number ?? null,
       settings.transaction_message_template ?? null,
       settings.google_drive_credentials_json ?? null,
       settings.google_drive_client_id ?? null,

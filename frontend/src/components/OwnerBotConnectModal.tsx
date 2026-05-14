@@ -41,9 +41,7 @@ export function OwnerBotConnectModal({
   const appData = useAppData();
   const { showToast } = useToast();
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [ownerPhoneNumber, setOwnerPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
-  const [ownerPhoneError, setOwnerPhoneError] = useState("");
   const [pairingCode, setPairingCode] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -107,9 +105,7 @@ export function OwnerBotConnectModal({
 
   function resetState() {
     setPhoneNumber("");
-    setOwnerPhoneNumber("");
     setPhoneError("");
-    setOwnerPhoneError("");
     setPairingCode("");
     setIsConnected(false);
     setIsLoading(false);
@@ -160,7 +156,6 @@ export function OwnerBotConnectModal({
 
   async function handleStart() {
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-    const normalizedOwnerPhoneNumber = normalizePhoneNumber(ownerPhoneNumber);
 
     let hasError = false;
     if (!normalizedPhoneNumber) {
@@ -168,12 +163,6 @@ export function OwnerBotConnectModal({
       hasError = true;
     } else {
       setPhoneError("");
-    }
-    if (!normalizedOwnerPhoneNumber) {
-      setOwnerPhoneError("No WA Owner wajib diisi");
-      hasError = true;
-    } else {
-      setOwnerPhoneError("");
     }
     if (hasError) return;
 
@@ -191,7 +180,6 @@ export function OwnerBotConnectModal({
       const result = await appData.connectBot({
         purpose,
         phoneNumber: normalizedPhoneNumber,
-        ownerPhoneNumber: normalizedOwnerPhoneNumber,
         pairingMethod: "code",
       });
 
@@ -241,22 +229,6 @@ export function OwnerBotConnectModal({
           </div>
         ) : (
           <div className="space-y-4">
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">No WA Owner</span>
-              <input
-                className={`h-[54px] w-full rounded-[18px] border px-4 text-sm leading-none text-white outline-none transition focus:border-[rgba(56,189,248,0.4)] bg-[rgba(15,23,42,0.72)] ${ownerPhoneError ? "border-[rgba(239,68,68,0.6)]" : "border-[rgba(56,189,248,0.16)]"
-                  }`}
-                type="text"
-                inputMode="numeric"
-                placeholder="Contoh: 628123456789"
-                value={ownerPhoneNumber}
-                onChange={(event) => { setOwnerPhoneNumber(event.target.value); setOwnerPhoneError(""); }}
-                disabled={isLoading}
-              />
-              {ownerPhoneError ? <p className="text-xs text-danger">{ownerPhoneError}</p> : null}
-            </label>
-
-
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">No WA Bot</span>
               <input

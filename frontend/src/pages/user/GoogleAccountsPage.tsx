@@ -1,5 +1,5 @@
-import { Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Plus, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { useAppData } from "../../hooks/useAppData";
@@ -62,6 +62,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   const [selectedTransactions, setSelectedTransactions] = useState<SelectedMember[]>([]);
   const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null);
   const [emailText, setEmailText] = useState("");
+  const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function refresh() {
@@ -160,20 +161,41 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     }
   }
 
+  const filteredItems = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return items;
+
+    return items.filter((item) => {
+      const statusText = item.isSuspended ? "google account suspended suspend" : "google account aktif";
+      return `${item.email} ${statusText}`.toLowerCase().includes(keyword);
+    });
+  }, [items, query]);
+
   const headerActions = (
-    <button
-      className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
-      type="button"
-      onClick={() => setIsModalOpen(true)}
-    >
-      <Plus size={18} /> Add Google
-    </button>
+    <>
+      <label className="relative flex min-h-[48px] w-full min-w-[220px] max-w-[360px] items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 sm:w-[320px]">
+        <Search size={18} className="pointer-events-none absolute left-5 text-text-secondary" />
+        <input
+          className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Cari akun Google"
+        />
+      </label>
+      <button
+        className="inline-flex min-h-[48px] items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
+        type="button"
+        onClick={() => setIsModalOpen(true)}
+      >
+        <Plus size={18} /> Add Google
+      </button>
+    </>
   );
 
   return (
     <div className="space-y-5">
       {embedded ? (
-        <div className="flex flex-wrap justify-end gap-2">{headerActions}</div>
+        <div className="flex flex-wrap items-center justify-end gap-2">{headerActions}</div>
       ) : (
         <PageHeader
           title="Google Accounts"
@@ -188,9 +210,13 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
         <div className="rounded-[20px] border border-glass-border bg-[rgba(30,41,59,0.88)] py-10 text-center text-sm text-text-secondary">
           Belum ada Google Account.
         </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="rounded-[20px] border border-glass-border bg-[rgba(30,41,59,0.88)] py-10 text-center text-sm text-text-secondary">
+          Akun Google tidak ditemukan.
+        </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => {
+          {filteredItems.map((item) => {
             const usedSlots = getUsedSlots(item);
             const full = isFullAccount(item);
             return (

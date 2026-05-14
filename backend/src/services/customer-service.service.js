@@ -47,11 +47,15 @@ function isResolvedContext(value) {
 }
 
 function buildBotContext(row) {
+  const contactOwnerPhone = String(row.contact_owner_phone_number ?? "");
+  const botInfoPhone = String(row.bot_info_phone_number ?? row.owner_phone_number ?? "");
   return {
     botId: Number(row.id),
     userId: Number(row.user_id),
     phoneNumber: String(row.phone_number ?? ""),
-    userPhoneNumber: String(row.owner_phone_number ?? row.phone_number ?? ""),
+    userPhoneNumber: contactOwnerPhone || botInfoPhone || String(row.phone_number ?? ""),
+    contactOwnerPhoneNumber: contactOwnerPhone,
+    botInfoPhoneNumber: botInfoPhone,
     entries: ENTRIES_TABLE,
     contacts: CONTACTS_TABLE,
   };
@@ -65,8 +69,10 @@ async function findBotRow(botId) {
 
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT b.id, b.user_id, b.phone_number, b.owner_phone_number
+    `SELECT b.id, b.user_id, b.phone_number, b.owner_phone_number,
+            s.contact_owner_phone_number, s.bot_info_phone_number
      FROM bots b
+     LEFT JOIN app_settings s ON s.user_id = b.user_id
      WHERE b.id = ?
      LIMIT 1`,
     [numericBotId],

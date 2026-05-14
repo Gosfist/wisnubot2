@@ -222,9 +222,11 @@ async function assertGroupForUser(pool, userId, groupId, botId = null) {
   }
 
   const [rows] = await pool.execute(
-    `SELECT g.id, g.bot_id, g.group_jid, g.name, g.is_active, b.phone_number, b.owner_phone_number
+    `SELECT g.id, g.bot_id, g.group_jid, g.name, g.is_active, b.phone_number,
+            COALESCE(s.bot_info_phone_number, b.owner_phone_number) AS owner_phone_number
        FROM "groups" g
        JOIN bots b ON b.id = g.bot_id
+       LEFT JOIN app_settings s ON s.user_id = b.user_id
       WHERE ${clauses.join(" AND ")}
       LIMIT 1`,
     params,

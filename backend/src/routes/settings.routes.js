@@ -21,6 +21,8 @@ router.put(
     body("pakasirSlug").optional({ values: "falsy" }).isString().isLength({ max: 100 }),
     body("pakasirApiKey").optional({ values: "falsy" }).isString().isLength({ max: 255 }),
     body("testimonialChannelLink").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
+    body("contactOwnerPhoneNumber").optional({ values: "falsy" }).isString().isLength({ max: 30 }),
+    body("botInfoPhoneNumber").optional({ values: "falsy" }).isString().isLength({ max: 30 }),
     body("transactionMessageTemplate").optional({ values: "falsy" }).isString().isLength({ max: 5000 }),
     body("googleDriveCredentialsJson").optional({ values: "falsy" }).isString().isLength({ max: 20000 }),
     body("googleDriveClientId").optional({ values: "falsy" }).isString().isLength({ max: 500 }),

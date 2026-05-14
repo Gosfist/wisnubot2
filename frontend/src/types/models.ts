@@ -193,6 +193,8 @@ export interface AppSettingsModel {
   testimonialChannelJid: string;
   testimonialChannelName: string;
   testimonialChannelStatus: { ok: boolean; message: string } | null;
+  contactOwnerPhoneNumber: string;
+  botInfoPhoneNumber: string;
   transactionMessageTemplate: string;
   googleDriveCredentialsJson: string;
   googleDriveCredentialsMasked: string | null;

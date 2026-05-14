@@ -266,9 +266,10 @@ class SchedulerService {
                 tx.active_exp_notified_at, tx.warranty_exp_notified_at,
                 cs.nama_perintah,
                 b.id AS bot_id,
-                COALESCE(b.owner_phone_number, b.phone_number) AS owner_phone_number
+                COALESCE(s.bot_info_phone_number, b.owner_phone_number, b.phone_number) AS owner_phone_number
            FROM cs_transactions tx
            LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+           LEFT JOIN app_settings s ON s.user_id = tx.user_id
            JOIN LATERAL (
              SELECT id, owner_phone_number, phone_number
                FROM bots
