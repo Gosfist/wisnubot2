@@ -2,6 +2,7 @@ import { getPool } from "../config/database.js";
 import { appSettingsService } from "./app-settings.service.js";
 import { csStockService } from "./cs-stock.service.js";
 import { geminiPriceService } from "./gemini-price.service.js";
+import { googleDriveService } from "./google-drive.service.js";
 import { messageService } from "./message.service.js";
 import { realtimeService } from "./realtime.service.js";
 import { logger } from "../utils/logger.js";
@@ -77,6 +78,47 @@ function normalizeOrderStatus(value) {
   const status = String(value ?? "").trim().toLowerCase();
   if (!status) return null;
   return status === "dikirim" ? "dikirim" : "selesai";
+}
+
+function normalizeReportStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase();
+  return status === "selesai" ? "selesai" : "proses";
+}
+
+function mapPaidTransactionRow(row) {
+  return {
+    id: Number(row.id),
+    idTrx: String(row.pakasir_order_id ?? ""),
+    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
+    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
+    customerJid: String(row.customer_jid ?? ""),
+    amount: Number(row.amount ?? 0),
+    buyerCount: Math.max(1, Number(row.buyer_count ?? 1)),
+    status: String(row.status ?? ""),
+    orderStatus: row.order_status ? String(row.order_status) : null,
+    commandName: row.nama_perintah ? String(row.nama_perintah) : row.google_account_email ? String(row.google_account_email) : null,
+    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
+    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
+    stockContent: row.stock_content ? String(row.stock_content) : null,
+    platform: String(row.platform ?? "whatsapp"),
+    activeStatus: normalizeActiveStatus(row.active_status),
+    memberStatus: String(row.member_status ?? "anggota"),
+    reportStatus: normalizeReportStatus(row.report_status),
+    proofDriveFileId: row.proof_drive_file_id ? String(row.proof_drive_file_id) : null,
+    proofDriveUrl: row.proof_drive_url ? String(row.proof_drive_url) : null,
+    proofUploadedAt: row.proof_uploaded_at ? String(row.proof_uploaded_at) : null,
+    isManual: Boolean(Number(row.is_manual ?? 0)),
+    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
+    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
+    completedAt: row.completed_at ? String(row.completed_at) : null,
+    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
+    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
+    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
+    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
+    paidAt: row.paid_at ? String(row.paid_at) : null,
+    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
+    createdAt: row.created_at ? String(row.created_at) : null,
+  };
 }
 
 function normalizeBuyerEmail(value) {
@@ -1264,6 +1306,7 @@ async function listPaidTransactionsForUser(user) {
             tx.platform, tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at, tx.buyer_email,
+            tx.report_status, tx.proof_drive_file_id, tx.proof_drive_url, tx.proof_uploaded_at,
             cs.nama_perintah, st.content AS stock_content,
             ga.email AS google_account_email
        FROM cs_transactions tx
@@ -1276,35 +1319,7 @@ async function listPaidTransactionsForUser(user) {
     [Number(user.id)],
   );
 
-  return rows.map((row) => ({
-    id: Number(row.id),
-    idTrx: String(row.pakasir_order_id ?? ""),
-    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
-    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
-    customerJid: String(row.customer_jid ?? ""),
-    amount: Number(row.amount ?? 0),
-    buyerCount: Math.max(1, Number(row.buyer_count ?? 1)),
-    status: String(row.status ?? ""),
-    orderStatus: row.order_status ? String(row.order_status) : null,
-    commandName: row.nama_perintah ? String(row.nama_perintah) : row.google_account_email ? String(row.google_account_email) : null,
-    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
-    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
-    stockContent: row.stock_content ? String(row.stock_content) : null,
-    platform: String(row.platform ?? "whatsapp"),
-    activeStatus: normalizeActiveStatus(row.active_status),
-    memberStatus: String(row.member_status ?? "anggota"),
-    isManual: Boolean(Number(row.is_manual ?? 0)),
-    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
-    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
-    completedAt: row.completed_at ? String(row.completed_at) : null,
-    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
-    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
-    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
-    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
-    paidAt: row.paid_at ? String(row.paid_at) : null,
-    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
-    createdAt: row.created_at ? String(row.created_at) : null,
-  }));
+  return rows.map(mapPaidTransactionRow);
 }
 
 function parseManualStartDate(value) {
@@ -1351,6 +1366,7 @@ async function createManualTransactionForUser(user, payload) {
   const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
   const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
   const orderStatus = normalizeOrderStatus(payload.orderStatus ?? payload.order_status ?? payload.statusText);
+  const reportStatus = normalizeReportStatus(payload.reportStatus ?? payload.report_status);
   const now = new Date();
 
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
@@ -1359,6 +1375,20 @@ async function createManualTransactionForUser(user, payload) {
   if (!buyerEmail) throw new Error("Email buyer wajib diisi");
   if (!isValidManualPlatform(platform)) {
     throw new Error("Platform tidak valid");
+  }
+
+  let proofUpload = null;
+  if (payload.proofImage?.buffer) {
+    const settings = await appSettingsService.getRawForUserId(user.id);
+    const originalName = String(payload.proofImage.originalname ?? "bukti-transaksi.jpg");
+    const extension = originalName.includes(".") ? originalName.split(".").pop() : "jpg";
+    proofUpload = await googleDriveService.uploadImage({
+      credentialsJson: settings.googleDriveCredentialsJson,
+      folderId: settings.googleDriveFolderId,
+      buffer: payload.proofImage.buffer,
+      mimeType: String(payload.proofImage.mimetype ?? "image/jpeg"),
+      filename: `${idTrx}-bukti.${extension}`,
+    });
   }
 
   const pool = getPool();
@@ -1381,11 +1411,11 @@ async function createManualTransactionForUser(user, payload) {
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, google_account_id, gemini_price_plan_id, customer_jid, buyer_email,
-        buyer_count, pakasir_order_id, pakasir_payment_url, qris_string, amount, status, order_status,
+       buyer_count, pakasir_order_id, pakasir_payment_url, qris_string, amount, status, order_status,
         paid_at, delivered_at, platform, active_status, member_status, is_manual, active_duration_days,
         warranty_duration_days, completed_at, active_start_at, active_expires_at,
-        warranty_start_at, warranty_expires_at)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, NULL, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+        warranty_start_at, warranty_expires_at, report_status, proof_drive_file_id, proof_drive_url, proof_uploaded_at)
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, NULL, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(user.id),
       googleAccountId,
@@ -1407,6 +1437,10 @@ async function createManualTransactionForUser(user, payload) {
       activeExpiresAt,
       warrantyStartAt,
       warrantyExpiresAt,
+      reportStatus,
+      proofUpload?.fileId ?? null,
+      proofUpload?.url ?? null,
+      proofUpload ? now : null,
     ],
   );
 
@@ -1417,6 +1451,7 @@ async function createManualTransactionForUser(user, payload) {
             tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
+            tx.report_status, tx.proof_drive_file_id, tx.proof_drive_url, tx.proof_uploaded_at,
             tx.paid_at, tx.delivered_at, tx.created_at,
             ga.email AS google_account_email
        FROM cs_transactions tx
@@ -1426,36 +1461,7 @@ async function createManualTransactionForUser(user, payload) {
     [Number(insertResult.insertId ?? 0), Number(user.id)],
   );
 
-  const row = rows[0];
-  return {
-    id: Number(row.id),
-    idTrx: String(row.pakasir_order_id ?? ""),
-    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
-    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
-    customerJid: String(row.customer_jid ?? ""),
-    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
-    amount: Number(row.amount ?? 0),
-    buyerCount: Math.max(1, Number(row.buyer_count ?? 1)),
-    status: String(row.status ?? ""),
-    orderStatus: row.order_status ? String(row.order_status) : null,
-    commandName: row.google_account_email ? String(row.google_account_email) : null,
-    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
-    stockContent: null,
-    platform: String(row.platform ?? "shopee"),
-    activeStatus: normalizeActiveStatus(row.active_status),
-    memberStatus: String(row.member_status ?? "anggota"),
-    isManual: Boolean(Number(row.is_manual ?? 0)),
-    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
-    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
-    completedAt: row.completed_at ? String(row.completed_at) : null,
-    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
-    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
-    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
-    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
-    paidAt: row.paid_at ? String(row.paid_at) : null,
-    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
-    createdAt: row.created_at ? String(row.created_at) : null,
-  };
+  return mapPaidTransactionRow({ ...rows[0], stock_content: null });
 }
 
 function normalizePhone(value) {
@@ -1496,6 +1502,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
   const customerJid = buyerEmail || normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
   const platform = normalizePlatform(payload.platform || "shopee");
   const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
+  const reportStatus = normalizeReportStatus(payload.reportStatus ?? payload.report_status);
   const amountRaw = payload.amount === undefined ? null : Number(payload.amount);
   const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
   const activeStartAt = nullableDate(payload.activeStartAt ?? payload.active_start_at);
@@ -1524,6 +1531,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
             buyer_email = ?,
             buyer_count = ?,
             platform = ?,
+            report_status = ?,
             active_status = ?,
             member_status = ?,
             amount = COALESCE(?, amount),
@@ -1539,6 +1547,7 @@ async function updateTransactionForUser(user, transactionId, payload) {
       buyerEmail,
       buyerCount,
       platform,
+      reportStatus,
       activeStatus,
       memberStatus,
       amountRaw === null ? null : Math.floor(amountRaw),
@@ -1559,7 +1568,8 @@ async function updateTransactionForUser(user, transactionId, payload) {
             tx.buyer_email, tx.buyer_count, tx.amount, tx.status, tx.order_status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days, tx.completed_at,
             tx.active_start_at, tx.active_expires_at, tx.warranty_start_at,
-            tx.warranty_expires_at, tx.paid_at, tx.delivered_at, tx.created_at,
+            tx.warranty_expires_at, tx.report_status, tx.proof_drive_file_id, tx.proof_drive_url,
+            tx.proof_uploaded_at, tx.paid_at, tx.delivered_at, tx.created_at,
             ga.email AS google_account_email
        FROM cs_transactions tx
        LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
@@ -1568,37 +1578,41 @@ async function updateTransactionForUser(user, transactionId, payload) {
     [Number(transactionId), Number(user.id)],
   );
 
-  const row = items[0];
-  if (!row) return null;
-  return {
-    id: Number(row.id),
-    idTrx: String(row.pakasir_order_id ?? ""),
-    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
-    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
-    customerJid: String(row.customer_jid ?? ""),
-    buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
-    amount: Number(row.amount ?? 0),
-    buyerCount: Math.max(1, Number(row.buyer_count ?? 1)),
-    status: String(row.status ?? ""),
-    orderStatus: row.order_status ? String(row.order_status) : null,
-    commandName: row.google_account_email ? String(row.google_account_email) : null,
-    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
-    stockContent: null,
-    platform: String(row.platform ?? "shopee"),
-    activeStatus: normalizeActiveStatus(row.active_status),
-    memberStatus: String(row.member_status ?? "anggota"),
-    isManual: Boolean(Number(row.is_manual ?? 0)),
-    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
-    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
-    completedAt: row.completed_at ? String(row.completed_at) : null,
-    activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
-    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
-    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
-    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
-    paidAt: row.paid_at ? String(row.paid_at) : null,
-    deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
-    createdAt: row.created_at ? String(row.created_at) : null,
-  };
+  if (!items[0]) return null;
+  return mapPaidTransactionRow({ ...items[0], stock_content: null });
+}
+
+async function updateTransactionReportForUser(user, transactionId, payload) {
+  const reportStatus = normalizeReportStatus(payload.reportStatus ?? payload.report_status);
+  const pool = getPool();
+  const [result] = await pool.execute(
+    `UPDATE cs_transactions
+        SET report_status = ?
+      WHERE id = ?
+        AND user_id = ?`,
+    [reportStatus, Number(transactionId), Number(user.id)],
+  );
+
+  if (Number(result.affectedRows ?? 0) === 0) {
+    throw new Error("Transaksi tidak ditemukan");
+  }
+
+  const [items] = await pool.execute(
+    `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
+            tx.buyer_email, tx.buyer_count, tx.amount, tx.status, tx.order_status, tx.platform,
+            tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days,
+            tx.warranty_duration_days, tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at, tx.report_status, tx.proof_drive_file_id,
+            tx.proof_drive_url, tx.proof_uploaded_at, tx.paid_at, tx.delivered_at, tx.created_at,
+            ga.email AS google_account_email
+       FROM cs_transactions tx
+       LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
+      WHERE tx.id = ? AND tx.user_id = ?
+      LIMIT 1`,
+    [Number(transactionId), Number(user.id)],
+  );
+
+  return items[0] ? mapPaidTransactionRow({ ...items[0], stock_content: null }) : null;
 }
 
 async function deleteTransactionForUser(user, transactionId) {
@@ -1624,5 +1638,6 @@ export const csPaymentService = {
   listPaidTransactionsForUser,
   createManualTransactionForUser,
   updateTransactionForUser,
+  updateTransactionReportForUser,
   deleteTransactionForUser,
 };

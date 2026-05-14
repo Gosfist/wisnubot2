@@ -3,14 +3,16 @@ import { PageHeader } from "../../components/PageHeader";
 import { cn } from "../../lib/cn";
 import { GoogleAccountsPage } from "./GoogleAccountsPage";
 import { GeminiPricesPage } from "./GeminiPricesPage";
+import { ShopeeReportPage } from "./ShopeeReportPage";
 import { TransactionsPage } from "./TransactionsPage";
 
-type TrxGeminiTab = "trx" | "account" | "price";
+type TrxGeminiTab = "trx" | "account" | "price" | "report";
 
 const tabs: { id: TrxGeminiTab; label: string }[] = [
   { id: "trx", label: "Transaksi Manual" },
   { id: "account", label: "Google Account" },
   { id: "price", label: "Harga" },
+  { id: "report", label: "Laporan" },
 ];
 
 export function TrxGeminiPage() {
@@ -42,8 +44,10 @@ export function TrxGeminiPage() {
         <TransactionsPage embedded />
       ) : activeTab === "account" ? (
         <GoogleAccountsPage embedded />
-      ) : (
+      ) : activeTab === "price" ? (
         <GeminiPricesPage embedded />
+      ) : (
+        <ShopeeReportPage />
       )}
     </div>
   );

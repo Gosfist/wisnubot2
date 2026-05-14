@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, Database, Download, Key, Lock, Megaphone, PencilLine, Save, Upload, User } from "lucide-react";
+import { CreditCard, Database, Download, Folder, Key, Lock, Megaphone, PencilLine, Save, Upload, User } from "lucide-react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -29,6 +29,10 @@ export function SettingsPage() {
   const [pakasirApiKeyMasked, setPakasirApiKeyMasked] = useState<string | null>(null);
   const [testimonialChannelLink, setTestimonialChannelLink] = useState("");
   const [testimonialChannelStatus, setTestimonialChannelStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [googleDriveCredentialsJson, setGoogleDriveCredentialsJson] = useState("");
+  const [googleDriveCredentialsMasked, setGoogleDriveCredentialsMasked] = useState<string | null>(null);
+  const [googleDriveServiceEmail, setGoogleDriveServiceEmail] = useState("");
+  const [googleDriveFolderId, setGoogleDriveFolderId] = useState("");
   const [isUpdatingUsername, setIsUpdatingUsername] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(true);
@@ -47,6 +51,9 @@ export function SettingsPage() {
         setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
         setTestimonialChannelLink(settings.testimonialChannelLink);
         setTestimonialChannelStatus(settings.testimonialChannelStatus);
+        setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
+        setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+        setGoogleDriveFolderId(settings.googleDriveFolderId);
       } catch (error) {
         showToast(error instanceof Error ? error.message : "Gagal memuat setting Pakasir.", "danger");
       } finally {
@@ -125,11 +132,17 @@ export function SettingsPage() {
         pakasirSlug: pakasirSlug.trim(),
         pakasirApiKey: pakasirApiKey.trim(),
         testimonialChannelLink: testimonialChannelLink.trim(),
+        googleDriveCredentialsJson: googleDriveCredentialsJson.trim(),
+        googleDriveFolderId: googleDriveFolderId.trim(),
       });
       setPakasirApiKey("");
       setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
       setTestimonialChannelLink(settings.testimonialChannelLink);
       setTestimonialChannelStatus(settings.testimonialChannelStatus);
+      setGoogleDriveCredentialsJson("");
+      setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
+      setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+      setGoogleDriveFolderId(settings.googleDriveFolderId);
       if (settings.testimonialChannelStatus && !settings.testimonialChannelStatus.ok) {
         showToast(settings.testimonialChannelStatus.message, "danger");
       } else {
@@ -211,6 +224,10 @@ export function SettingsPage() {
       setPakasirApiKeyMasked(settings.pakasirApiKeyMasked);
       setTestimonialChannelLink(settings.testimonialChannelLink);
       setTestimonialChannelStatus(settings.testimonialChannelStatus);
+      setGoogleDriveCredentialsJson("");
+      setGoogleDriveCredentialsMasked(settings.googleDriveCredentialsMasked);
+      setGoogleDriveServiceEmail(settings.googleDriveServiceEmail);
+      setGoogleDriveFolderId(settings.googleDriveFolderId);
       setImportProgress({
         percent: 100,
         label: `Import selesai, ${trxGeminiData.transactions.length} TRX Gemini dimuat.`,
@@ -324,6 +341,40 @@ export function SettingsPage() {
                 {testimonialChannelStatus?.message || "Bot utama harus masuk ke saluran dan dijadikan admin agar testimoni otomatis terkirim."}
               </span>
             </label>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block space-y-2 md:col-span-2">
+                <span className="flex items-center gap-2 text-xs font-bold tracking-[0.22em] text-text-muted">
+                  <Folder size={14} />
+                  SERVICE ACCOUNT GOOGLE DRIVE
+                </span>
+                <textarea
+                  className="min-h-32"
+                  autoComplete="off"
+                  name="google_drive_credentials_json"
+                  value={googleDriveCredentialsJson}
+                  onChange={(event) => setGoogleDriveCredentialsJson(event.target.value)}
+                  placeholder={googleDriveCredentialsMasked ? `Tersimpan: ${googleDriveCredentialsMasked}` : "Paste JSON service account Google Drive"}
+                />
+                <span className="text-xs text-text-secondary">
+                  Kosongkan jika tidak ingin mengganti credential. Email service account: {googleDriveServiceEmail || "-"}
+                </span>
+              </label>
+
+              <label className="block space-y-2 md:col-span-2">
+                <span className="text-xs font-bold tracking-[0.22em] text-text-muted">ID FOLDER GOOGLE DRIVE</span>
+                <input
+                  autoComplete="off"
+                  name="google_drive_folder_id"
+                  value={googleDriveFolderId}
+                  onChange={(event) => setGoogleDriveFolderId(event.target.value)}
+                  placeholder="ID folder untuk bukti transaksi"
+                />
+                <span className="text-xs text-text-secondary">
+                  Folder harus dibagikan ke email service account agar upload bukti transaksi berhasil.
+                </span>
+              </label>
+            </div>
 
             <button
               className="flex w-full items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"

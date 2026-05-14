@@ -70,12 +70,30 @@ export async function listPaidTransactions(req, res) {
 
 export async function createManualTransaction(req, res) {
   try {
-    const item = await csPaymentService.createManualTransactionForUser(req.user, req.body);
+    const item = await csPaymentService.createManualTransactionForUser(req.user, {
+      ...req.body,
+      proofImage: req.file ?? null,
+    });
     realtimeService.emitTrxGeminiChanged(req.user.id, { source: "manual_transaction_create" });
     res.status(201).json({ message: "Transaksi berhasil disimpan", item });
   } catch (err) {
     logger.error(err, "Create manual transaction error");
     res.status(400).json({ error: err instanceof Error ? err.message : "Gagal menyimpan transaksi" });
+  }
+}
+
+export async function updateTransactionReport(req, res) {
+  try {
+    const item = await csPaymentService.updateTransactionReportForUser(
+      req.user,
+      req.params.transactionId,
+      req.body,
+    );
+    realtimeService.emitTrxGeminiChanged(req.user.id, { source: "transaction_report_update" });
+    res.json({ message: "Status laporan berhasil diperbarui", item });
+  } catch (err) {
+    logger.error(err, "Update transaction report error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Gagal memperbarui laporan" });
   }
 }
 

@@ -313,12 +313,14 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const appData = useAppData();
   const { showToast } = useToast();
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const proofImageInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<TransactionModel[]>([]);
   const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountModel[]>([]);
   const [pricePlans, setPricePlans] = useState<GeminiPricePlanModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [expFilter, setExpFilter] = useState("all");
+  const [reportStatusFilter, setReportStatusFilter] = useState("all");
   const [activeStatusFilter, setActiveStatusFilter] = useState("all");
   const [memberStatusFilter, setMemberStatusFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -326,6 +328,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   const [editingItem, setEditingItem] = useState<TransactionModel | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+  const [proofImageFile, setProofImageFile] = useState<File | null>(null);
+  const [proofImagePreview, setProofImagePreview] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
     googleAccountId: "",
     pricePlanId: "",
@@ -340,6 +344,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     idTrx: "",
     buyerEmail: "",
     platform: "",
+    reportStatus: "proses",
     activeStatus: "aktif",
     memberStatus: "anggota",
     activeStartAt: "",
@@ -377,6 +382,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     const q = query.trim().toLowerCase();
     const hasStatusFilter =
       expFilter !== "all" ||
+      reportStatusFilter !== "all" ||
       activeStatusFilter !== "all" ||
       memberStatusFilter !== "all";
     const hasAnyFilter = q.length > 0 || hasStatusFilter;
@@ -388,6 +394,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       if (activeStatusFilter !== "all" && activeStatus !== activeStatusFilter) return false;
 
       if (memberStatusFilter !== "all" && item.memberStatus !== memberStatusFilter) return false;
+
+      if (reportStatusFilter !== "all" && item.reportStatus !== reportStatusFilter) return false;
 
       if (expFilter !== "all") {
         const expDate = item.activeExpiresAt ? new Date(item.activeExpiresAt) : null;
@@ -406,7 +414,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
       return true;
     }).sort((a, b) => compareTransactionStart(a, b, !hasAnyFilter));
-  }, [activeStatusFilter, expFilter, items, memberStatusFilter, query]);
+  }, [activeStatusFilter, expFilter, items, memberStatusFilter, query, reportStatusFilter]);
 
   const totalPages = Math.max(Math.ceil(filteredItems.length / pageSize), 1);
   const pageItems = useMemo(() => {
@@ -428,7 +436,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeStatusFilter, expFilter, memberStatusFilter, query, items.length]);
+  }, [activeStatusFilter, expFilter, memberStatusFilter, query, reportStatusFilter, items.length]);
 
   useEffect(() => {
     if (!manualForm.pricePlanId && defaultPricePlan) {
@@ -440,6 +448,42 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     }
   }, [defaultPricePlan, manualForm.pricePlanId]);
 
+  useEffect(() => {
+    return () => {
+      if (proofImagePreview) URL.revokeObjectURL(proofImagePreview);
+    };
+  }, [proofImagePreview]);
+
+  function handleProofImageFile(file: File | null) {
+    setProofImageFile(file);
+    setProofImagePreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  function validateProofImage(file: File) {
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png"];
+    if (!allowedTypes.includes(file.type)) {
+      showToast("Format gambar harus JPG, JPEG, atau PNG.", "danger");
+      return false;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showToast("Ukuran gambar maksimal 10MB.", "danger");
+      return false;
+    }
+    return true;
+  }
+
+  function handleProofPaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    const imageItem = Array.from(event.clipboardData.items).find((item) => item.type.startsWith("image/"));
+    const file = imageItem?.getAsFile();
+    if (!file || !validateProofImage(file)) return;
+    event.preventDefault();
+    const extension = file.type === "image/png" ? "png" : "jpg";
+    handleProofImageFile(new File([file], `bukti-transaksi.${extension}`, { type: file.type }));
+  }
+
   function openEditModal(item: TransactionModel) {
     const matchedAccount = googleAccounts.find((account) => account.id === item.googleAccountId)
       ?? googleAccounts.find((account) => account.email === item.googleAccountEmail);
@@ -449,6 +493,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       idTrx: item.idTrx,
       buyerEmail: item.buyerEmail ?? formatCustomerJid(item.customerJid),
       platform: item.platform || "whatsapp",
+      reportStatus: item.reportStatus,
       activeStatus: getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform).toLowerCase(),
       memberStatus: item.memberStatus,
       activeStartAt: toDateOnlyInputValue(item.activeStartAt),
@@ -480,6 +525,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         amount: selectedPlan.price * Math.max(1, countBuyerEmails(manualForm.buyerEmail)),
         activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
+        reportStatus: "proses",
+        proofImage: proofImageFile,
       });
       const [nextItems, nextAccounts, nextPlans] = await Promise.all([
         appData.fetchTransactions(),
@@ -498,6 +545,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         activeDurationDays: defaultPricePlan ? String(defaultPricePlan.durationDays) : "30",
         startDate: toTodayInputValue(),
       });
+      handleProofImageFile(null);
+      if (proofImageInputRef.current) proofImageInputRef.current.value = "";
       setIsManualOpen(false);
       showToast("Transaksi manual berhasil disimpan.", "success");
     } catch (err) {
@@ -515,6 +564,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       "Email Buyer": item.buyerEmail ?? formatCustomerJid(item.customerJid),
       Start: formatShortDate(item.activeStartAt),
       Exp: formatShortDate(item.activeExpiresAt),
+      Laporan: item.reportStatus === "selesai" ? "Selesai" : "Proses",
       "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform),
       "Status Akun": item.memberStatus === "kick" ? "kick" : "Anggota",
       Total: item.amount,
@@ -665,6 +715,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         buyerEmail: normalizeBuyerEmail(editForm.buyerEmail),
         noBuyer: normalizeBuyerEmail(editForm.buyerEmail),
         platform: editForm.platform,
+        reportStatus: editForm.reportStatus,
         activeStatus: editForm.activeStatus,
         memberStatus: editForm.memberStatus,
         amount: editingItem.amount,
@@ -748,7 +799,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
       {loading ? null : (
         <SurfaceCard className="p-3 lg:p-4">
-          <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_160px_160px_auto]">
+          <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_150px_150px_150px_150px_auto]">
             <label className="relative flex min-h-[48px] items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4">
               <Search size={18} className="pointer-events-none absolute left-5 text-text-secondary" />
               <input
@@ -767,6 +818,16 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <option value="all">Exp</option>
               <option value="7">Exp: 7 hari</option>
               <option value="expired">Exp: Lewat</option>
+            </select>
+            <select
+              className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
+              value={reportStatusFilter}
+              onChange={(event) => setReportStatusFilter(event.target.value)}
+              aria-label="Filter laporan"
+            >
+              <option value="all">Laporan</option>
+              <option value="proses">Proses</option>
+              <option value="selesai">Selesai</option>
             </select>
             <select
               className="min-h-[48px] rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-0 text-sm text-white outline-none"
@@ -794,6 +855,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               onClick={() => {
                 setQuery("");
                 setExpFilter("all");
+                setReportStatusFilter("all");
                 setActiveStatusFilter("all");
                 setMemberStatusFilter("all");
               }}
@@ -803,14 +865,15 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           </div>
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-[980px] table-fixed border-collapse text-left text-sm">
+              <table className="min-w-[1060px] table-fixed border-collapse text-left text-sm">
                 <colgroup>
-                  <col className="w-[12%]" />
-                  <col className="w-[14%]" />
+                  <col className="w-[11%]" />
                   <col className="w-[13%]" />
+                  <col className="w-[12%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[8%]" />
                   <col className="w-[8%]" />
                   <col className="w-[8%]" />
                   <col className="w-[8%]" />
@@ -823,6 +886,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                     <th className="px-3 py-3">Platform</th>
                     <th className="px-3 py-3">Start</th>
                     <th className="px-3 py-3">Exp</th>
+                    <th className="px-2 py-3 text-center">Laporan</th>
                     <th className="px-2 py-3 text-center">Masa Aktif</th>
                     <th className="px-2 py-3 text-center">Status</th>
                     <th className="px-2 py-3 text-center">Aksi</th>
@@ -831,13 +895,13 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <tbody className="divide-y divide-[rgba(56,189,248,0.1)]">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-5 py-8 text-center text-sm text-text-secondary">
+                      <td colSpan={10} className="px-5 py-8 text-center text-sm text-text-secondary">
                         Belum ada transaksi sukses.
                       </td>
                     </tr>
                   ) : filteredItems.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-5 py-8 text-center text-sm text-text-secondary">
+                      <td colSpan={10} className="px-5 py-8 text-center text-sm text-text-secondary">
                         idTrx tidak ditemukan.
                       </td>
                     </tr>
@@ -874,6 +938,17 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                         <td className="px-3 py-2.5 text-text-primary">
                           <span className="block truncate" title={formatShortDate(item.activeExpiresAt)}>
                             {formatShortDate(item.activeExpiresAt)}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2.5 text-center">
+                          <span
+                            className={
+                              item.reportStatus === "selesai"
+                                ? "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(34,197,94,0.16)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-success"
+                                : "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(250,204,21,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-yellow-300"
+                            }
+                          >
+                            {item.reportStatus === "selesai" ? "SELESAI" : "PROSES"}
                           </span>
                         </td>
                         <td className="px-2 py-2.5 text-center">
@@ -1056,6 +1131,61 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </label>
           </div>
 
+          <div
+            className="rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.48)] p-4"
+            onPaste={handleProofPaste}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-text-secondary">Gambar Bukti</span>
+              <button
+                className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(56,189,248,0.22)] px-3 py-2 text-xs font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+                type="button"
+                onClick={() => proofImageInputRef.current?.click()}
+              >
+                <Upload size={14} />
+                Pilih File
+              </button>
+            </div>
+            {proofImagePreview ? (
+              <div className="flex flex-wrap items-start gap-3">
+                <img
+                  className="h-28 w-28 rounded-[10px] border border-[rgba(56,189,248,0.18)] object-cover"
+                  src={proofImagePreview}
+                  alt="Preview bukti transaksi"
+                />
+                <button
+                  className="rounded-[10px] border border-[rgba(244,63,94,0.24)] px-3 py-2 text-xs font-bold text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                  type="button"
+                  onClick={() => {
+                    handleProofImageFile(null);
+                    if (proofImageInputRef.current) proofImageInputRef.current.value = "";
+                  }}
+                >
+                  Hapus Gambar
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-[10px] border border-dashed border-[rgba(56,189,248,0.2)] px-4 py-5 text-sm text-text-secondary">
+                Pilih file atau tekan Ctrl + V saat area ini aktif.
+              </div>
+            )}
+            <input
+              ref={proofImageInputRef}
+              className="hidden"
+              type="file"
+              accept="image/jpeg,image/jpg,image/png"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                if (!file) return;
+                if (!validateProofImage(file)) {
+                  event.target.value = "";
+                  return;
+                }
+                handleProofImageFile(file);
+              }}
+            />
+          </div>
+
           <button
             className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
             type="submit"
@@ -1098,6 +1228,17 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <option value="shopee">shopee</option>
                 <option value="whatsapp">whatsapp</option>
                 <option value="pribadi">pribadi</option>
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-text-secondary">Laporan</span>
+              <select
+                value={editForm.reportStatus}
+                onChange={(event) => setEditForm((current) => ({ ...current, reportStatus: event.target.value }))}
+              >
+                <option value="proses">PROSES</option>
+                <option value="selesai">SELESAI</option>
               </select>
             </label>
 

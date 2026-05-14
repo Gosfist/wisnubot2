@@ -39,6 +39,14 @@ export const broadcastUpload = multer({
   fileFilter,
 }).single("image");
 
+const memoryStorage = multer.memoryStorage();
+
+export const proofImageUpload = multer({
+  storage: memoryStorage,
+  limits: { fileSize: MAX_FILE_SIZE_BYTES },
+  fileFilter,
+}).single("proofImage");
+
 /**
  * Express middleware that wraps multer and returns a friendly JSON error for file validation failures.
  */
@@ -54,6 +62,20 @@ export function broadcastUploadMiddleware(req, res, next) {
 
     // Multer file filter error or other multer error
     return res.status(400).json({ error: err.message || "Gagal mengupload gambar." });
+  });
+}
+
+export function proofImageUploadMiddleware(req, res, next) {
+  proofImageUpload(req, res, (err) => {
+    if (!err) {
+      return next();
+    }
+
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: `Ukuran gambar maksimal ${MAX_FILE_SIZE_MB}MB.` });
+    }
+
+    return res.status(400).json({ error: err.message || "Gagal mengupload gambar bukti." });
   });
 }
 

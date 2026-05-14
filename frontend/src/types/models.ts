@@ -167,6 +167,10 @@ export interface TransactionModel {
   platform: string;
   activeStatus: "aktif" | "expired" | null;
   memberStatus: "anggota" | "kick";
+  reportStatus: "proses" | "selesai";
+  proofDriveFileId: string | null;
+  proofDriveUrl: string | null;
+  proofUploadedAt: string | null;
   isManual: boolean;
   activeDurationDays: number | null;
   warrantyDurationDays: number | null;
@@ -189,6 +193,10 @@ export interface AppSettingsModel {
   testimonialChannelJid: string;
   testimonialChannelName: string;
   testimonialChannelStatus: { ok: boolean; message: string } | null;
+  googleDriveCredentialsJson: string;
+  googleDriveCredentialsMasked: string | null;
+  googleDriveServiceEmail: string;
+  googleDriveFolderId: string;
   updatedAt: string | null;
 }
 

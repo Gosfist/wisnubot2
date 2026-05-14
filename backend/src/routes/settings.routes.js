@@ -21,6 +21,8 @@ router.put(
     body("pakasirSlug").optional({ values: "falsy" }).isString().isLength({ max: 100 }),
     body("pakasirApiKey").optional({ values: "falsy" }).isString().isLength({ max: 255 }),
     body("testimonialChannelLink").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
+    body("googleDriveCredentialsJson").optional({ values: "falsy" }).isString().isLength({ max: 20000 }),
+    body("googleDriveFolderId").optional({ values: "falsy" }).isString().isLength({ max: 255 }),
     validate,
   ],
   updateSettings,

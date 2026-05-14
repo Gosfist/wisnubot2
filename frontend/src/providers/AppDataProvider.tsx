@@ -84,6 +84,7 @@ interface AppDataContextValue {
   }>;
   createManualTransaction: (payload: Record<string, unknown>) => Promise<TransactionModel>;
   updateTransaction: (transactionId: number, payload: Record<string, unknown>) => Promise<TransactionModel>;
+  updateTransactionReport: (transactionId: number, payload: { reportStatus: "proses" | "selesai" }) => Promise<TransactionModel>;
   deleteTransaction: (transactionId: number) => Promise<string>;
   fetchSettings: () => Promise<AppSettingsModel>;
   updateSettings: (payload: Partial<AppSettingsModel>) => Promise<AppSettingsModel>;
@@ -371,6 +372,10 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
       ? (String(payload.activeStatus ?? payload.active_status).toLowerCase() === "expired" ? "expired" : "aktif")
       : null,
     memberStatus: String(payload.memberStatus ?? payload.member_status ?? "anggota").toLowerCase() === "kick" ? "kick" : "anggota",
+    reportStatus: String(payload.reportStatus ?? payload.report_status ?? "proses").toLowerCase() === "selesai" ? "selesai" : "proses",
+    proofDriveFileId: payload.proofDriveFileId ?? payload.proof_drive_file_id ? String(payload.proofDriveFileId ?? payload.proof_drive_file_id) : null,
+    proofDriveUrl: payload.proofDriveUrl ?? payload.proof_drive_url ? String(payload.proofDriveUrl ?? payload.proof_drive_url) : null,
+    proofUploadedAt: payload.proofUploadedAt ?? payload.proof_uploaded_at ? String(payload.proofUploadedAt ?? payload.proof_uploaded_at) : null,
     isManual: Boolean(payload.isManual ?? payload.is_manual ?? false),
     activeDurationDays: payload.activeDurationDays ?? payload.active_duration_days ? Number(payload.activeDurationDays ?? payload.active_duration_days) : null,
     warrantyDurationDays: payload.warrantyDurationDays ?? payload.warranty_duration_days ? Number(payload.warrantyDurationDays ?? payload.warranty_duration_days) : null,
@@ -404,6 +409,12 @@ function parseAppSettings(payload: Record<string, unknown>): AppSettingsModel {
           message: String(status.message ?? ""),
         }
       : null,
+    googleDriveCredentialsJson: String(payload.googleDriveCredentialsJson ?? payload.google_drive_credentials_json ?? ""),
+    googleDriveCredentialsMasked: payload.googleDriveCredentialsMasked ?? payload.google_drive_credentials_masked
+      ? String(payload.googleDriveCredentialsMasked ?? payload.google_drive_credentials_masked)
+      : null,
+    googleDriveServiceEmail: String(payload.googleDriveServiceEmail ?? payload.google_drive_service_email ?? ""),
+    googleDriveFolderId: String(payload.googleDriveFolderId ?? payload.google_drive_folder_id ?? ""),
     updatedAt: payload.updatedAt ? String(payload.updatedAt) : null,
   };
 }
@@ -794,14 +805,36 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return { googleAccounts, geminiPricePlans, transactions };
   }
 
+  function buildTransactionFormData(payload: Record<string, unknown>): FormData {
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === "proofImage") {
+        if (value instanceof File) formData.append("proofImage", value);
+      } else if (value != null) {
+        formData.append(key, String(value));
+      }
+    }
+    return formData;
+  }
+
   async function createManualTransaction(payload: Record<string, unknown>): Promise<TransactionModel> {
-    const data = await apiFetch("/cs-payments/transactions", withJsonBody(payload));
+    const hasFile = payload.proofImage instanceof File;
+    const data = await apiFetch(
+      "/cs-payments/transactions",
+      hasFile ? { method: "POST", body: buildTransactionFormData(payload) } : withJsonBody(payload),
+    );
     invalidateTrxGeminiCache();
     return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
   }
 
   async function updateTransaction(transactionId: number, payload: Record<string, unknown>): Promise<TransactionModel> {
     const data = await apiFetch(`/cs-payments/transactions/${transactionId}`, withJsonBody(payload, "PUT"));
+    invalidateTrxGeminiCache();
+    return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function updateTransactionReport(transactionId: number, payload: { reportStatus: "proses" | "selesai" }): Promise<TransactionModel> {
+    const data = await apiFetch(`/cs-payments/transactions/${transactionId}/report`, withJsonBody(payload, "PATCH"));
     invalidateTrxGeminiCache();
     return parseTransaction((data as { item: Record<string, unknown> }).item ?? {});
   }
@@ -916,6 +949,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       refreshTrxGeminiData,
       createManualTransaction,
       updateTransaction,
+      updateTransactionReport,
       deleteTransaction,
       fetchSettings,
       updateSettings,
