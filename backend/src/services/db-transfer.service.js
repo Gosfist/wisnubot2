@@ -1,9 +1,11 @@
 import { getPool } from "../config/database.js";
 
 const EXPORT_FORMAT = "wisnubot2-db-export";
-const SCOPED_EXPORT_VERSION = 1;
-const FULL_EXPORT_VERSION = 2;
+const SCOPED_EXPORT_VERSION = 2;
+const FULL_EXPORT_VERSION = 3;
 const EXPORT_VERSION = FULL_EXPORT_VERSION;
+const SUPPORTED_SCOPED_EXPORT_VERSIONS = new Set([1, SCOPED_EXPORT_VERSION]);
+const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, FULL_EXPORT_VERSION]);
 const BULK_BATCH_SIZE = 300;
 
 const SECTION_KEYS = [
@@ -150,6 +152,10 @@ const TRANSACTION_COLUMNS = [
   "gemini_price_plan_id",
   "order_status",
   "buyer_count",
+  "report_status",
+  "proof_drive_file_id",
+  "proof_drive_url",
+  "proof_uploaded_at",
 ];
 
 const RELAY_SESSION_COLUMNS = [
@@ -386,7 +392,10 @@ async function exportScopedForUser(user) {
   const [settingsRows] = await pool.execute(
     `SELECT pakasir_slug, pakasir_api_key, testimonial_channel_link,
             testimonial_channel_jid, testimonial_channel_name,
-            transaction_message_template, updated_at
+            transaction_message_template,
+            google_drive_credentials_json, google_drive_client_id,
+            google_drive_client_secret, google_drive_refresh_token,
+            google_drive_folder_id, updated_at
        FROM app_settings
       WHERE user_id = ?
       LIMIT 1`,
@@ -653,9 +662,11 @@ async function importSettings(connection, userId, data) {
     `INSERT INTO app_settings (
        user_id, pakasir_slug, pakasir_api_key, testimonial_channel_link,
        testimonial_channel_jid, testimonial_channel_name,
-       transaction_message_template, updated_at
+       transaction_message_template, google_drive_credentials_json,
+       google_drive_client_id, google_drive_client_secret,
+       google_drive_refresh_token, google_drive_folder_id, updated_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
     [
       userId,
       settings.pakasir_slug ?? null,
@@ -664,6 +675,11 @@ async function importSettings(connection, userId, data) {
       settings.testimonial_channel_jid ?? null,
       settings.testimonial_channel_name ?? null,
       settings.transaction_message_template ?? null,
+      settings.google_drive_credentials_json ?? null,
+      settings.google_drive_client_id ?? null,
+      settings.google_drive_client_secret ?? null,
+      settings.google_drive_refresh_token ?? null,
+      settings.google_drive_folder_id ?? null,
       settings.updated_at ?? null,
     ],
   );
@@ -955,7 +971,7 @@ async function importRelaySessions(connection, data, txIdMap) {
 }
 
 async function importScopedForUser(user, payload) {
-  if (!payload || payload.format !== EXPORT_FORMAT || Number(payload.version) !== SCOPED_EXPORT_VERSION) {
+  if (!payload || payload.format !== EXPORT_FORMAT || !SUPPORTED_SCOPED_EXPORT_VERSIONS.has(Number(payload.version))) {
     throw new Error("File import bukan export DB WisnuBot2 yang valid");
   }
 
@@ -1031,7 +1047,7 @@ async function importScopedForUser(user, payload) {
 }
 
 async function importFullDatabase(payload) {
-  if (!payload || payload.format !== EXPORT_FORMAT || Number(payload.version) !== FULL_EXPORT_VERSION || payload.mode !== "full-database") {
+  if (!payload || payload.format !== EXPORT_FORMAT || !SUPPORTED_FULL_EXPORT_VERSIONS.has(Number(payload.version)) || payload.mode !== "full-database") {
     throw new Error("File import bukan backup full DB WisnuBot2 yang valid");
   }
 
@@ -1070,7 +1086,7 @@ async function importFullDatabase(payload) {
 }
 
 async function importForUser(user, payload) {
-  if (payload?.mode === "full-database" || Number(payload?.version) === FULL_EXPORT_VERSION) {
+  if (payload?.mode === "full-database") {
     return importFullDatabase(payload);
   }
   return importScopedForUser(user, payload);
