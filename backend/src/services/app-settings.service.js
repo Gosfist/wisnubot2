@@ -1,4 +1,5 @@
 import { getPool } from "../config/database.js";
+import { getNewsletterViewerRole, isNewsletterAdminRole } from "../utils/newsletter.js";
 import { googleDriveService } from "./google-drive.service.js";
 
 function maskApiKey(value) {
@@ -125,20 +126,20 @@ async function resolveTestimonialChannel(sock, link) {
   const metadata = await sock.newsletterMetadata(metadataType, key, "ADMIN");
   const jid = String(metadata?.id ?? (key.endsWith("@newsletter") ? key : ""));
   const name = String(metadata?.name ?? "");
-  const role = String(metadata?.viewer_metadata?.view_role ?? "").toUpperCase();
+  const role = getNewsletterViewerRole(metadata);
 
   if (jid && typeof sock.newsletterFollow === "function") {
     await sock.newsletterFollow(jid).catch(() => null);
   }
 
-  const isAdmin = role === "ADMIN" || role === "OWNER";
+  const isAdmin = !role || isNewsletterAdminRole(role);
   return {
     jid,
     name,
     status: {
       ok: isAdmin,
       message: isAdmin
-        ? `Bot sudah admin saluran${name ? ` ${name}` : ""}`
+        ? `Bot sudah terhubung ke saluran${name ? ` ${name}` : ""}`
         : "Bot belum jadi admin saluran. Masukkan bot ke saluran lalu jadikan admin.",
     },
   };

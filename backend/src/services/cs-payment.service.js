@@ -6,6 +6,7 @@ import { googleDriveService } from "./google-drive.service.js";
 import { messageService } from "./message.service.js";
 import { realtimeService } from "./realtime.service.js";
 import { logger } from "../utils/logger.js";
+import { getNewsletterViewerRole, isNewsletterAdminRole } from "../utils/newsletter.js";
 
 const PAKASIR_BASE_URL = "https://app.pakasir.com";
 const PAID_STATUSES = new Set(["completed", "paid", "success"]);
@@ -292,8 +293,8 @@ async function sendTransactionTestimonial(sock, transaction) {
   try {
     if (typeof sock.newsletterMetadata === "function") {
       const metadata = await sock.newsletterMetadata("jid", channelJid, "ADMIN");
-      const role = String(metadata?.viewer_metadata?.view_role ?? "").toUpperCase();
-      if (role !== "ADMIN" && role !== "OWNER") {
+      const role = getNewsletterViewerRole(metadata);
+      if (role && !isNewsletterAdminRole(role)) {
         await pool.execute(
           "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
           [
