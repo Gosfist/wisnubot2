@@ -701,7 +701,7 @@ export function SettingsPage() {
           </button>
         </div>
         <p className="mt-3 text-xs leading-relaxed text-text-secondary">
-          File export memakai format JSON WisnuBot2. Import full backup akan mengganti seluruh database, termasuk bot WA, grup, transaksi, Gemini, broadcast, dan pengaturan.
+          File export memakai format JSON WisnuBot2. Import full backup akan mengganti seluruh database, termasuk user, bot WA, grup, transaksi, Gemini, broadcast, pengaturan, dan log keamanan.
         </p>
       </Modal>
 
