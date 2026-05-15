@@ -24,8 +24,8 @@ async function listForCs(user, csId) {
   const [rows] = await pool.execute(
     `SELECT id, cs_id, content, is_used, used_by_jid, used_at, created_at
        FROM cs_stocks
-      WHERE cs_id = ?
-      ORDER BY is_used ASC, id ASC`,
+      WHERE cs_id = ? AND is_used = 0
+      ORDER BY id ASC`,
     [Number(csId)],
   );
   return rows.map((row) => ({
@@ -46,7 +46,7 @@ async function summaryForUser(user) {
             cs.nama_perintah,
             cs.delivery_mode,
             cs.price,
-            COUNT(s.id) AS total,
+            SUM(CASE WHEN s.is_used = 0 THEN 1 ELSE 0 END) AS total,
             SUM(CASE WHEN s.is_used = 0 THEN 1 ELSE 0 END) AS available,
             SUM(CASE WHEN s.is_used = 1 THEN 1 ELSE 0 END) AS used
        FROM customer_service cs
@@ -119,6 +119,40 @@ async function deleteStock(user, stockId) {
   return Number(result.affectedRows || 0) > 0;
 }
 
+async function updateStock(user, stockId, content) {
+  const nextContent = String(content ?? "").trim();
+  if (!nextContent) {
+    throw new Error("Data akun wajib diisi");
+  }
+
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT s.id, s.cs_id
+       FROM cs_stocks s
+       JOIN customer_service cs ON cs.id = s.cs_id
+      WHERE s.id = ? AND s.is_used = 0 AND cs.user_id = ?
+      LIMIT 1`,
+    [Number(stockId), user.id],
+  );
+  if (rows.length === 0) {
+    return null;
+  }
+
+  await pool.execute(
+    `UPDATE cs_stocks SET content = ? WHERE id = ?`,
+    [nextContent, Number(stockId)],
+  );
+
+  return {
+    id: Number(rows[0].id),
+    csId: Number(rows[0].cs_id),
+    content: nextContent,
+    isUsed: false,
+    usedByJid: null,
+    usedAt: null,
+  };
+}
+
 async function deleteAllForCs(user, csId) {
   await assertCsOwnership(csId, user.id);
   const pool = getPool();
@@ -130,8 +164,8 @@ async function deleteAllForCs(user, csId) {
 }
 
 /**
- * Atomically reserve the next available stock for a customer.
- * Returns { id, content } or null if pool empty.
+ * Atomically takes and removes the next available stock for a customer.
+ * Returns { id, content } or null if pool empty. The content is deleted from DB after being taken.
  */
 async function reserveOne(csId, customerJid) {
   const pool = getPool();
@@ -153,10 +187,8 @@ async function reserveOne(csId, customerJid) {
     }
     const stock = rows[0];
     await conn.execute(
-      `UPDATE cs_stocks
-          SET is_used = 1, used_by_jid = ?, used_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-      [String(customerJid), Number(stock.id)],
+      `DELETE FROM cs_stocks WHERE id = ? AND is_used = 0`,
+      [Number(stock.id)],
     );
     await conn.commit();
     return { id: Number(stock.id), content: String(stock.content) };
@@ -173,6 +205,7 @@ export const csStockService = {
   summaryForUser,
   addStocks,
   deleteStock,
+  updateStock,
   deleteAllForCs,
   reserveOne,
 };

@@ -153,6 +153,7 @@ export interface GeminiPricePlanModel {
 export interface TransactionModel {
   id: number;
   idTrx: string;
+  paymentGatewayOrderId: string | null;
   googleAccountId: number | null;
   geminiPricePlanId: number | null;
   customerJid: string;
@@ -179,6 +180,9 @@ export interface TransactionModel {
   activeExpiresAt: string | null;
   warrantyStartAt: string | null;
   warrantyExpiresAt: string | null;
+  warrantyStatus: "open" | "selesai";
+  warrantyClaimedAt: string | null;
+  warrantyClaimStockId: number | null;
   paidAt: string | null;
   deliveredAt: string | null;
   createdAt: string | null;

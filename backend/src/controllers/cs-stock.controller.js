@@ -60,6 +60,22 @@ export async function deleteStock(req, res) {
   }
 }
 
+export async function updateStock(req, res) {
+  try {
+    const stockId = Number(req.params.stockId);
+    const item = await csStockService.updateStock(req.user, stockId, req.body?.content);
+    if (!item) {
+      return res.status(404).json({ error: "Stock tidak ditemukan" });
+    }
+    res.json({ message: "Stock berhasil diperbarui", item });
+  } catch (err) {
+    logger.error(err, "Update stock error");
+    res.status(400).json({
+      error: err instanceof Error ? err.message : "Request tidak valid",
+    });
+  }
+}
+
 export async function clearStocks(req, res) {
   try {
     const csId = Number(req.params.csId);

@@ -9,6 +9,7 @@ import { SplashPage } from "../pages/SplashPage";
 import { ForgotPasswordPage } from "../pages/auth/ForgotPasswordPage";
 import { LoginPage } from "../pages/auth/LoginPage";
 import { AddBroadcastPage } from "../pages/user/AddBroadcastPage";
+import { BotWaTransactionsPage } from "../pages/user/BotWaTransactionsPage";
 import { AddCustomerServicePage } from "../pages/user/AddCustomerServicePage";
 import { BroadcastsPage } from "../pages/user/BroadcastsPage";
 import { CustomerServicePage } from "../pages/user/CustomerServicePage";
@@ -26,6 +27,8 @@ import { TrxGeminiPage } from "../pages/user/TrxGeminiPage";
 const navItems = [
   { to: "/dashboard", label: "Dashboard", end: true },
   { to: "/transactions", label: "TRX Gemini", end: true },
+  { to: "/bot-wa/transactions", label: "TRX Bot WA", end: true },
+  { to: "/stock", label: "Stock", end: true },
   {
     label: "Bot Wa",
     children: [
@@ -34,7 +37,6 @@ const navItems = [
       { to: "/push-kontak", label: "Push Kontak", end: true },
       { to: "/customer-service", label: "Customer Service", end: true },
       { to: "/groups", label: "Kelola Group", end: true },
-      { to: "/stock", label: "Stock", end: true },
     ],
   },
   { to: "/documentation", label: "Dokumentasi", end: true },
@@ -111,6 +113,7 @@ export function App() {
       <Route element={<ProtectedShell />}>
         <Route path="/dashboard" element={<SalesDashboardPage />} />
         <Route path="/bot-wa" element={<DashboardPage />} />
+        <Route path="/bot-wa/transactions" element={<BotWaTransactionsPage />} />
         <Route path="/groups" element={<GroupsPage />} />
         <Route path="/google-accounts" element={<GoogleAccountsPage />} />
         <Route path="/broadcasts" element={<BroadcastsPage />} />

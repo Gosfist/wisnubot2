@@ -21,7 +21,7 @@ const {
 } = pkg;
 import { Boom } from "@hapi/boom";
 import { join } from "path";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import QRCode from "qrcode";
 import { config } from "../config/env.js";
 import { getPool } from "../config/database.js";
@@ -33,19 +33,8 @@ import { logger } from "../utils/logger.js";
 
 const PAIRING_BROWSER = ["Ubuntu", "Chrome", "22.04.4"];
 const DEFAULT_BROWSER = ["Mac OS", "Desktop", "14.4.1"];
-const PAYMENT_SUCCESS_IMAGE_PATH = new URL("../../uploads/asset/sukses.png", import.meta.url);
-const PAYMENT_FAILED_IMAGE_PATH = new URL("../../uploads/asset/gagal.png", import.meta.url);
 const PAYMENT_FAILED_TEXT =
   "Pembayaran gagal atau belum terdeteksi. Silakan hubungi owner jika merasa sudah melakukan transaksi.";
-
-function getPaymentStatusImageBuffer(status) {
-  const assetUrl = status === "success" ? PAYMENT_SUCCESS_IMAGE_PATH : PAYMENT_FAILED_IMAGE_PATH;
-  if (!existsSync(assetUrl)) {
-    logger.warn(`Payment status image not found: ${assetUrl.pathname}`);
-    return null;
-  }
-  return readFileSync(assetUrl);
-}
 
 function extractIncomingTextContent(message) {
   if (!message || typeof message !== "object") {
@@ -1263,6 +1252,39 @@ class BaileysManager {
               continue;
             }
 
+            if (
+              incomingText === "/claimgaransi" ||
+              incomingText === "claimgaransi" ||
+              incomingText.startsWith("/claimgaransi ") ||
+              incomingText.startsWith("claimgaransi ")
+            ) {
+              const idTrx = incomingText
+                .replace(/^\/?claimgaransi\s*/i, "")
+                .trim();
+              try {
+                const result = await csPaymentService.claimWarrantyForCustomer({
+                  userId: customerServiceContext.userId,
+                  customerJid: remoteJid,
+                  idTrx,
+                });
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  result.message,
+                );
+              } catch (err) {
+                logger.warn(err, "Customer service warranty claim failed");
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  err instanceof Error ? err.message : "Gagal claim garansi.",
+                );
+              }
+              continue;
+            }
+
             if (incomingText.startsWith("cs_buy:")) {
               const [, csIdRaw, buttonIdRaw] = incomingText.split(":");
               const csId = Number(csIdRaw);
@@ -1337,36 +1359,6 @@ class BaileysManager {
                   sock,
                 });
                 if (!result.paid) {
-                  const failedImage = getPaymentStatusImageBuffer("failed");
-                  if (failedImage) {
-                    await messageService.sendCustomerServiceImageMessage(
-                      sock,
-                      message.key,
-                      remoteJid,
-                      failedImage,
-                      PAYMENT_FAILED_TEXT,
-                    );
-                  } else {
-                    await messageService.sendCustomerServiceMessage(
-                      sock,
-                      message.key,
-                      remoteJid,
-                      PAYMENT_FAILED_TEXT,
-                    );
-                  }
-                }
-              } catch (err) {
-                logger.warn(err, "Customer service payment check failed");
-                const failedImage = getPaymentStatusImageBuffer("failed");
-                if (failedImage) {
-                  await messageService.sendCustomerServiceImageMessage(
-                    sock,
-                    message.key,
-                    remoteJid,
-                    failedImage,
-                    PAYMENT_FAILED_TEXT,
-                  );
-                } else {
                   await messageService.sendCustomerServiceMessage(
                     sock,
                     message.key,
@@ -1374,6 +1366,14 @@ class BaileysManager {
                     PAYMENT_FAILED_TEXT,
                   );
                 }
+              } catch (err) {
+                logger.warn(err, "Customer service payment check failed");
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  PAYMENT_FAILED_TEXT,
+                );
               }
               continue;
             }

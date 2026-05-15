@@ -56,6 +56,7 @@ interface AppDataContextValue {
   fetchStocksSummary: () => Promise<CsStockSummaryModel[]>;
   fetchStocksForCs: (csId: number) => Promise<CsStockModel[]>;
   addStocks: (csId: number, contents: string | string[]) => Promise<{ added: number; message: string }>;
+  updateStock: (stockId: number, content: string) => Promise<CsStockModel>;
   deleteStock: (stockId: number) => Promise<string>;
   clearStocks: (csId: number) => Promise<string>;
   fetchGoogleAccounts: () => Promise<GoogleAccountModel[]>;
@@ -318,7 +319,7 @@ function parseStock(payload: Record<string, unknown>): CsStockModel {
 function parseStockSummary(payload: Record<string, unknown>): CsStockSummaryModel {
   return {
     csId: Number(payload.csId ?? 0),
-    commandName: String(payload.namaPerintah ?? ""),
+    commandName: String(payload.commandName ?? payload.namaPerintah ?? payload.nama_perintah ?? ""),
     deliveryMode: (String(payload.deliveryMode ?? "none") as CsDeliveryMode),
     price: payload.price === null || payload.price === undefined ? null : Number(payload.price),
     total: Number(payload.total ?? 0),
@@ -356,6 +357,9 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
   return {
     id: Number(payload.id ?? 0),
     idTrx: String(payload.idTrx ?? payload.id_trx ?? ""),
+    paymentGatewayOrderId: payload.paymentGatewayOrderId ?? payload.pakasir_gateway_order_id
+      ? String(payload.paymentGatewayOrderId ?? payload.pakasir_gateway_order_id)
+      : null,
     googleAccountId: payload.googleAccountId ?? payload.google_account_id ? Number(payload.googleAccountId ?? payload.google_account_id) : null,
     geminiPricePlanId: payload.geminiPricePlanId ?? payload.gemini_price_plan_id ? Number(payload.geminiPricePlanId ?? payload.gemini_price_plan_id) : null,
     customerJid: String(payload.customerJid ?? payload.customer_jid ?? ""),
@@ -384,6 +388,9 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
     activeExpiresAt: payload.activeExpiresAt ?? payload.active_expires_at ? String(payload.activeExpiresAt ?? payload.active_expires_at) : null,
     warrantyStartAt: payload.warrantyStartAt ?? payload.warranty_start_at ? String(payload.warrantyStartAt ?? payload.warranty_start_at) : null,
     warrantyExpiresAt: payload.warrantyExpiresAt ?? payload.warranty_expires_at ? String(payload.warrantyExpiresAt ?? payload.warranty_expires_at) : null,
+    warrantyStatus: String(payload.warrantyStatus ?? payload.warranty_status ?? "open").toLowerCase() === "selesai" ? "selesai" : "open",
+    warrantyClaimedAt: payload.warrantyClaimedAt ?? payload.warranty_claimed_at ? String(payload.warrantyClaimedAt ?? payload.warranty_claimed_at) : null,
+    warrantyClaimStockId: payload.warrantyClaimStockId ?? payload.warranty_claim_stock_id ? Number(payload.warrantyClaimStockId ?? payload.warranty_claim_stock_id) : null,
     paidAt: payload.paidAt ?? payload.paid_at ? String(payload.paidAt ?? payload.paid_at) : null,
     deliveredAt: payload.deliveredAt ?? payload.delivered_at ? String(payload.deliveredAt ?? payload.delivered_at) : null,
     createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
@@ -633,6 +640,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       added: Number((data as { added: number }).added ?? 0),
       message: String((data as { message: string }).message ?? "OK"),
     };
+  }
+
+  async function updateStock(stockId: number, content: string): Promise<CsStockModel> {
+    const data = await apiFetch(`/cs-stocks/${stockId}`, withJsonBody({ content }, "PUT"));
+    return parseStock((data as { item: Record<string, unknown> }).item ?? {});
   }
 
   async function deleteStock(stockId: number): Promise<string> {
@@ -938,6 +950,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       fetchStocksSummary,
       fetchStocksForCs,
       addStocks,
+      updateStock,
       deleteStock,
       clearStocks,
       fetchGoogleAccounts,

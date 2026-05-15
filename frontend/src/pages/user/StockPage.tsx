@@ -1,4 +1,4 @@
-import { Boxes, Plus, Trash2, X } from "lucide-react";
+import { Edit3, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -6,23 +6,60 @@ import { useAppData } from "../../hooks/useAppData";
 import { useToast } from "../../hooks/useToast";
 import type { CsStockModel, CsStockSummaryModel } from "../../types/models";
 
+interface StockRow extends CsStockModel {
+  commandName: string;
+}
+
+const BLOCKED_COMMANDS = new Set(["start", "welcome"]);
+
+function isStockCommand(row: CsStockSummaryModel) {
+  return row.deliveryMode === "stock" && !BLOCKED_COMMANDS.has(row.commandName.trim().toLowerCase());
+}
+
 export function StockPage() {
   const appData = useAppData();
   const { showToast } = useToast();
 
   const [summary, setSummary] = useState<CsStockSummaryModel[]>([]);
+  const [rows, setRows] = useState<StockRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [openCsId, setOpenCsId] = useState<number | null>(null);
-  const [openCsCommand, setOpenCsCommand] = useState<string>("");
-  const [items, setItems] = useState<CsStockModel[]>([]);
-  const [bulkText, setBulkText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [selectedCsId, setSelectedCsId] = useState<number>(0);
+  const [newContent, setNewContent] = useState("");
+  const [editing, setEditing] = useState<StockRow | null>(null);
+  const [editContent, setEditContent] = useState("");
 
-  async function refreshSummary() {
+  const stockCommands = useMemo(() => summary.filter(isStockCommand), [summary]);
+
+  const filteredRows = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return rows;
+    return rows.filter((row) =>
+      `/${row.commandName} ${row.content}`.toLowerCase().includes(keyword),
+    );
+  }, [query, rows]);
+
+  async function refreshStock() {
     setLoading(true);
     try {
-      const data = await appData.fetchStocksSummary();
-      setSummary(data);
+      const nextSummary = await appData.fetchStocksSummary();
+      const commands = nextSummary.filter(isStockCommand);
+      const lists = await Promise.all(
+        commands.map(async (command) => {
+          const items = await appData.fetchStocksForCs(command.csId);
+          return items
+            .filter((item) => !item.isUsed)
+            .map((item) => ({ ...item, commandName: command.commandName }));
+        }),
+      );
+      setSummary(nextSummary);
+      setRows(lists.flat());
+      setSelectedCsId((current) => {
+        if (current && commands.some((command) => command.csId === current)) return current;
+        return commands[0]?.csId ?? 0;
+      });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal memuat stock", "danger");
     } finally {
@@ -31,45 +68,28 @@ export function StockPage() {
   }
 
   useEffect(() => {
-    void refreshSummary();
+    void refreshStock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function openManager(row: CsStockSummaryModel) {
-    setOpenCsId(row.csId);
-    setOpenCsCommand(row.commandName);
-    setItems([]);
-    setBulkText("");
-    try {
-      const list = await appData.fetchStocksForCs(row.csId);
-      setItems(list);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Gagal memuat stock", "danger");
-    }
-  }
-
-  function closeManager() {
-    setOpenCsId(null);
-    setOpenCsCommand("");
-    setItems([]);
-    setBulkText("");
-  }
-
   async function handleAdd() {
-    if (!openCsId) return;
-    const trimmed = bulkText.trim();
-    if (!trimmed) {
-      showToast("Isi minimal 1 baris stock.", "danger");
+    const content = newContent.trim();
+    if (!selectedCsId) {
+      showToast("Pilih perintah terlebih dahulu.", "danger");
       return;
     }
+    if (!content) {
+      showToast("Data akun wajib diisi.", "danger");
+      return;
+    }
+
     setBusy(true);
     try {
-      const result = await appData.addStocks(openCsId, trimmed);
+      const result = await appData.addStocks(selectedCsId, content);
       showToast(result.message, "success");
-      setBulkText("");
-      const list = await appData.fetchStocksForCs(openCsId);
-      setItems(list);
-      await refreshSummary();
+      setNewContent("");
+      setIsAddOpen(false);
+      await refreshStock();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal menambah stock", "danger");
     } finally {
@@ -77,166 +97,248 @@ export function StockPage() {
     }
   }
 
-  async function handleDelete(stockId: number) {
-    if (!openCsId) return;
-    if (!window.confirm("Hapus item stock ini?")) return;
+  function openEdit(row: StockRow) {
+    setEditing(row);
+    setEditContent(row.content);
+  }
+
+  async function handleEdit() {
+    if (!editing) return;
+    const content = editContent.trim();
+    if (!content) {
+      showToast("Data akun wajib diisi.", "danger");
+      return;
+    }
+
     setBusy(true);
     try {
-      await appData.deleteStock(stockId);
-      const list = await appData.fetchStocksForCs(openCsId);
-      setItems(list);
-      await refreshSummary();
+      await appData.updateStock(editing.id, content);
+      showToast("Stock berhasil diperbarui.", "success");
+      setEditing(null);
+      setEditContent("");
+      await refreshStock();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Gagal menghapus", "danger");
+      showToast(err instanceof Error ? err.message : "Gagal memperbarui stock", "danger");
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleClear() {
-    if (!openCsId) return;
-    if (!window.confirm("Hapus SEMUA stock yang belum terpakai?")) return;
+  async function handleDelete(row: StockRow) {
+    if (!window.confirm(`Hapus stock /${row.commandName}?`)) return;
     setBusy(true);
     try {
-      const msg = await appData.clearStocks(openCsId);
-      showToast(msg, "success");
-      const list = await appData.fetchStocksForCs(openCsId);
-      setItems(list);
-      await refreshSummary();
+      const message = await appData.deleteStock(row.id);
+      showToast(message, "success");
+      await refreshStock();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Gagal menghapus", "danger");
+      showToast(err instanceof Error ? err.message : "Gagal menghapus stock", "danger");
     } finally {
       setBusy(false);
     }
   }
-
-  const stockEnabledRows = useMemo(
-    () => summary.filter((s) => s.deliveryMode === "stock"),
-    [summary],
-  );
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Stock Customer Service" />
+      <PageHeader title="Stock" />
 
       <SurfaceCard>
-        {loading ? (
-          null
-        ) : stockEnabledRows.length === 0 ? (
-          <div className="py-8 text-center text-sm text-text-secondary">
-            Belum ada perintah CS dengan mode <strong>Stock</strong>.
-            <br />
-            Buat perintah CS lalu pilih mode pengiriman <em>Pakai Stock</em>.
+        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <label className="relative flex min-h-[48px] w-full items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 md:max-w-[520px]">
+            <Search className="pointer-events-none absolute left-5 text-text-secondary" size={18} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Cari perintah / data akun"
+              className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setIsAddOpen(true)}
+            disabled={stockCommands.length === 0}
+            className="inline-flex items-center gap-2 rounded-[18px] bg-linear-to-r from-primary to-accent px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus size={18} /> Add Stock
+          </button>
+        </div>
+
+        {loading ? null : stockCommands.length === 0 ? (
+          <div className="py-10 text-center text-sm text-text-secondary">
+            Belum ada perintah dengan mode <strong>Pakai Stock</strong>.
           </div>
         ) : (
-          <div className="space-y-2">
-            {stockEnabledRows.map((row) => {
-              const lowStock = row.available <= 3;
-              return (
-                <button
-                  key={row.csId}
-                  onClick={() => void openManager(row)}
-                  className="flex w-full items-center justify-between gap-3 rounded-[16px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.6)] px-4 py-3 text-left transition hover:border-[rgba(56,189,248,0.4)]"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-[12px] bg-[rgba(56,189,248,0.12)] p-2 text-accent">
-                      <Boxes size={18} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-white">/{row.commandName}</div>
-                      <div className="text-xs text-text-secondary">
-                        {row.price !== null ? `Rp ${row.price.toLocaleString("id-ID")}` : "-"}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={"text-sm font-bold " + (lowStock ? "text-danger" : "text-white")}>
-                      {row.available}
-                    </div>
-                    <div className="text-[10px] uppercase tracking-wider text-text-secondary">
-                      tersedia / {row.total}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[780px] table-fixed text-left">
+              <colgroup>
+                <col className="w-[220px]" />
+                <col />
+                <col className="w-[132px]" />
+              </colgroup>
+              <thead>
+                <tr className="text-sm font-bold text-white">
+                  <th className="px-3 py-4">Perintah</th>
+                  <th className="px-3 py-4">Data Akun</th>
+                  <th className="px-3 py-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-10 text-center text-sm text-text-secondary">
+                      Stock belum ada.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRows.map((row) => (
+                    <tr key={row.id} className="border-t border-[rgba(148,163,184,0.12)] text-base font-semibold text-white">
+                      <td className="px-3 py-4">/{row.commandName}</td>
+                      <td className="px-3 py-4">
+                        <div title={row.content} className="max-w-full truncate whitespace-nowrap text-text-primary">
+                          {row.content}
+                        </div>
+                      </td>
+                      <td className="px-3 py-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(row)}
+                            disabled={busy}
+                            className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-[rgba(56,189,248,0.3)] text-accent hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-50"
+                            aria-label="Edit stock"
+                            title="Edit stock"
+                          >
+                            <Edit3 size={17} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(row)}
+                            disabled={busy}
+                            className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-[rgba(244,63,94,0.35)] text-danger hover:bg-[rgba(244,63,94,0.08)] disabled:opacity-50"
+                            aria-label="Hapus stock"
+                            title="Hapus stock"
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         )}
       </SurfaceCard>
 
-      {openCsId !== null && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-t-[24px] bg-[#0b1220] shadow-2xl sm:rounded-[24px]">
-            <div className="flex items-center justify-between border-b border-[rgba(56,189,248,0.15)] px-5 py-4">
-              <div>
-                <div className="text-sm font-bold text-white">Stock /{openCsCommand}</div>
-                <div className="text-xs text-text-secondary">{items.length} item total</div>
-              </div>
-              <button onClick={closeManager} className="rounded-full p-2 text-text-secondary hover:bg-white/10 hover:text-white">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-4 px-5 py-4">
-              <div className="space-y-2">
-                <span className="text-xs font-semibold text-text-secondary">Tambah Stock (1 baris = 1 item)</span>
-                <textarea
-                  className="min-h-[120px] w-full rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-3 py-2 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
-                  value={bulkText}
-                  onChange={(e) => setBulkText(e.target.value)}
-                  placeholder={"akun1@mail.com|password123\nakun2@mail.com|password456"}
-                />
-                <button
-                  onClick={() => void handleAdd()}
-                  disabled={busy}
-                  className="flex w-full items-center justify-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-2.5 text-sm font-bold text-white shadow-glow hover:brightness-110 disabled:opacity-60"
-                >
-                  <Plus size={16} /> Tambah Stock
-                </button>
-              </div>
-
-              <div className="max-h-[40vh] space-y-1 overflow-y-auto">
-                {items.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-text-secondary">Belum ada stock.</div>
-                ) : (
-                  items.map((it) => (
-                    <div
-                      key={it.id}
-                      className={
-                        "flex items-center justify-between gap-2 rounded-[12px] border px-3 py-2 text-xs " +
-                        (it.isUsed
-                          ? "border-[rgba(244,63,94,0.16)] bg-[rgba(244,63,94,0.05)] text-text-secondary line-through"
-                          : "border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.5)] text-white")
-                      }
-                    >
-                      <span className="break-all font-mono">{it.content}</span>
-                      {!it.isUsed && (
-                        <button
-                          onClick={() => void handleDelete(it.id)}
-                          disabled={busy}
-                          className="shrink-0 rounded-lg p-1.5 text-[rgba(244,63,94,0.7)] hover:bg-[rgba(244,63,94,0.1)] hover:text-danger"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {items.some((it) => !it.isUsed) && (
-                <button
-                  onClick={() => void handleClear()}
-                  disabled={busy}
-                  className="w-full rounded-[14px] border border-[rgba(244,63,94,0.4)] px-3 py-2 text-xs font-bold text-danger hover:bg-[rgba(244,63,94,0.08)] disabled:opacity-60"
-                >
-                  Hapus Semua Stock Belum Terpakai
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+      {isAddOpen && (
+        <StockDialog
+          title="Add Stock"
+          commandOptions={stockCommands}
+          selectedCsId={selectedCsId}
+          onSelectedCsIdChange={setSelectedCsId}
+          content={newContent}
+          onContentChange={setNewContent}
+          onClose={() => setIsAddOpen(false)}
+          onSubmit={() => void handleAdd()}
+          busy={busy}
+          submitLabel="Simpan Stock"
+        />
       )}
+
+      {editing && (
+        <StockDialog
+          title="Edit Stock"
+          commandOptions={stockCommands}
+          selectedCsId={editing.csId}
+          onSelectedCsIdChange={() => undefined}
+          content={editContent}
+          onContentChange={setEditContent}
+          onClose={() => setEditing(null)}
+          onSubmit={() => void handleEdit()}
+          busy={busy}
+          submitLabel="Update Stock"
+          lockCommand
+        />
+      )}
+    </div>
+  );
+}
+
+interface StockDialogProps {
+  title: string;
+  commandOptions: CsStockSummaryModel[];
+  selectedCsId: number;
+  onSelectedCsIdChange: (value: number) => void;
+  content: string;
+  onContentChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  busy: boolean;
+  submitLabel: string;
+  lockCommand?: boolean;
+}
+
+function StockDialog({
+  title,
+  commandOptions,
+  selectedCsId,
+  onSelectedCsIdChange,
+  content,
+  onContentChange,
+  onClose,
+  onSubmit,
+  busy,
+  submitLabel,
+  lockCommand = false,
+}: StockDialogProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-t-[24px] border border-[rgba(56,189,248,0.22)] bg-[#0b1220] shadow-2xl sm:rounded-[24px]">
+        <div className="flex items-center justify-between border-b border-[rgba(56,189,248,0.15)] px-5 py-4">
+          <div className="text-lg font-bold text-white">{title}</div>
+          <button onClick={onClose} className="rounded-full p-2 text-text-secondary hover:bg-white/10 hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-text-secondary">Perintah</span>
+            <select
+              value={selectedCsId}
+              onChange={(event) => onSelectedCsIdChange(Number(event.target.value))}
+              disabled={lockCommand || busy}
+              className="h-[54px] w-full rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 text-base font-semibold text-white outline-none focus:border-[rgba(56,189,248,0.45)] disabled:opacity-70"
+            >
+              {commandOptions.map((option) => (
+                <option key={option.csId} value={option.csId}>
+                  /{option.commandName}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-text-secondary">Data Akun</span>
+            <textarea
+              value={content}
+              onChange={(event) => onContentChange(event.target.value)}
+              className="min-h-[150px] w-full rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm font-semibold text-white outline-none focus:border-[rgba(56,189,248,0.45)]"
+              placeholder="email@gmail.com | password | catatan"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={busy}
+            className="flex h-[54px] w-full items-center justify-center rounded-[14px] bg-linear-to-r from-primary to-accent text-sm font-bold text-white shadow-glow hover:brightness-110 disabled:opacity-60"
+          >
+            {submitLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

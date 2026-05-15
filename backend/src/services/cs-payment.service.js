@@ -6,7 +6,6 @@ import { googleDriveService } from "./google-drive.service.js";
 import { messageService } from "./message.service.js";
 import { realtimeService } from "./realtime.service.js";
 import { logger } from "../utils/logger.js";
-import { existsSync, readFileSync } from "fs";
 
 const PAKASIR_BASE_URL = "https://app.pakasir.com";
 const PAID_STATUSES = new Set(["completed", "paid", "success"]);
@@ -16,15 +15,6 @@ const QRIS_ADMIN_HIGH_AMOUNT_PERCENT = 0.01;
 const QRIS_ADMIN_HIGH_AMOUNT_THRESHOLD = 105000;
 const PAYMENT_EXPIRY_MINUTES = 5;
 const PAYMENT_EXPIRY_MS = PAYMENT_EXPIRY_MINUTES * 60 * 1000;
-const PAYMENT_SUCCESS_IMAGE_PATH = new URL("../../uploads/asset/sukses.png", import.meta.url);
-
-function getPaymentSuccessImageBuffer() {
-  if (!existsSync(PAYMENT_SUCCESS_IMAGE_PATH)) {
-    logger.warn(`Payment success image not found: ${PAYMENT_SUCCESS_IMAGE_PATH.pathname}`);
-    return null;
-  }
-  return readFileSync(PAYMENT_SUCCESS_IMAGE_PATH);
-}
 
 function normalizeJid(value) {
   const raw = String(value ?? "").trim();
@@ -38,7 +28,7 @@ function normalizeJid(value) {
   return `${digits}@s.whatsapp.net`;
 }
 
-function buildOrderId(csId) {
+function buildPakasirGatewayOrderId(csId) {
   const stamp = Date.now().toString(36).toUpperCase();
   const random = Math.random().toString(36).slice(2, 8).toUpperCase();
   return `CS${csId}-${stamp}${random}`;
@@ -95,6 +85,7 @@ function mapPaidTransactionRow(row) {
   return {
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
+    paymentGatewayOrderId: row.pakasir_gateway_order_id ? String(row.pakasir_gateway_order_id) : null,
     googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
     geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
     customerJid: String(row.customer_jid ?? ""),
@@ -121,6 +112,9 @@ function mapPaidTransactionRow(row) {
     activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
     warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
     warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
+    warrantyStatus: String(row.warranty_status ?? "open") === "selesai" ? "selesai" : "open",
+    warrantyClaimedAt: row.warranty_claimed_at ? String(row.warranty_claimed_at) : null,
+    warrantyClaimStockId: row.warranty_claim_stock_id === null || row.warranty_claim_stock_id === undefined ? null : Number(row.warranty_claim_stock_id),
     paidAt: row.paid_at ? String(row.paid_at) : null,
     deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
     createdAt: row.created_at ? String(row.created_at) : null,
@@ -334,6 +328,7 @@ function buildPaymentView(row) {
   return {
     idTrx,
     orderId: idTrx,
+    paymentGatewayOrderId: row.pakasir_gateway_order_id ? String(row.pakasir_gateway_order_id) : null,
     paymentUrl: String(row.pakasir_payment_url ?? row.paymentUrl ?? ""),
     qrisString: row.qris_string ? String(row.qris_string) : null,
     amount: price,
@@ -432,7 +427,7 @@ async function closePendingTransaction(transaction, status) {
     await cancelPakasirTransaction({
       slug: transaction.pakasir_slug,
       apiKey: transaction.pakasir_api_key,
-      orderId: transaction.pakasir_order_id,
+      orderId: transaction.pakasir_gateway_order_id || transaction.pakasir_order_id,
       amount: transaction.amount,
     });
   } catch (err) {
@@ -469,6 +464,7 @@ async function findPendingTransactionsForCustomer(userId, customerJid) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+            tx.pakasir_gateway_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.created_at,
             tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             cs.nama_perintah,
@@ -545,11 +541,12 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
 
   await enforcePendingTransactionLock(userId, customerJid);
 
-  const orderId = buildOrderId(csId);
+  const orderId = await generateWhatsappManualIdTrx(userId);
+  const gatewayOrderId = buildPakasirGatewayOrderId(csId);
   const pakasirPayment = await createPakasirQrisPayment({
     slug: settings.pakasirSlug,
     apiKey: settings.pakasirApiKey,
-    orderId,
+    orderId: gatewayOrderId,
     amount: price,
   });
   const adminFee = Number.isFinite(Number(pakasirPayment.fee))
@@ -558,14 +555,15 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
   const totalPayment = Number.isFinite(Number(pakasirPayment.total_payment))
     ? Number(pakasirPayment.total_payment)
     : price + adminFee;
-  const paymentUrl = buildPaymentUrl(settings.pakasirSlug, price, orderId);
+  const paymentUrl = buildPaymentUrl(settings.pakasirSlug, price, gatewayOrderId);
 
   const pool = getPool();
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
-         qris_string, amount, platform, active_duration_days, warranty_duration_days)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         qris_string, amount, platform, active_duration_days, warranty_duration_days,
+         pakasir_gateway_order_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(userId),
       Number(csId),
@@ -577,6 +575,7 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
       "whatsapp",
       normalizeDurationDays(entry.active_duration_days),
       normalizeDurationDays(entry.warranty_duration_days),
+      gatewayOrderId,
     ],
   );
   if (insertResult.insertId) {
@@ -585,6 +584,7 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
       user_id: Number(userId),
       customer_jid: String(customerJid),
       pakasir_order_id: orderId,
+      pakasir_gateway_order_id: gatewayOrderId,
       amount: price,
       status: "pending",
       created_at: new Date(),
@@ -596,6 +596,7 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
   return {
     idTrx: orderId,
     orderId,
+    paymentGatewayOrderId: gatewayOrderId,
     paymentUrl,
     amount: price,
     price,
@@ -627,7 +628,7 @@ async function createOwnerManualTransaction({
     throw new Error("Harga produk belum diatur");
   }
 
-  const orderId = buildOrderId(csId);
+  const orderId = await generateWhatsappManualIdTrx(userId);
   const completedAt = new Date();
   const lifecycle = buildLifecyclePatch(
     completedAt,
@@ -708,6 +709,7 @@ async function findTransaction(orderId, amount) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+            tx.pakasir_gateway_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
             tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
@@ -720,10 +722,10 @@ async function findTransaction(orderId, amount) {
        FROM cs_transactions tx
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
        LEFT JOIN app_settings s ON s.user_id = tx.user_id
-      WHERE tx.pakasir_order_id = ?
+      WHERE (tx.pakasir_gateway_order_id = ? OR tx.pakasir_order_id = ?)
         AND tx.amount = ?
       LIMIT 1`,
-    [String(orderId), Number(amount)],
+    [String(orderId), String(orderId), Number(amount)],
   );
   return rows[0] ?? null;
 }
@@ -732,6 +734,7 @@ async function findTransactionByOrderForUser(userId, orderId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+            tx.pakasir_gateway_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
             tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
@@ -744,9 +747,9 @@ async function findTransactionByOrderForUser(userId, orderId) {
        LEFT JOIN customer_service cs ON cs.id = tx.cs_id
        LEFT JOIN app_settings s ON s.user_id = tx.user_id
       WHERE tx.user_id = ?
-        AND UPPER(tx.pakasir_order_id) = UPPER(?)
+        AND (UPPER(tx.pakasir_order_id) = UPPER(?) OR UPPER(tx.pakasir_gateway_order_id) = UPPER(?))
       LIMIT 1`,
-    [Number(userId), String(orderId)],
+    [Number(userId), String(orderId), String(orderId)],
   );
   return rows[0] ?? null;
 }
@@ -881,7 +884,7 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
   const detail = await fetchPakasirStatus({
     slug: tx.pakasir_slug,
     apiKey: tx.pakasir_api_key,
-    orderId: tx.pakasir_order_id,
+    orderId: tx.pakasir_gateway_order_id || tx.pakasir_order_id,
     amount: tx.amount,
   });
   const status = String(detail?.status ?? "").toLowerCase();
@@ -955,6 +958,123 @@ async function cancelTransactionForCustomer({ userId, idTrx, customerJid }) {
   };
 }
 
+async function claimWarrantyForCustomer({ userId, idTrx, customerJid }) {
+  const trxId = String(idTrx ?? "").trim();
+  if (!trxId) {
+    return {
+      claimed: false,
+      message: "Format claim garansi: /claimgaransi TRX-12",
+    };
+  }
+
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute(
+      `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+              tx.status, tx.warranty_expires_at, tx.warranty_status,
+              cs.nama_perintah
+         FROM cs_transactions tx
+         LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+        WHERE tx.user_id = ?
+          AND UPPER(tx.pakasir_order_id) = UPPER(?)
+        LIMIT 1
+        FOR UPDATE OF tx`,
+      [Number(userId), trxId],
+    );
+
+    const tx = rows[0];
+    if (!tx) {
+      await conn.rollback();
+      return { claimed: false, message: "idTRX tidak ditemukan." };
+    }
+
+    if (customerJid && String(tx.customer_jid) !== String(customerJid)) {
+      await conn.rollback();
+      return { claimed: false, message: "Transaksi ini bukan milik nomor kamu." };
+    }
+
+    if (String(tx.status) !== "paid") {
+      await conn.rollback();
+      return { claimed: false, message: "Garansi hanya bisa diklaim setelah transaksi sukses." };
+    }
+
+    if (String(tx.warranty_status ?? "open") === "selesai") {
+      await conn.rollback();
+      return { claimed: false, message: `Garansi ${tx.pakasir_order_id} sudah selesai atau sudah pernah diklaim.` };
+    }
+
+    if (!tx.warranty_expires_at) {
+      await conn.rollback();
+      return { claimed: false, message: "Transaksi ini tidak memiliki masa garansi." };
+    }
+
+    const warrantyExpiresAt = new Date(tx.warranty_expires_at);
+    if (Number.isNaN(warrantyExpiresAt.getTime()) || warrantyExpiresAt.getTime() < Date.now()) {
+      await conn.rollback();
+      return {
+        claimed: false,
+        message: `Masa claim garansi sudah lewat. Exp garansi: ${formatDateId(tx.warranty_expires_at)}.`,
+      };
+    }
+
+    if (!tx.cs_id) {
+      await conn.rollback();
+      return { claimed: false, message: "Produk transaksi tidak ditemukan untuk claim garansi." };
+    }
+
+    const [stockRows] = await conn.execute(
+      `SELECT id, content
+         FROM cs_stocks
+        WHERE cs_id = ? AND is_used = 0
+        ORDER BY id ASC
+        LIMIT 1
+        FOR UPDATE`,
+      [Number(tx.cs_id)],
+    );
+
+    const stock = stockRows[0];
+    if (!stock) {
+      await conn.rollback();
+      return {
+        claimed: false,
+        message: "Stock produk habis, silakan hubungi owner.",
+      };
+    }
+
+    await conn.execute(
+      `DELETE FROM cs_stocks WHERE id = ? AND is_used = 0`,
+      [Number(stock.id)],
+    );
+    await conn.execute(
+      `UPDATE cs_transactions
+          SET warranty_status = 'selesai',
+              warranty_claimed_at = CURRENT_TIMESTAMP,
+              warranty_claim_stock_id = NULL
+        WHERE id = ?`,
+      [Number(tx.id)],
+    );
+
+    await conn.commit();
+    realtimeService.emitTrxGeminiChanged(userId, { source: "warranty_claim" });
+    return {
+      claimed: true,
+      stockContent: String(stock.content ?? ""),
+      message:
+        `Claim garansi berhasil.\n\n` +
+        `idTRX: ${tx.pakasir_order_id}\n` +
+        `Produk: ${tx.nama_perintah || "-"}\n\n` +
+        `Data garansi:\n${String(stock.content ?? "")}`,
+    };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 async function deliverPaidTransaction(sock, transaction) {
   if (!sock || !transaction) {
     return false;
@@ -990,7 +1110,7 @@ async function deliverPaidTransaction(sock, transaction) {
 
     await pool.execute(
       `UPDATE cs_transactions
-          SET stock_id = ?, delivered_at = CURRENT_TIMESTAMP,
+          SET stock_id = NULL, delivered_at = CURRENT_TIMESTAMP,
               completed_at = COALESCE(completed_at, ?),
               active_start_at = COALESCE(active_start_at, ?),
               active_expires_at = COALESCE(active_expires_at, ?),
@@ -998,7 +1118,6 @@ async function deliverPaidTransaction(sock, transaction) {
               warranty_expires_at = COALESCE(warranty_expires_at, ?)
         WHERE id = ?`,
       [
-        stock.id,
         deliveryLifecycle.completedAt,
         deliveryLifecycle.activeStartAt,
         deliveryLifecycle.activeExpiresAt,
@@ -1070,17 +1189,6 @@ async function deliverPaidTransaction(sock, transaction) {
 }
 
 async function sendPaymentSuccessMessage(sock, messageKey, jid, text) {
-  const successImage = getPaymentSuccessImageBuffer();
-  if (successImage) {
-    return messageService.sendCustomerServiceImageMessage(
-      sock,
-      messageKey,
-      jid,
-      successImage,
-      text,
-    );
-  }
-
   return messageService.sendCustomerServiceMessage(sock, messageKey, jid, text);
 }
 
@@ -1313,12 +1421,13 @@ async function handleWebhookAndDeliver(payload, sockResolver) {
 async function listPaidTransactionsForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id,
+    `SELECT tx.id, tx.pakasir_order_id, tx.pakasir_gateway_order_id, tx.customer_jid, tx.google_account_id,
             tx.gemini_price_plan_id, tx.amount, tx.buyer_count,
             tx.status, tx.order_status, tx.paid_at, tx.delivered_at, tx.created_at,
             tx.platform, tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
-            tx.warranty_start_at, tx.warranty_expires_at, tx.buyer_email,
+            tx.warranty_start_at, tx.warranty_expires_at, tx.warranty_status,
+            tx.warranty_claimed_at, tx.warranty_claim_stock_id, tx.buyer_email,
             tx.report_status, tx.proof_drive_file_id, tx.proof_drive_url, tx.proof_uploaded_at,
             cs.nama_perintah, st.content AS stock_content,
             ga.email AS google_account_email
@@ -1476,7 +1585,7 @@ async function createManualTransactionForUser(user, payload) {
   );
 
   const [rows] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.customer_jid, tx.google_account_id,
+    `SELECT tx.id, tx.pakasir_order_id, tx.pakasir_gateway_order_id, tx.customer_jid, tx.google_account_id,
             tx.gemini_price_plan_id, tx.buyer_email, tx.buyer_count,
             tx.amount, tx.status, tx.order_status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days,
@@ -1527,6 +1636,10 @@ function nullableDate(value) {
 }
 
 async function updateTransactionForUser(user, transactionId, payload) {
+  if (String(payload.mode ?? payload.type ?? "").trim().toLowerCase() === "bot_wa") {
+    return updateBotWaTransactionForUser(user, transactionId, payload);
+  }
+
   const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
   const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
   const { buyerEmail, buyerCount } = normalizeBuyerEmailList(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
@@ -1595,11 +1708,12 @@ async function updateTransactionForUser(user, transactionId, payload) {
   }
 
   const [items] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
+    `SELECT tx.id, tx.pakasir_order_id, tx.pakasir_gateway_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
             tx.buyer_email, tx.buyer_count, tx.amount, tx.status, tx.order_status, tx.platform, tx.active_status, tx.member_status, tx.is_manual,
             tx.active_duration_days, tx.warranty_duration_days, tx.completed_at,
             tx.active_start_at, tx.active_expires_at, tx.warranty_start_at,
-            tx.warranty_expires_at, tx.report_status, tx.proof_drive_file_id, tx.proof_drive_url,
+            tx.warranty_expires_at, tx.warranty_status, tx.warranty_claimed_at,
+            tx.warranty_claim_stock_id, tx.report_status, tx.proof_drive_file_id, tx.proof_drive_url,
             tx.proof_uploaded_at, tx.paid_at, tx.delivered_at, tx.created_at,
             ga.email AS google_account_email
        FROM cs_transactions tx
@@ -1611,6 +1725,77 @@ async function updateTransactionForUser(user, transactionId, payload) {
 
   if (!items[0]) return null;
   return mapPaidTransactionRow({ ...items[0], stock_content: null });
+}
+
+async function updateBotWaTransactionForUser(user, transactionId, payload) {
+  const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
+  const customerJid = normalizeCustomerJid(payload.customerJid ?? payload.waPembeli ?? payload.customer_jid);
+  const warrantyExpiresAt = nullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at);
+  const warrantyStatus =
+    String(payload.warrantyStatus ?? payload.warranty_status ?? "open").trim().toLowerCase() === "selesai"
+      ? "selesai"
+      : "open";
+
+  if (!idTrx) throw new Error("idTRX wajib diisi");
+  if (!customerJid) throw new Error("WA pembeli wajib diisi");
+
+  const pool = getPool();
+  const [duplicates] = await pool.execute(
+    `SELECT id
+       FROM cs_transactions
+      WHERE user_id = ?
+        AND pakasir_order_id = ?
+        AND id <> ?
+      LIMIT 1`,
+    [Number(user.id), idTrx, Number(transactionId)],
+  );
+  if (duplicates.length > 0) {
+    throw new Error(`idTRX sudah ada: ${idTrx}`);
+  }
+
+  const [result] = await pool.execute(
+    `UPDATE cs_transactions
+        SET pakasir_order_id = ?,
+            customer_jid = ?,
+            warranty_expires_at = COALESCE(?, warranty_expires_at),
+            warranty_status = ?
+      WHERE id = ?
+        AND user_id = ?
+        AND is_manual = 0`,
+    [
+      idTrx,
+      customerJid,
+      warrantyExpiresAt,
+      warrantyStatus,
+      Number(transactionId),
+      Number(user.id),
+    ],
+  );
+
+  if (Number(result.affectedRows ?? 0) === 0) {
+    throw new Error("Transaksi Bot WA tidak ditemukan");
+  }
+
+  const [items] = await pool.execute(
+    `SELECT tx.id, tx.pakasir_order_id, tx.pakasir_gateway_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
+            tx.buyer_email, tx.buyer_count, tx.amount, tx.status, tx.order_status, tx.platform,
+            tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days,
+            tx.warranty_duration_days, tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at, tx.warranty_status,
+            tx.warranty_claimed_at, tx.warranty_claim_stock_id, tx.report_status, tx.proof_drive_file_id,
+            tx.proof_drive_url, tx.proof_uploaded_at, tx.paid_at, tx.delivered_at, tx.created_at,
+            ga.email AS google_account_email,
+            cs.value AS stock_content,
+            cs.nama_perintah
+       FROM cs_transactions tx
+       LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
+       LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+      WHERE tx.id = ? AND tx.user_id = ?
+      LIMIT 1`,
+    [Number(transactionId), Number(user.id)],
+  );
+
+  return items[0] ? mapPaidTransactionRow(items[0]) : null;
 }
 
 async function updateTransactionReportForUser(user, transactionId, payload) {
@@ -1629,11 +1814,12 @@ async function updateTransactionReportForUser(user, transactionId, payload) {
   }
 
   const [items] = await pool.execute(
-    `SELECT tx.id, tx.pakasir_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
+    `SELECT tx.id, tx.pakasir_order_id, tx.pakasir_gateway_order_id, tx.google_account_id, tx.gemini_price_plan_id, tx.customer_jid,
             tx.buyer_email, tx.buyer_count, tx.amount, tx.status, tx.order_status, tx.platform,
             tx.active_status, tx.member_status, tx.is_manual, tx.active_duration_days,
             tx.warranty_duration_days, tx.completed_at, tx.active_start_at, tx.active_expires_at,
-            tx.warranty_start_at, tx.warranty_expires_at, tx.report_status, tx.proof_drive_file_id,
+            tx.warranty_start_at, tx.warranty_expires_at, tx.warranty_status,
+            tx.warranty_claimed_at, tx.warranty_claim_stock_id, tx.report_status, tx.proof_drive_file_id,
             tx.proof_drive_url, tx.proof_uploaded_at, tx.paid_at, tx.delivered_at, tx.created_at,
             ga.email AS google_account_email
        FROM cs_transactions tx
@@ -1666,6 +1852,7 @@ export const csPaymentService = {
   handleCustomerRelayInput,
   handleOwnerDone,
   handleWebhookAndDeliver,
+  claimWarrantyForCustomer,
   listPaidTransactionsForUser,
   createManualTransactionForUser,
   updateTransactionForUser,

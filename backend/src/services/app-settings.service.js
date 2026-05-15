@@ -197,11 +197,15 @@ async function upsertForUser(user, payload, options = {}) {
     [Number(user.id)],
   );
   const existing = existingRows[0] ?? {};
-  const field = (key, column, fallback = "") => (
-    Object.prototype.hasOwnProperty.call(payload ?? {}, key)
-      ? String(payload?.[key] ?? "").trim()
-      : String(existing?.[column] ?? fallback)
-  );
+  const field = (key, column, fallback = "") => {
+    const existingValue = String(existing?.[column] ?? fallback);
+    if (!Object.prototype.hasOwnProperty.call(payload ?? {}, key)) {
+      return existingValue;
+    }
+
+    const nextValue = String(payload?.[key] ?? "").trim();
+    return nextValue || existingValue;
+  };
   const pakasirSlug = field("pakasirSlug", "pakasir_slug");
   const apiKey = field("pakasirApiKey", "pakasir_api_key");
   const testimonialChannelLink = field("testimonialChannelLink", "testimonial_channel_link");
