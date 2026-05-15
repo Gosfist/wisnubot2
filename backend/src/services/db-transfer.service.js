@@ -2,10 +2,10 @@ import { getPool } from "../config/database.js";
 
 const EXPORT_FORMAT = "wisnubot2-db-export";
 const SCOPED_EXPORT_VERSION = 2;
-const FULL_EXPORT_VERSION = 4;
+const FULL_EXPORT_VERSION = 5;
 const EXPORT_VERSION = FULL_EXPORT_VERSION;
 const SUPPORTED_SCOPED_EXPORT_VERSIONS = new Set([1, SCOPED_EXPORT_VERSION]);
-const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, 3, FULL_EXPORT_VERSION]);
+const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, 3, 4, FULL_EXPORT_VERSION]);
 const BULK_BATCH_SIZE = 300;
 
 const SECTION_KEYS = [
@@ -72,6 +72,7 @@ const CUSTOMER_SERVICE_COLUMNS = [
   "relay_waiting_text",
   "relay_owner_instruction",
   "relay_done_text",
+  "payment_success_text",
 ];
 
 const CS_BUTTON_COLUMNS = [

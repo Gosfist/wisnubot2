@@ -13,7 +13,7 @@ async function assertCsOwnership(csId, userId) {
 
 function parseStockLines(input) {
   return String(input ?? "")
-    .split(/\r?\n/)
+    .split(/[\/\r\n]+/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 }
@@ -96,6 +96,17 @@ async function addStocks(user, csId, contents) {
   }
 
   return { added: lines.length };
+}
+
+async function countAvailableForCs(csId) {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS total
+       FROM cs_stocks
+      WHERE cs_id = ? AND is_used = 0`,
+    [Number(csId)],
+  );
+  return Number(rows[0]?.total ?? 0);
 }
 
 async function deleteStock(user, stockId) {
@@ -204,6 +215,7 @@ export const csStockService = {
   listForCs,
   summaryForUser,
   addStocks,
+  countAvailableForCs,
   deleteStock,
   updateStock,
   deleteAllForCs,

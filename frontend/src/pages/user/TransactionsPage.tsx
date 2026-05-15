@@ -40,6 +40,14 @@ function formatShortDate(value: string | null) {
   }).format(parsed);
 }
 
+function getLocalDayEndTime(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(23, 59, 59, 999);
+  return parsed.getTime();
+}
+
 function getActiveStatus(
   value: string | null,
   manualStatus?: TransactionModel["activeStatus"],
@@ -49,9 +57,9 @@ function getActiveStatus(
   if (manualStatus === "aktif" && isPribadi) return "Aktif";
   if (manualStatus === "expired") return "Expired";
   if (!value) return "Aktif";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Aktif";
-  return parsed.getTime() >= Date.now() ? "Aktif" : "Expired";
+  const expEndTime = getLocalDayEndTime(value);
+  if (expEndTime === null) return "Aktif";
+  return expEndTime >= Date.now() ? "Aktif" : "Expired";
 }
 
 function getGoogleAccountTotalSlots(item: GoogleAccountModel) {
@@ -283,7 +291,6 @@ function normalizeMemberStatusImport(value: unknown) {
 function normalizePlatformImport(value: unknown) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw === "whatsapp" || raw === "wa") return "whatsapp";
-  if (raw === "pribadi") return "pribadi";
   return "shopee";
 }
 
@@ -383,6 +390,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     pricePlanId: "",
     platform: "shopee",
     noPesanan: "",
+    phoneNumber: "",
     buyerEmail: "",
     activeDurationDays: "30",
     startDate: toTodayInputValue(),
@@ -450,18 +458,19 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       if (reportStatusFilter !== "all" && item.reportStatus !== reportStatusFilter) return false;
 
       if (expFilter !== "all") {
-        const expDate = item.activeExpiresAt ? new Date(item.activeExpiresAt) : null;
-        if (!expDate || Number.isNaN(expDate.getTime())) return false;
+        const expEndTime = getLocalDayEndTime(item.activeExpiresAt);
+        if (expEndTime === null) return false;
 
         const now = new Date();
-        if (expFilter === "expired" && expDate.getTime() >= now.getTime()) return false;
+        if (expFilter === "expired" && expEndTime >= now.getTime()) return false;
 
         const todayStart = new Date(now);
         todayStart.setHours(0, 0, 0, 0);
         const sevenDaysLater = new Date(todayStart);
         sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
+        sevenDaysLater.setHours(23, 59, 59, 999);
 
-        if (expFilter === "7" && (expDate < todayStart || expDate > sevenDaysLater)) return false;
+        if (expFilter === "7" && (expEndTime < todayStart.getTime() || expEndTime > sevenDaysLater.getTime())) return false;
       }
 
       return true;
@@ -602,21 +611,26 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         pricePlanId: selectedPlan.id,
         platform: manualForm.platform,
         noPesanan: manualForm.noPesanan,
+        phoneNumber: manualForm.phoneNumber,
         buyerEmail: normalizeBuyerEmail(manualForm.buyerEmail, { requireGmail: true }),
         amount: selectedPlan.price * Math.max(1, countBuyerEmails(manualForm.buyerEmail)),
         activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
         proofImage: manualForm.platform === "shopee" ? proofImageFile : null,
       });
-      const settings = await appData.fetchSettings().catch(() => null);
-      setSuccessMessagePreview(renderTransactionMessageTemplate(
-        getTransactionMessageTemplateForPlatform(
-          settings?.transactionMessageTemplate ?? DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
-          created.platform,
-        ),
-        created,
-        { saluran: settings?.testimonialChannelLink ?? "" },
-      ));
+      if (created.platform !== "whatsapp") {
+        const settings = await appData.fetchSettings().catch(() => null);
+        setSuccessMessagePreview(renderTransactionMessageTemplate(
+          getTransactionMessageTemplateForPlatform(
+            settings?.transactionMessageTemplate ?? DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+            created.platform,
+          ),
+          created,
+          { saluran: settings?.testimonialChannelLink ?? "" },
+        ));
+      } else {
+        setSuccessMessagePreview("");
+      }
       const [nextItems, nextAccounts, nextPlans] = await Promise.all([
         appData.fetchTransactions(),
         appData.fetchGoogleAccounts(),
@@ -634,6 +648,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         pricePlanId: shopeeDefaultPlan ? String(shopeeDefaultPlan.id) : "",
         platform: "shopee",
         noPesanan: "",
+        phoneNumber: "",
         buyerEmail: "",
         activeDurationDays: shopeeDefaultPlan ? String(shopeeDefaultPlan.durationDays) : "30",
         startDate: toTodayInputValue(),
@@ -904,6 +919,19 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         onClick={handleExportExcel}
       >
         <Download size={18} /> Export Excel
+      </button>
+      <button
+        className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(56,189,248,0.22)] px-4 py-3 text-sm font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
+        type="button"
+        onClick={() => {
+          setQuery("");
+          setExpFilter("all");
+          setReportStatusFilter("all");
+          setActiveStatusFilter("expired");
+          setMemberStatusFilter("anggota");
+        }}
+      >
+        <CalendarDays size={18} /> Cek Exp
       </button>
       <button
         className="inline-flex items-center gap-2 rounded-[18px] bg-linear-to-r from-primary to-accent px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110"
@@ -1232,6 +1260,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                       ...current,
                       platform,
                       noPesanan: platform === "whatsapp" ? "" : current.noPesanan,
+                      phoneNumber: platform === "whatsapp" ? current.phoneNumber : "",
                       pricePlanId: nextDefaultPlan ? String(nextDefaultPlan.id) : "",
                       activeDurationDays: nextDefaultPlan ? String(nextDefaultPlan.durationDays) : current.activeDurationDays,
                     }));
@@ -1243,7 +1272,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 >
                   <option value="shopee">Shopee</option>
                   <option value="whatsapp">Whatsapp</option>
-                  <option value="pribadi">Pribadi</option>
                 </select>
                 <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
               </div>
@@ -1259,6 +1287,17 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 />
               </label>
             )}
+
+            {manualForm.platform === "whatsapp" ? (
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-text-secondary">Nomor WA</span>
+                <input
+                  value={manualForm.phoneNumber}
+                  onChange={(event) => setManualForm((current) => ({ ...current, phoneNumber: event.target.value }))}
+                  placeholder="6281234567890"
+                />
+              </label>
+            ) : null}
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Email</span>
@@ -1412,7 +1451,6 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 >
                   <option value="shopee">shopee</option>
                   <option value="whatsapp">whatsapp</option>
-                  <option value="pribadi">pribadi</option>
                 </select>
                 <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
               </div>

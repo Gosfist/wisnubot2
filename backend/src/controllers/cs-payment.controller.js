@@ -70,12 +70,34 @@ export async function listPaidTransactions(req, res) {
 
 export async function createManualTransaction(req, res) {
   try {
+    const targetPhone =
+      req.body?.phoneNumber ??
+      req.body?.phone_number ??
+      req.body?.noHp ??
+      req.body?.no_hp ??
+      req.body?.waNumber ??
+      req.body?.wa_number ??
+      "";
     const item = await csPaymentService.createManualTransactionForUser(req.user, {
       ...req.body,
       proofImage: req.file ?? null,
     });
+    const sendResult = targetPhone
+      ? await csPaymentService.sendManualTransactionTemplate({
+          user: req.user,
+          transaction: item,
+          sock: baileysManager.getSocket(req.user.id),
+          targetPhone,
+        })
+      : { sent: false, reason: null };
     realtimeService.emitTrxGeminiChanged(req.user.id, { source: "manual_transaction_create" });
-    res.status(201).json({ message: "Transaksi berhasil disimpan", item });
+    res.status(201).json({
+      message: sendResult.sent
+        ? "Transaksi berhasil disimpan dan template dikirim"
+        : "Transaksi berhasil disimpan",
+      item,
+      notification: sendResult,
+    });
   } catch (err) {
     logger.error(err, "Create manual transaction error");
     res.status(400).json({ error: err instanceof Error ? err.message : "Gagal menyimpan transaksi" });

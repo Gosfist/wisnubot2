@@ -106,6 +106,7 @@ export interface CustomerServiceItemModel {
   relayWaitingText: string | null;
   relayOwnerInstruction: string | null;
   relayDoneText: string | null;
+  paymentSuccessText: string | null;
   buttons: CsButtonModel[];
   createdAt: string;
   updatedAt: string;

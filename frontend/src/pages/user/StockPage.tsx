@@ -16,7 +16,19 @@ function isStockCommand(row: CsStockSummaryModel) {
   return row.deliveryMode === "stock" && !BLOCKED_COMMANDS.has(row.commandName.trim().toLowerCase());
 }
 
+function formatStockDate(value: string) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
 export function StockPage() {
+  const pageSize = 5;
   const appData = useAppData();
   const { showToast } = useToast();
 
@@ -25,6 +37,7 @@ export function StockPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedCsId, setSelectedCsId] = useState<number>(0);
   const [newContent, setNewContent] = useState("");
@@ -37,9 +50,14 @@ export function StockPage() {
     const keyword = query.trim().toLowerCase();
     if (!keyword) return rows;
     return rows.filter((row) =>
-      `/${row.commandName} ${row.content}`.toLowerCase().includes(keyword),
+      `/${row.commandName} ${formatStockDate(row.createdAt)} ${row.content}`.toLowerCase().includes(keyword),
     );
   }, [query, rows]);
+  const totalPages = Math.max(Math.ceil(filteredRows.length / pageSize), 1);
+  const pageRows = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [currentPage, filteredRows]);
 
   async function refreshStock() {
     setLoading(true);
@@ -71,6 +89,16 @@ export function StockPage() {
     void refreshStock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, rows.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   async function handleAdd() {
     const content = newContent.trim();
@@ -171,13 +199,15 @@ export function StockPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[780px] table-fixed text-left">
               <colgroup>
-                <col className="w-[220px]" />
+                <col className="w-[190px]" />
+                <col className="w-[160px]" />
                 <col />
                 <col className="w-[132px]" />
               </colgroup>
               <thead>
                 <tr className="text-sm font-bold text-white">
                   <th className="px-3 py-4">Perintah</th>
+                  <th className="px-3 py-4">Tanggal</th>
                   <th className="px-3 py-4">Data Akun</th>
                   <th className="px-3 py-4 text-right">Action</th>
                 </tr>
@@ -185,14 +215,15 @@ export function StockPage() {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-3 py-10 text-center text-sm text-text-secondary">
+                    <td colSpan={4} className="px-3 py-10 text-center text-sm text-text-secondary">
                       Stock belum ada.
                     </td>
                   </tr>
                 ) : (
-                  filteredRows.map((row) => (
+                  pageRows.map((row) => (
                     <tr key={row.id} className="border-t border-[rgba(148,163,184,0.12)] text-base font-semibold text-white">
                       <td className="px-3 py-4">/{row.commandName}</td>
+                      <td className="px-3 py-4 text-sm text-text-secondary">{formatStockDate(row.createdAt)}</td>
                       <td className="px-3 py-4">
                         <div title={row.content} className="max-w-full truncate whitespace-nowrap text-text-primary">
                           {row.content}
@@ -227,6 +258,44 @@ export function StockPage() {
                 )}
               </tbody>
             </table>
+
+            {filteredRows.length > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-sm text-text-secondary">
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)] disabled:opacity-45"
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+                  >
+                    Prev
+                  </button>
+                  <button
+                    className="rounded-[10px] bg-[rgba(37,99,235,0.24)] px-3 py-1.5 font-bold text-white"
+                    type="button"
+                  >
+                    {currentPage}
+                  </button>
+                  {totalPages > 1 && currentPage !== totalPages ? (
+                    <button
+                      className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-text-secondary transition hover:bg-[rgba(56,189,248,0.08)]"
+                      type="button"
+                      onClick={() => setCurrentPage(totalPages)}
+                    >
+                      {totalPages}
+                    </button>
+                  ) : null}
+                  <button
+                    className="rounded-[10px] border border-[rgba(56,189,248,0.18)] px-3 py-1.5 text-white transition hover:bg-[rgba(56,189,248,0.08)] disabled:text-text-muted disabled:opacity-45"
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage((page) => Math.min(page + 1, totalPages))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </SurfaceCard>
@@ -325,7 +394,7 @@ function StockDialog({
               value={content}
               onChange={(event) => onContentChange(event.target.value)}
               className="min-h-[150px] w-full rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm font-semibold text-white outline-none focus:border-[rgba(56,189,248,0.45)]"
-              placeholder="email@gmail.com | password | catatan"
+              placeholder="data1/data2/data3"
             />
           </label>
 

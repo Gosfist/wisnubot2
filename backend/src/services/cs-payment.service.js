@@ -15,6 +15,31 @@ const QRIS_ADMIN_HIGH_AMOUNT_PERCENT = 0.01;
 const QRIS_ADMIN_HIGH_AMOUNT_THRESHOLD = 105000;
 const PAYMENT_EXPIRY_MINUTES = 5;
 const PAYMENT_EXPIRY_MS = PAYMENT_EXPIRY_MINUTES * 60 * 1000;
+const DEFAULT_TRANSACTION_MESSAGE_TEMPLATE = [
+  "Transaksi selesai",
+  "",
+  "ID Trx: {idTrx}",
+  "Produk: {produk}",
+  "Akun Google: {akunGoogle}",
+  "Email: {emailBuyer}",
+  "Platform: {platform}",
+  "Nominal: Rp {nominal}",
+  "Masa Aktif: {activeStart} - {activeExp}",
+  "Garansi: {garansiExp}",
+  "Saluran: {saluran}",
+].join("\n");
+const DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE = [
+  "Transaksi selesai",
+  "",
+  "ID Trx: {idTrx}",
+  "Produk: {produk}",
+  "Akun Google: {akunGoogle}",
+  "Email: {emailBuyer}",
+  "Nominal: Rp {nominal}",
+  "Masa Aktif: {activeStart} - {activeExp}",
+  "Garansi: {garansiExp}",
+  "Saluran: {saluran}",
+].join("\n");
 
 function normalizeJid(value) {
   const raw = String(value ?? "").trim();
@@ -55,7 +80,7 @@ function normalizePlatform(value) {
 }
 
 function isValidManualPlatform(value) {
-  return ["shopee", "whatsapp", "pribadi"].includes(value);
+  return ["shopee", "whatsapp"].includes(value);
 }
 
 function normalizeActiveStatus(value) {
@@ -186,6 +211,7 @@ function buildTemplateData(row) {
   const activeExpiresAt = row.active_expires_at ?? row.activeExpiresAt ?? null;
   const warrantyExpiresAt = row.warranty_expires_at ?? row.warrantyExpiresAt ?? null;
   const completedAt = row.completed_at ?? row.completedAt ?? row.delivered_at ?? row.deliveredAt ?? null;
+  const stockContent = String(row.stock_content ?? row.stockContent ?? row.data_akun ?? row.dataAkun ?? "");
   const now = new Date();
 
   return {
@@ -193,13 +219,18 @@ function buildTemplateData(row) {
     idtrx: idTrx,
     orderId: idTrx,
     produk: String(row.nama_perintah ?? row.commandName ?? ""),
+    produkgemini: "Gemini",
     commandName: String(row.nama_perintah ?? row.commandName ?? ""),
+    akunGoogle: String(row.google_account_email ?? row.googleAccountEmail ?? ""),
+    emailBuyer: String(row.buyer_email ?? row.buyerEmail ?? ""),
     nomorWa: String(row.customer_jid ?? row.customerJid ?? "").replace("@s.whatsapp.net", ""),
     customerJid: String(row.customer_jid ?? row.customerJid ?? ""),
     nominal: Number(row.amount ?? 0).toLocaleString("id-ID"),
     amount: String(row.amount ?? 0),
     platform: String(row.platform ?? "whatsapp"),
     status: String(row.status ?? ""),
+    saluran: String(row.testimonial_channel_link ?? row.testimonialChannelLink ?? ""),
+    linkSaluran: String(row.testimonial_channel_link ?? row.testimonialChannelLink ?? ""),
     jam: new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(now),
     tanggal: formatDateId(now),
     doneAt: formatDateId(completedAt, true),
@@ -210,6 +241,9 @@ function buildTemplateData(row) {
     garansiExp: formatDateId(warrantyExpiresAt),
     warrantyStart: formatDateId(warrantyStartAt),
     warrantyExp: formatDateId(warrantyExpiresAt),
+    dataAkun: stockContent,
+    data_akun: stockContent,
+    stockContent,
     masaAktif: row.active_duration_days ? `${Number(row.active_duration_days)} hari` : "-",
     masaGaransi: row.warranty_duration_days ? `${Number(row.warranty_duration_days)} hari` : "-",
   };
@@ -296,10 +330,39 @@ function applyTemplate(text, row) {
   const source = String(text ?? "");
   if (!source) return "";
   const data = buildTemplateData(row);
-  return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_match, a, b) => {
+  const rendered = source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_match, a, b) => {
     const key = a || b;
     return data[key] ?? data[key?.toLowerCase?.()] ?? "";
   });
+  if (String(row?.platform ?? "").trim().toLowerCase() === "whatsapp") {
+    return rendered
+      .split(/\r?\n/)
+      .filter((line) => !/^Platform\s*:\s*whatsapp\s*$/i.test(line.trim()))
+      .join("\n");
+  }
+  return rendered;
+}
+
+function renderPaymentSuccessText(transaction, fallback, stockContent = "") {
+  const template = String(transaction?.payment_success_text ?? "").trim();
+  return applyTemplate(template || fallback, {
+    ...transaction,
+    stock_content: stockContent,
+    stockContent,
+    dataAkun: stockContent,
+  });
+}
+
+function getTransactionMessageTemplateForPlatform(value, platform) {
+  const raw = String(value ?? "").trim();
+  const key = String(platform ?? "").trim().toLowerCase() === "whatsapp" ? "whatsapp" : "shopee";
+  if (!raw) return key === "whatsapp" ? DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE : DEFAULT_TRANSACTION_MESSAGE_TEMPLATE;
+  try {
+    const parsed = JSON.parse(raw);
+    return String(parsed?.[key] ?? "").trim() || (key === "whatsapp" ? DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE : DEFAULT_TRANSACTION_MESSAGE_TEMPLATE);
+  } catch {
+    return raw;
+  }
 }
 
 function calculateQrisAdminFee(amount) {
@@ -527,6 +590,19 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
     throw new Error("Produk customer service tidak ditemukan");
   }
 
+  if (String(entry.delivery_mode ?? "none") === "stock") {
+    const availableStock = await csStockService.countAvailableForCs(entry.id);
+    if (availableStock <= 0) {
+      return {
+        stockUnavailable: true,
+        csId: Number(entry.id),
+        commandName: String(entry.nama_perintah ?? ""),
+        message:
+          "Stock lagi kosong. Klik button di bawah ini untuk mengingatkan owner agar segera restock.",
+      };
+    }
+  }
+
   const price = Number(entry.price ?? 0);
   if (!Number.isFinite(price) || price <= 0) {
     throw new Error("Harga produk belum diatur");
@@ -714,7 +790,7 @@ async function findTransaction(orderId, amount) {
             tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
-            cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
+            cs.nama_perintah, cs.delivery_mode, cs.relay_prompt, cs.payment_success_text,
             cs.relay_waiting_text, cs.relay_owner_instruction, cs.relay_done_text,
             s.pakasir_slug, s.pakasir_api_key,
             s.testimonial_channel_jid, s.testimonial_channel_name,
@@ -739,7 +815,7 @@ async function findTransactionByOrderForUser(userId, orderId) {
             tx.platform, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
-            cs.nama_perintah, cs.delivery_mode, cs.relay_prompt,
+            cs.nama_perintah, cs.delivery_mode, cs.relay_prompt, cs.payment_success_text,
             s.pakasir_slug, s.pakasir_api_key,
             s.testimonial_channel_jid, s.testimonial_channel_name,
             tx.testimonial_sent_at
@@ -1130,7 +1206,11 @@ async function deliverPaidTransaction(sock, transaction) {
       sock,
       null,
       customerJid,
-      `Pembayaran berhasil.\n\nData pesanan kamu:\n${stock.content}`,
+      renderPaymentSuccessText(
+        transaction,
+        `Pembayaran berhasil.\n\nData pesanan kamu:\n${stock.content}`,
+        stock.content,
+      ),
     );
     await sendTransactionTestimonial(sock, transaction);
     return true;
@@ -1154,7 +1234,7 @@ async function deliverPaidTransaction(sock, transaction) {
       sock,
       null,
       customerJid,
-      applyTemplate(prompt, transaction),
+      renderPaymentSuccessText(transaction, prompt),
     );
     await sendTransactionTestimonial(sock, transaction);
     return true;
@@ -1182,7 +1262,10 @@ async function deliverPaidTransaction(sock, transaction) {
     sock,
     null,
     customerJid,
-    "Pembayaran berhasil. Pesanan kamu sedang diproses.",
+    renderPaymentSuccessText(
+      transaction,
+      "Pembayaran berhasil. Pesanan kamu sedang diproses.",
+    ),
   );
   await sendTransactionTestimonial(sock, transaction);
   return true;
@@ -1483,6 +1566,9 @@ async function createManualTransactionForUser(user, payload) {
     ? await generateWhatsappManualIdTrx(user.id)
     : String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
   const { buyerEmail, buyerCount } = normalizeBuyerEmailList(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
+  const customerJid = normalizeCustomerJid(
+    payload.phoneNumber ?? payload.phone_number ?? payload.noHp ?? payload.no_hp ?? payload.waNumber ?? payload.wa_number ?? payload.customerJid ?? payload.customer_jid,
+  ) || buyerEmail;
   const pricePlan = pricePlanId ? await geminiPriceService.getActiveForUser(user.id, pricePlanId) : null;
   if (pricePlanId && !pricePlan) {
     throw new Error("Paket harga tidak ditemukan atau non aktif");
@@ -1560,7 +1646,7 @@ async function createManualTransactionForUser(user, payload) {
       Number(user.id),
       googleAccountId,
       pricePlanId,
-      buyerEmail,
+      customerJid,
       buyerEmail,
       buyerCount,
       idTrx,
@@ -1602,6 +1688,31 @@ async function createManualTransactionForUser(user, payload) {
   );
 
   return mapPaidTransactionRow({ ...rows[0], stock_content: null });
+}
+
+async function sendManualTransactionTemplate({ user, transaction, sock, targetPhone }) {
+  const targetJid = normalizeCustomerJid(targetPhone) || normalizeCustomerJid(transaction?.customerJid);
+  if (!targetJid) {
+    return { sent: false, reason: "Nomor WA kosong" };
+  }
+  if (!sock) {
+    return { sent: false, reason: "Bot utama belum online" };
+  }
+
+  const settings = await appSettingsService.getForUser(user);
+  const template = getTransactionMessageTemplateForPlatform(
+    settings.transactionMessageTemplate,
+    transaction.platform,
+  );
+  const text = applyTemplate(template, {
+    ...transaction,
+    testimonialChannelLink: settings.testimonialChannelLink,
+  });
+  const sent = await messageService.sendCustomerServiceMessage(sock, null, targetJid, text);
+  return {
+    sent,
+    reason: sent ? null : "Gagal mengirim template ke nomor WA",
+  };
 }
 
 function normalizePhone(value) {
@@ -1855,6 +1966,7 @@ export const csPaymentService = {
   claimWarrantyForCustomer,
   listPaidTransactionsForUser,
   createManualTransactionForUser,
+  sendManualTransactionTemplate,
   updateTransactionForUser,
   updateTransactionReportForUser,
   deleteTransactionForUser,

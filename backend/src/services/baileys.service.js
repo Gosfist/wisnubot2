@@ -422,6 +422,24 @@ function buildPaymentActionMessage(remoteJid, tx, notice = "") {
   );
 }
 
+function buildRestockReminderContent(commandName) {
+  const safeCommand = String(commandName ?? "").replace(/^[/.]+/, "").trim();
+  return {
+    interactiveMessage: {
+      title:
+        "Stock lagi kosong. Klik button di bawah ini untuk mengingatkan owner agar segera restock.",
+      footer: "By Wisnu Store",
+      buttons: [
+        buildSingleSelectButton(
+          "Ingatkan Owner",
+          `cs_notify_restock:${safeCommand}`,
+          "Restock",
+        ),
+      ],
+    },
+  };
+}
+
 class BaileysManager {
   constructor() {
     this.connections = new Map();
@@ -1314,6 +1332,15 @@ class BaileysManager {
                   buttonId: Number.isFinite(buttonId) ? buttonId : null,
                   customerJid: remoteJid,
                 });
+                if (tx.stockUnavailable) {
+                  await messageService.sendCustomerServiceInteractiveMessage(
+                    sock,
+                    message.key,
+                    remoteJid,
+                    buildRestockReminderContent(tx.commandName),
+                  );
+                  continue;
+                }
                 const qrImage = await QRCode.toBuffer(tx.qrisString, {
                   type: "png",
                   errorCorrectionLevel: "M",
@@ -1340,6 +1367,42 @@ class BaileysManager {
                     : "Gagal membuat link pembayaran.",
                 );
               }
+              continue;
+            }
+
+            if (incomingText.startsWith("cs_notify_restock:")) {
+              const commandName = incomingText
+                .replace(/^cs_notify_restock:/, "")
+                .replace(/^[/.]+/, "")
+                .trim();
+              const infoJid = normalizeJid(
+                customerServiceContext.botInfoPhoneNumber ||
+                  customerServiceContext.userPhoneNumber,
+              );
+              if (!infoJid) {
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  "Nomor informasi belum diisi. Silakan hubungi owner langsung.",
+                );
+                continue;
+              }
+
+              const buyerNumber = String(remoteJid)
+                .replace("@s.whatsapp.net", "")
+                .replace(/\D/g, "");
+              await sock.sendMessage(infoJid, {
+                text:
+                  `Stock di perintah ${commandName || "-"} kosong dan ada yang mau beli.\n\n` +
+                  `Nomor pembeli: ${buyerNumber || remoteJid}`,
+              });
+              await messageService.sendCustomerServiceMessage(
+                sock,
+                message.key,
+                remoteJid,
+                "Owner sudah diingatkan untuk segera restock.",
+              );
               continue;
             }
 

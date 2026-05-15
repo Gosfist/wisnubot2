@@ -298,6 +298,7 @@ function parseCustomerService(payload: Record<string, unknown>): CustomerService
     relayWaitingText: payload.relay_waiting_text ? String(payload.relay_waiting_text) : null,
     relayOwnerInstruction: payload.relay_owner_instruction ? String(payload.relay_owner_instruction) : null,
     relayDoneText: payload.relay_done_text ? String(payload.relay_done_text) : null,
+    paymentSuccessText: payload.paymentSuccessText ?? payload.payment_success_text ? String(payload.paymentSuccessText ?? payload.payment_success_text) : null,
     buttons: buttonsRaw.map(parseCsButton),
     createdAt: String(payload.created_at ?? ""),
     updatedAt: String(payload.updated_at ?? ""),

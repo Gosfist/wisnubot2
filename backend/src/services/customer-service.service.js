@@ -125,6 +125,7 @@ async function listEntriesForUser(user) {
   const [rows] = await pool.execute(
     `SELECT id, nama_perintah, value, delivery_mode, price, relay_prompt,
             relay_waiting_text, relay_owner_instruction, relay_done_text,
+            payment_success_text,
             created_at, updated_at
      FROM ${ENTRIES_TABLE}
      WHERE user_id = ?
@@ -184,6 +185,7 @@ async function listEntriesForUser(user) {
     relay_waiting_text: row.relay_waiting_text ? String(row.relay_waiting_text) : null,
     relay_owner_instruction: row.relay_owner_instruction ? String(row.relay_owner_instruction) : null,
     relay_done_text: row.relay_done_text ? String(row.relay_done_text) : null,
+    payment_success_text: row.payment_success_text ? String(row.payment_success_text) : null,
     buttons: buttonsByCs.get(Number(row.id)) ?? [],
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -217,12 +219,13 @@ async function createEntry(user, payload) {
   const relayWaitingText = normalizeOptionalText(payload.relayWaitingText);
   const relayOwnerInstruction = normalizeOptionalText(payload.relayOwnerInstruction);
   const relayDoneText = normalizeOptionalText(payload.relayDoneText);
+  const paymentSuccessText = normalizeOptionalText(payload.paymentSuccessText);
 
   const [result] = await pool.execute(
     `INSERT INTO ${ENTRIES_TABLE}
         (user_id, nama_perintah, value, delivery_mode, price, relay_prompt,
-         relay_waiting_text, relay_owner_instruction, relay_done_text)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         relay_waiting_text, relay_owner_instruction, relay_done_text, payment_success_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user.id,
       commandName,
@@ -233,6 +236,7 @@ async function createEntry(user, payload) {
       relayWaitingText,
       relayOwnerInstruction,
       relayDoneText,
+      paymentSuccessText,
     ],
   );
 
@@ -246,6 +250,7 @@ async function createEntry(user, payload) {
     relay_waiting_text: relayWaitingText,
     relay_owner_instruction: relayOwnerInstruction,
     relay_done_text: relayDoneText,
+    payment_success_text: paymentSuccessText,
     buttons: [],
   };
 }
@@ -294,11 +299,13 @@ async function updateEntry(user, entryId, payload) {
   const relayWaitingText = normalizeOptionalText(payload.relayWaitingText);
   const relayOwnerInstruction = normalizeOptionalText(payload.relayOwnerInstruction);
   const relayDoneText = normalizeOptionalText(payload.relayDoneText);
+  const paymentSuccessText = normalizeOptionalText(payload.paymentSuccessText);
 
   await pool.execute(
     `UPDATE ${ENTRIES_TABLE}
      SET nama_perintah = ?, value = ?, delivery_mode = ?, price = ?, relay_prompt = ?,
-         relay_waiting_text = ?, relay_owner_instruction = ?, relay_done_text = ?
+         relay_waiting_text = ?, relay_owner_instruction = ?, relay_done_text = ?,
+         payment_success_text = ?
      WHERE id = ? AND user_id = ?`,
     [
       commandName,
@@ -309,6 +316,7 @@ async function updateEntry(user, entryId, payload) {
       relayWaitingText,
       relayOwnerInstruction,
       relayDoneText,
+      paymentSuccessText,
       numericEntryId,
       user.id,
     ],
@@ -401,7 +409,8 @@ async function getCommandEntry(contextOrBotId, commandName) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT id, user_id, nama_perintah, value, delivery_mode, price, relay_prompt,
-            relay_waiting_text, relay_owner_instruction, relay_done_text
+            relay_waiting_text, relay_owner_instruction, relay_done_text,
+            payment_success_text
      FROM ${ENTRIES_TABLE}
      WHERE user_id = ? AND nama_perintah = ?
      LIMIT 1`,
@@ -433,6 +442,7 @@ async function getCommandEntry(contextOrBotId, commandName) {
     relayWaitingText: row.relay_waiting_text ? String(row.relay_waiting_text) : null,
     relayOwnerInstruction: row.relay_owner_instruction ? String(row.relay_owner_instruction) : null,
     relayDoneText: row.relay_done_text ? String(row.relay_done_text) : null,
+    paymentSuccessText: row.payment_success_text ? String(row.payment_success_text) : null,
     buttons: buttons.map((button) => ({
       id: Number(button.id),
       label: String(button.label ?? ""),

@@ -75,6 +75,7 @@ export function AddCustomerServicePage() {
   const [relayWaitingText, setRelayWaitingText] = useState("");
   const [relayOwnerInstruction, setRelayOwnerInstruction] = useState("");
   const [relayDoneText, setRelayDoneText] = useState("");
+  const [paymentSuccessText, setPaymentSuccessText] = useState("");
   const [buttons, setButtons] = useState<CsButtonModel[]>([]);
   const [selectedMenus, setSelectedMenus] = useState<string[]>([]); // legacy welcome menu list
   const [draggingMenuIndex, setDraggingMenuIndex] = useState<number | null>(null);
@@ -197,6 +198,7 @@ export function AddCustomerServicePage() {
           setRelayWaitingText(next.relayWaitingText ?? "");
           setRelayOwnerInstruction(next.relayOwnerInstruction ?? "");
           setRelayDoneText(next.relayDoneText ?? "");
+          setPaymentSuccessText(next.paymentSuccessText ?? "");
           setButtons(
             next.buttons.map((b, i) => ({
               ...b,
@@ -332,6 +334,7 @@ export function AddCustomerServicePage() {
       relayWaitingText: deliveryMode === "relay" ? relayWaitingText.trim() : null,
       relayOwnerInstruction: deliveryMode === "relay" ? relayOwnerInstruction.trim() : null,
       relayDoneText: deliveryMode === "relay" ? relayDoneText.trim() : null,
+      paymentSuccessText: hasBuyButton ? paymentSuccessText.trim() || null : null,
     };
 
     setIsSaving(true);
@@ -687,6 +690,20 @@ export function AddCustomerServicePage() {
                     })}
                   </div>
                 </div>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-semibold text-text-secondary">Template Balasan Pembayaran Sukses</span>
+                  <textarea
+                    className="min-h-[100px] w-full rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 py-3 text-sm text-white outline-none focus:border-[rgba(56,189,248,0.4)]"
+                    value={paymentSuccessText}
+                    onChange={(e) => setPaymentSuccessText(e.target.value.slice(0, 1000))}
+                    placeholder={"Pembayaran berhasil.\n\nData pesanan kamu:\n{dataAkun}"}
+                    rows={3}
+                  />
+                  <span className="block text-xs text-text-secondary">
+                    Variabel: {"{idTrx}"}, {"{produk}"}, {"{nomorWa}"}, {"{nominal}"}, {"{dataAkun}"}, {"{activeExp}"}, {"{garansiExp}"}.
+                  </span>
+                </label>
 
                 {deliveryMode === "relay" && (
                   <div className="space-y-3">

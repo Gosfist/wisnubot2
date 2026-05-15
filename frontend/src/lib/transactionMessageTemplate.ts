@@ -14,7 +14,18 @@ export const DEFAULT_TRANSACTION_MESSAGE_TEMPLATE = [
   "Saluran: {saluran}",
 ].join("\n");
 
-export const DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE = DEFAULT_TRANSACTION_MESSAGE_TEMPLATE;
+export const DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE = [
+  "Transaksi selesai",
+  "",
+  "ID Trx: {idTrx}",
+  "Produk: {produk}",
+  "Akun Google: {akunGoogle}",
+  "Email: {emailBuyer}",
+  "Nominal: Rp {nominal}",
+  "Masa Aktif: {activeStart} - {activeExp}",
+  "Garansi: {garansiExp}",
+  "Saluran: {saluran}",
+].join("\n");
 
 export type TransactionMessageTemplatePlatform = "shopee" | "whatsapp";
 
@@ -175,8 +186,15 @@ export function renderTransactionMessageTemplate(
     data[item.slug] = item.value;
   }
 
-  return source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_match, a, b) => {
+  const rendered = source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_match, a, b) => {
     const key = String(a || b);
     return data[key] ?? data[key.toLowerCase()] ?? "";
   });
+  if (normalizeTransactionTemplatePlatform(transaction.platform) === "whatsapp") {
+    return rendered
+      .split(/\r?\n/)
+      .filter((line) => !/^Platform\s*:\s*whatsapp\s*$/i.test(line.trim()))
+      .join("\n");
+  }
+  return rendered;
 }
