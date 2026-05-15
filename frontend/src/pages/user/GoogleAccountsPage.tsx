@@ -15,12 +15,12 @@ function normalizeGoogleAccountEmail(value: string) {
   const raw = value.trim();
   if (!raw) return "";
   const [emailPart, ...metadataParts] = raw.split("|");
-  const email = emailPart.trim().toLowerCase();
-  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
-    throw new Error(`Email akun Google harus berakhiran @gmail.com: ${email || raw}`);
+  const accountName = emailPart.trim().toLowerCase().replace(/@gmail\.com$/i, "");
+  if (!/^[^\s@,;]+$/i.test(accountName)) {
+    throw new Error(`Akun Google tidak perlu @gmail.com: ${accountName || raw}`);
   }
   const metadata = metadataParts.join("|").trim();
-  return metadata ? `${email} | ${metadata}` : email;
+  return metadata ? `${accountName} | ${metadata}` : accountName;
 }
 
 type SelectedMember = {
@@ -110,7 +110,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
         ),
       ];
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Email akun Google harus berakhiran @gmail.com.", "danger");
+      showToast(err instanceof Error ? err.message : "Akun Google tidak perlu @gmail.com.", "danger");
       return;
     }
     if (emails.length === 0) {
@@ -314,10 +314,10 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
               className="min-h-[150px]"
               value={emailText}
               onChange={(event) => setEmailText(event.target.value)}
-              placeholder={"contoh: wisnusuro09@gmail.com\nmegayuro01@gmail.com\nmegayuro02@gmail.com"}
+              placeholder={"contoh: wisnusuro09\nmegayuro01\nmegayuro02"}
             />
             <span className="block text-xs text-text-muted">
-              Bisa isi banyak akun, pisahkan dengan baris baru, koma, atau titik koma.
+              Bisa isi banyak akun tanpa @gmail.com, pisahkan dengan baris baru, koma, atau titik koma.
             </span>
           </label>
 

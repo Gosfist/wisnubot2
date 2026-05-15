@@ -5,13 +5,16 @@ function normalizeEmail(value) {
   if (!raw) return "";
 
   const [emailPart, ...metadataParts] = raw.split("|");
-  const email = emailPart.trim().toLowerCase();
-  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
-    throw new Error("Email akun Google harus berakhiran @gmail.com");
+  const accountName = emailPart
+    .trim()
+    .toLowerCase()
+    .replace(/@gmail\.com$/i, "");
+  if (!/^[^\s@,;]+$/i.test(accountName)) {
+    throw new Error("Akun Google tidak perlu @gmail.com, isi nama akun saja");
   }
 
   const metadata = metadataParts.join("|").trim();
-  return metadata ? `${email} | ${metadata}` : email;
+  return metadata ? `${accountName} | ${metadata}` : accountName;
 }
 
 function isFullPrivateAccount(email) {

@@ -1,4 +1,15 @@
-import pkg from "socketon";
+async function importSocketonQuietly() {
+  const originalConsoleLog = console.log;
+  console.log = () => undefined;
+  try {
+    const module = await import("socketon");
+    return module.default ?? module;
+  } finally {
+    console.log = originalConsoleLog;
+  }
+}
+
+const pkg = await importSocketonQuietly();
 const {
   default: makeWASocket,
   useMultiFileAuthState,

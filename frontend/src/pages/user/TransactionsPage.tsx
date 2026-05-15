@@ -21,6 +21,14 @@ function formatCustomerJid(value: string) {
   return value.replace("@s.whatsapp.net", "");
 }
 
+function formatBuyerEmailDisplay(value: string) {
+  return String(value ?? "")
+    .split(/[,;\n]+/)
+    .map((item) => item.trim().replace(/@gmail\.com$/i, ""))
+    .filter(Boolean)
+    .join(", ");
+}
+
 function formatShortDate(value: string | null) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -213,12 +221,12 @@ function normalizeGoogleAccountEmail(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
   const [emailPart, ...metadataParts] = raw.split("|");
-  const email = emailPart.trim().toLowerCase();
-  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
-    throw new Error(`Akun Google harus berakhiran @gmail.com: ${email || raw}`);
+  const accountName = emailPart.trim().toLowerCase().replace(/@gmail\.com$/i, "");
+  if (!/^[^\s@,;]+$/i.test(accountName)) {
+    throw new Error(`Akun Google tidak perlu @gmail.com: ${accountName || raw}`);
   }
   const metadata = metadataParts.join("|").trim();
-  return metadata ? `${email} | ${metadata}` : email;
+  return metadata ? `${accountName} | ${metadata}` : accountName;
 }
 
 function countBuyerEmails(value: unknown) {
@@ -1003,12 +1011,12 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </button>
           </div>
           <>
-            <div className="overflow-x-auto">
-              <table className="min-w-[1060px] table-fixed border-collapse text-left text-sm">
+            <div className="overflow-x-hidden">
+              <table className="w-full min-w-0 table-fixed border-collapse text-left text-sm">
                 <colgroup>
-                  <col className="w-[11%]" />
                   <col className="w-[13%]" />
-                  <col className="w-[12%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[14%]" />
                   <col className="w-[8%]" />
                   <col className="w-[9%]" />
                   <col className="w-[9%]" />
@@ -1046,6 +1054,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                     </tr>
                   ) : pageItems.map((item) => {
                     const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform);
+                    const fullBuyerEmail = item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid);
+                    const shortBuyerEmail = formatBuyerEmailDisplay(fullBuyerEmail) || fullBuyerEmail;
                     return (
                       <tr key={item.id} className="transition hover:bg-[rgba(56,189,248,0.06)]">
                         <td className="px-3 py-2.5 font-semibold leading-snug text-white">
@@ -1059,9 +1069,9 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                         <td className="px-3 py-2.5 text-text-primary">
                           <span
                             className="block truncate"
-                            title={item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                            title={fullBuyerEmail}
                           >
-                            {item.buyerEmail || item.googleAccountEmail || formatCustomerJid(item.customerJid)}
+                            {shortBuyerEmail}
                           </span>
                         </td>
                         <td className="px-3 py-2.5 text-text-primary">

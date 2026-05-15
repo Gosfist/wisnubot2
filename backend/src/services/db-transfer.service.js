@@ -347,6 +347,15 @@ function normalizeLower(value) {
   return normalizeText(value).trim().toLowerCase();
 }
 
+function normalizeGoogleAccountEmailValue(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const [emailPart, ...metadataParts] = raw.split("|");
+  const accountName = emailPart.trim().toLowerCase().replace(/@gmail\.com$/i, "");
+  const metadata = metadataParts.join("|").trim();
+  return metadata ? `${accountName} | ${metadata}` : accountName;
+}
+
 function normalizeJsonColumn(value) {
   if (value == null || typeof value === "string") return value ?? null;
   return JSON.stringify(value);
@@ -767,6 +776,7 @@ async function importGoogleAccounts(connection, userId, data) {
   const rows = requireArray(data.googleAccounts ?? [], "googleAccounts").map((row) => ({
     ...compactRow(row, ["id", "user_id"]),
     user_id: userId,
+    email: normalizeGoogleAccountEmailValue(row.email),
   }));
   await bulkInsertRows(connection, "google_accounts", rows, GOOGLE_ACCOUNT_COLUMNS, {
     onConflict: `ON CONFLICT (user_id, lower(email)) DO UPDATE SET
@@ -782,7 +792,7 @@ async function importGoogleAccounts(connection, userId, data) {
   const idByEmail = new Map(inserted.map((row) => [normalizeLower(row.email), Number(row.id)]));
   return {
     count: rows.length,
-    idMap: new Map(requireArray(data.googleAccounts ?? [], "googleAccounts").map((row) => [Number(row.id), idByEmail.get(normalizeLower(row.email))]).filter(([, id]) => id)),
+    idMap: new Map(requireArray(data.googleAccounts ?? [], "googleAccounts").map((row) => [Number(row.id), idByEmail.get(normalizeLower(normalizeGoogleAccountEmailValue(row.email)))]).filter(([, id]) => id)),
   };
 }
 
