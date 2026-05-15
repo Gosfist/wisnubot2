@@ -9,6 +9,7 @@ import { cn } from "../../lib/cn";
 import { formatCurrency } from "../../lib/format";
 import {
   DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+  getTransactionMessageTemplateForPlatform,
   renderTransactionMessageTemplate,
 } from "../../lib/transactionMessageTemplate";
 import { useAppData } from "../../hooks/useAppData";
@@ -64,6 +65,15 @@ function sortAvailableGoogleAccounts(items: GoogleAccountModel[]) {
       if (usedDiff !== 0) return usedDiff;
       return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
     });
+}
+
+function getDefaultPricePlanForPlatform(plans: GeminiPricePlanModel[], platform: string) {
+  const normalizedPlatform = String(platform).trim().toLowerCase();
+  const preferredLabel = normalizedPlatform === "whatsapp" ? "WA 1 Bulan" : "SHP 1 Bulan";
+  return plans.find((plan) => plan.label.toLowerCase() === preferredLabel.toLowerCase())
+    ?? plans.find((plan) => plan.durationDays === 30)
+    ?? plans[0]
+    ?? null;
 }
 
 function toDateOnlyInputValue(value: string | null) {
@@ -395,7 +405,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       memberStatusFilter !== "all";
     const hasAnyFilter = q.length > 0 || hasStatusFilter;
     return items.filter((item) => {
-      if (q && !item.idTrx.toLowerCase().includes(q)) return false;
+      if (q) {
+        const googleText = String(item.googleAccountEmail ?? "").toLowerCase();
+        const searchableText = `${item.idTrx} ${googleText}`.toLowerCase();
+        if (!searchableText.includes(q)) return false;
+      }
       if (hasStatusFilter && String(item.platform ?? "").trim().toLowerCase() === "pribadi") return false;
 
       const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform).toLowerCase();
@@ -437,9 +451,33 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     () => sortAvailableGoogleAccounts([...googleAccounts]),
     [googleAccounts],
   );
+  const editableGoogleAccounts = useMemo(() => {
+    const currentAccountId = editingItem?.googleAccountId ?? null;
+    const currentAccountEmail = editingItem?.googleAccountEmail?.trim().toLowerCase() ?? "";
+    return googleAccounts
+      .filter((account) => {
+        const isCurrentAccount =
+          (currentAccountId !== null && account.id === currentAccountId) ||
+          (currentAccountEmail && account.email.trim().toLowerCase() === currentAccountEmail);
+        const hasAvailableSlot = !account.isSuspended && getGoogleAccountUsedSlots(account) < getGoogleAccountTotalSlots(account);
+        return isCurrentAccount || hasAvailableSlot;
+      })
+      .sort((a, b) => {
+        const aCurrent =
+          (currentAccountId !== null && a.id === currentAccountId) ||
+          (currentAccountEmail && a.email.trim().toLowerCase() === currentAccountEmail);
+        const bCurrent =
+          (currentAccountId !== null && b.id === currentAccountId) ||
+          (currentAccountEmail && b.email.trim().toLowerCase() === currentAccountEmail);
+        if (aCurrent !== bCurrent) return aCurrent ? -1 : 1;
+        const usedDiff = getGoogleAccountUsedSlots(b) - getGoogleAccountUsedSlots(a);
+        if (usedDiff !== 0) return usedDiff;
+        return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
+      });
+  }, [editingItem?.googleAccountEmail, editingItem?.googleAccountId, googleAccounts]);
   const defaultPricePlan = useMemo(
-    () => activePricePlans.find((plan) => plan.durationDays === 30) ?? activePricePlans[0] ?? null,
-    [activePricePlans],
+    () => getDefaultPricePlanForPlatform(activePricePlans, manualForm.platform),
+    [activePricePlans, manualForm.platform],
   );
   const editControlClass = "w-full rounded-[12px] px-3.5 py-2.5 text-sm";
 
@@ -522,7 +560,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       showToast("Paket harga wajib dipilih.", "danger");
       return;
     }
-    if (!proofImageFile) {
+    if (manualForm.platform === "shopee" && !proofImageFile) {
       showToast("Gambar bukti wajib diisi.", "danger");
       return;
     }
@@ -538,12 +576,16 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         amount: selectedPlan.price * Math.max(1, countBuyerEmails(manualForm.buyerEmail)),
         activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
-        proofImage: proofImageFile,
+        proofImage: manualForm.platform === "shopee" ? proofImageFile : null,
       });
       const settings = await appData.fetchSettings().catch(() => null);
       setSuccessMessagePreview(renderTransactionMessageTemplate(
-        settings?.transactionMessageTemplate || DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+        getTransactionMessageTemplateForPlatform(
+          settings?.transactionMessageTemplate ?? DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+          created.platform,
+        ),
         created,
+        { saluran: settings?.testimonialChannelLink ?? "" },
       ));
       const [nextItems, nextAccounts, nextPlans] = await Promise.all([
         appData.fetchTransactions(),
@@ -553,13 +595,17 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       setItems(nextItems);
       setGoogleAccounts(nextAccounts);
       setPricePlans(nextPlans);
+      const shopeeDefaultPlan = getDefaultPricePlanForPlatform(
+        nextPlans.filter((plan) => plan.isActive),
+        "shopee",
+      );
       setManualForm({
         googleAccountId: "",
-        pricePlanId: defaultPricePlan ? String(defaultPricePlan.id) : "",
+        pricePlanId: shopeeDefaultPlan ? String(shopeeDefaultPlan.id) : "",
         platform: "shopee",
         noPesanan: "",
         buyerEmail: "",
-        activeDurationDays: defaultPricePlan ? String(defaultPricePlan.durationDays) : "30",
+        activeDurationDays: shopeeDefaultPlan ? String(shopeeDefaultPlan.durationDays) : "30",
         startDate: toTodayInputValue(),
       });
       handleProofImageFile(null);
@@ -765,6 +811,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
 
   async function handleCopySuccessMessage() {
     await navigator.clipboard.writeText(successMessagePreview);
+    setSuccessMessagePreview("");
     showToast("Template pesan berhasil disalin.", "success");
   }
 
@@ -785,8 +832,12 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     };
     const settings = await appData.fetchSettings().catch(() => null);
     const text = renderTransactionMessageTemplate(
-      settings?.transactionMessageTemplate || DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+      getTransactionMessageTemplateForPlatform(
+        settings?.transactionMessageTemplate ?? DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+        previewTransaction.platform,
+      ),
       previewTransaction,
+      { saluran: settings?.testimonialChannelLink ?? "" },
     );
     await navigator.clipboard.writeText(text);
     showToast("Template pesan berhasil disalin.", "success");
@@ -852,7 +903,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cari idTrx"
+                placeholder="Cari idTrx / Google"
               />
             </label>
             <label className="relative block">
@@ -1134,7 +1185,21 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <select
                   className="w-full appearance-none pr-11"
                   value={manualForm.platform}
-                  onChange={(event) => setManualForm((current) => ({ ...current, platform: event.target.value }))}
+                  onChange={(event) => {
+                    const platform = event.target.value;
+                    const nextDefaultPlan = getDefaultPricePlanForPlatform(activePricePlans, platform);
+                    setManualForm((current) => ({
+                      ...current,
+                      platform,
+                      noPesanan: platform === "whatsapp" ? "" : current.noPesanan,
+                      pricePlanId: nextDefaultPlan ? String(nextDefaultPlan.id) : "",
+                      activeDurationDays: nextDefaultPlan ? String(nextDefaultPlan.durationDays) : current.activeDurationDays,
+                    }));
+                    if (platform === "whatsapp") {
+                      handleProofImageFile(null);
+                      if (proofImageInputRef.current) proofImageInputRef.current.value = "";
+                    }
+                  }}
                 >
                   <option value="shopee">Shopee</option>
                   <option value="whatsapp">Whatsapp</option>
@@ -1144,14 +1209,16 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </label>
 
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">idTrx</span>
-              <input
-                value={manualForm.noPesanan}
-                onChange={(event) => setManualForm((current) => ({ ...current, noPesanan: event.target.value }))}
-                placeholder="2604xxxx"
-              />
-            </label>
+            {manualForm.platform === "whatsapp" ? null : (
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-text-secondary">idTrx</span>
+                <input
+                  value={manualForm.noPesanan}
+                  onChange={(event) => setManualForm((current) => ({ ...current, noPesanan: event.target.value }))}
+                  placeholder={manualForm.platform === "shopee" ? "ID pesanan Shopee" : "TRX manual"}
+                />
+              </label>
+            )}
 
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Email</span>
@@ -1201,63 +1268,65 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
             </label>
           </div>
 
-          <div
-            className="rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.48)] p-4"
-            onPaste={handleProofPaste}
-          >
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-text-secondary">Gambar Bukti <span className="text-danger">*</span></span>
-              <button
-                className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(56,189,248,0.22)] px-3 py-2 text-xs font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
-                type="button"
-                onClick={() => proofImageInputRef.current?.click()}
-              >
-                <Upload size={14} />
-                Pilih File
-              </button>
-            </div>
-            {proofImagePreview ? (
-              <div className="flex flex-wrap items-start gap-3">
-                <img
-                  className="h-28 w-28 rounded-[10px] border border-[rgba(56,189,248,0.18)] object-cover"
-                  src={proofImagePreview}
-                  alt="Preview bukti transaksi"
-                />
+          {manualForm.platform === "shopee" ? (
+            <div
+              className="rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.48)] p-4"
+              onPaste={handleProofPaste}
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-text-secondary">Gambar Bukti <span className="text-danger">*</span></span>
                 <button
-                  className="rounded-[10px] border border-[rgba(244,63,94,0.24)] px-3 py-2 text-xs font-bold text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-[rgba(56,189,248,0.22)] px-3 py-2 text-xs font-bold text-accent transition hover:bg-[rgba(56,189,248,0.08)]"
                   type="button"
-                  onClick={() => {
-                    handleProofImageFile(null);
-                    if (proofImageInputRef.current) proofImageInputRef.current.value = "";
-                  }}
+                  onClick={() => proofImageInputRef.current?.click()}
                 >
-                  Hapus Gambar
+                  <Upload size={14} />
+                  Pilih File
                 </button>
               </div>
-            ) : (
-              <div className="rounded-[10px] border border-dashed border-[rgba(56,189,248,0.2)] px-4 py-5 text-sm text-text-secondary">
-                Gambar bukti wajib diisi. Pilih file atau tekan Ctrl + V saat area ini aktif.
-              </div>
-            )}
-            <input
-              ref={proofImageInputRef}
-              className="hidden"
-              type="file"
-              accept="image/jpeg,image/jpg,image/png"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                if (!file) return;
-                if (!validateProofImage(file)) {
-                  event.target.value = "";
-                  return;
-                }
-                handleProofImageFile(file);
-              }}
-            />
-          </div>
+              {proofImagePreview ? (
+                <div className="flex flex-wrap items-start gap-3">
+                  <img
+                    className="h-28 w-28 rounded-[10px] border border-[rgba(56,189,248,0.18)] object-cover"
+                    src={proofImagePreview}
+                    alt="Preview bukti transaksi"
+                  />
+                  <button
+                    className="rounded-[10px] border border-[rgba(244,63,94,0.24)] px-3 py-2 text-xs font-bold text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
+                    type="button"
+                    onClick={() => {
+                      handleProofImageFile(null);
+                      if (proofImageInputRef.current) proofImageInputRef.current.value = "";
+                    }}
+                  >
+                    Hapus Gambar
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-[10px] border border-dashed border-[rgba(56,189,248,0.2)] px-4 py-5 text-sm text-text-secondary">
+                  Gambar bukti wajib diisi. Pilih file atau tekan Ctrl + V saat area ini aktif.
+                </div>
+              )}
+              <input
+                ref={proofImageInputRef}
+                className="hidden"
+                type="file"
+                accept="image/jpeg,image/jpg,image/png"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  if (!file) return;
+                  if (!validateProofImage(file)) {
+                    event.target.value = "";
+                    return;
+                  }
+                  handleProofImageFile(file);
+                }}
+              />
+            </div>
+          ) : null}
 
           <button
-            className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:opacity-60"
             type="submit"
             disabled={isSaving}
           >
@@ -1283,7 +1352,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   onChange={(event) => setEditForm((current) => ({ ...current, googleAccountId: event.target.value }))}
                 >
                   <option value="">Pilih akun Google</option>
-                  {googleAccounts.map((account) => (
+                  {editableGoogleAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
                       {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
                     </option>
@@ -1433,7 +1502,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           </div>
 
           <button
-            className="inline-flex w-full items-center justify-center gap-2 rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:opacity-60"
             type="button"
             onClick={() => void handleCopySuccessMessage()}
           >

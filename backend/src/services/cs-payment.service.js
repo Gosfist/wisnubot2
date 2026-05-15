@@ -1347,12 +1347,28 @@ function parseManualNullableDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+async function generateWhatsappManualIdTrx(userId) {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    "SELECT pakasir_order_id FROM cs_transactions WHERE user_id = ? AND pakasir_order_id LIKE 'TRX-%'",
+    [Number(userId)],
+  );
+  const maxNumber = rows.reduce((max, row) => {
+    const match = String(row.pakasir_order_id ?? "").match(/^TRX-(\d+)$/i);
+    if (!match) return max;
+    return Math.max(max, Number(match[1]));
+  }, 0);
+  return `TRX-${maxNumber + 1}`;
+}
+
 async function createManualTransactionForUser(user, payload) {
   const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
   const pricePlanId = Number(payload.pricePlanId ?? payload.geminiPricePlanId ?? payload.gemini_price_plan_id ?? 0);
-  const idTrx = String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
-  const { buyerEmail, buyerCount } = normalizeBuyerEmailList(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
   const platform = normalizePlatform(payload.platform || "shopee");
+  const idTrx = platform === "whatsapp"
+    ? await generateWhatsappManualIdTrx(user.id)
+    : String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
+  const { buyerEmail, buyerCount } = normalizeBuyerEmailList(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
   const pricePlan = pricePlanId ? await geminiPriceService.getActiveForUser(user.id, pricePlanId) : null;
   if (pricePlanId && !pricePlan) {
     throw new Error("Paket harga tidak ditemukan atau non aktif");
@@ -1379,7 +1395,7 @@ async function createManualTransactionForUser(user, payload) {
 
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
   if (!pricePlanId) throw new Error("Paket harga wajib dipilih");
-  if (!idTrx) throw new Error("No pesanan wajib diisi");
+  if (!idTrx) throw new Error(platform === "shopee" ? "ID pesanan Shopee wajib diisi" : "No pesanan wajib diisi");
   if (!buyerEmail) throw new Error("Email buyer wajib diisi");
   if (!isValidManualPlatform(platform)) {
     throw new Error("Platform tidak valid");

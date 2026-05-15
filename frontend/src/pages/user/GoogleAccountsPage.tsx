@@ -1,4 +1,4 @@
-import { Plus, Search } from "lucide-react";
+import { ChevronDown, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
@@ -17,6 +17,8 @@ type SelectedMember = {
   buyerEmail: string;
   idTrx: string;
 };
+
+type AccountSlotFilter = "all" | "available" | "full" | "suspended";
 
 function splitBuyerEmails(item: TransactionModel) {
   const fallback = item.buyerEmail || item.customerJid;
@@ -63,6 +65,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
   const [checkingAccountId, setCheckingAccountId] = useState<number | null>(null);
   const [emailText, setEmailText] = useState("");
   const [query, setQuery] = useState("");
+  const [slotFilter, setSlotFilter] = useState<AccountSlotFilter>("all");
   const [saving, setSaving] = useState(false);
 
   async function refresh() {
@@ -163,13 +166,18 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
 
   const filteredItems = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    if (!keyword) return items;
 
     return items.filter((item) => {
+      const full = isFullAccount(item);
+      if (slotFilter === "available" && (item.isSuspended || full)) return false;
+      if (slotFilter === "full" && (item.isSuspended || !full)) return false;
+      if (slotFilter === "suspended" && !item.isSuspended) return false;
+      if (!keyword) return true;
+
       const statusText = item.isSuspended ? "google account suspended suspend" : "google account aktif";
       return `${item.email} ${statusText}`.toLowerCase().includes(keyword);
     });
-  }, [items, query]);
+  }, [items, query, slotFilter]);
 
   const headerActions = (
     <>
@@ -181,6 +189,19 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Cari akun Google"
         />
+      </label>
+      <label className="relative flex min-h-[48px] w-full min-w-[160px] max-w-[190px] items-center rounded-[14px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 sm:w-[180px]">
+        <select
+          className="h-full w-full appearance-none rounded-none border-0 bg-transparent py-0 pr-7 text-sm font-bold text-white outline-none focus:border-0"
+          value={slotFilter}
+          onChange={(event) => setSlotFilter(event.target.value as AccountSlotFilter)}
+        >
+          <option className="bg-[#5b6473] text-white" value="all">Semua</option>
+          <option className="bg-[#5b6473] text-white" value="available">Tersedia</option>
+          <option className="bg-[#5b6473] text-white" value="full">Penuh</option>
+          <option className="bg-[#5b6473] text-white" value="suspended">Suspend</option>
+        </select>
+        <ChevronDown size={18} className="pointer-events-none absolute right-4 text-text-secondary" />
       </label>
       <button
         className="inline-flex min-h-[48px] items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"

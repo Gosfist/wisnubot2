@@ -38,7 +38,7 @@ router.put(
     body("testimonialChannelLink").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
     body("contactOwnerPhoneNumber").optional({ values: "falsy" }).isString().isLength({ max: 30 }),
     body("botInfoPhoneNumber").optional({ values: "falsy" }).isString().isLength({ max: 30 }),
-    body("transactionMessageTemplate").optional({ values: "falsy" }).isString().isLength({ max: 5000 }),
+    body("transactionMessageTemplate").optional({ values: "falsy" }).isString().isLength({ max: 10000 }),
     body("googleDriveCredentialsJson").optional({ values: "falsy" }).isString().isLength({ max: 20000 }),
     body("googleDriveClientId").optional({ values: "falsy" }).isString().isLength({ max: 500 }),
     body("googleDriveClientSecret").optional({ values: "falsy" }).isString().isLength({ max: 500 }),

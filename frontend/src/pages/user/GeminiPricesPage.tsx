@@ -1,4 +1,4 @@
-import { Edit2, Plus, Trash2 } from "lucide-react";
+import { Edit2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -22,6 +22,7 @@ function defaultForm() {
 }
 
 export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
+  void embedded;
   const appData = useAppData();
   const { showToast } = useToast();
   const [items, setItems] = useState<GeminiPricePlanModel[]>([]);
@@ -50,12 +51,6 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
 
   const activeCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
 
-  function openCreateModal() {
-    setEditingItem(null);
-    setForm(defaultForm());
-    setIsModalOpen(true);
-  }
-
   function openEditModal(item: GeminiPricePlanModel) {
     setEditingItem(item);
     setForm({
@@ -70,21 +65,15 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const payload = {
-      label: form.label,
-      durationDays: Number(form.durationDays),
       price: Number(form.price),
       isActive: form.isActive === "true",
     };
 
     setSaving(true);
     try {
-      if (editingItem) {
-        await appData.updateGeminiPricePlan(editingItem.id, payload);
-        showToast("Harga Gemini berhasil diperbarui.", "success");
-      } else {
-        await appData.createGeminiPricePlan(payload);
-        showToast("Harga Gemini berhasil disimpan.", "success");
-      }
+      if (!editingItem) return;
+      await appData.updateGeminiPricePlan(editingItem.id, payload);
+      showToast("Harga Gemini berhasil diperbarui.", "success");
       const nextItems = await appData.fetchGeminiPricePlans();
       setItems(nextItems);
       setIsModalOpen(false);
@@ -97,39 +86,8 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  async function handleDelete(item: GeminiPricePlanModel) {
-    const confirmed = window.confirm(`Hapus harga ${item.label}?`);
-    if (!confirmed) return;
-
-    setSaving(true);
-    try {
-      const message = await appData.deleteGeminiPricePlan(item.id);
-      const nextItems = await appData.fetchGeminiPricePlans();
-      setItems(nextItems);
-      showToast(message, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Gagal menghapus harga Gemini.", "danger");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const headerActions = (
-    <button
-      className="inline-flex items-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow"
-      type="button"
-      onClick={openCreateModal}
-    >
-      <Plus size={18} /> Add Harga
-    </button>
-  );
-
   return (
     <div className="space-y-4">
-      {embedded ? (
-        <div className="flex flex-wrap justify-end gap-2">{headerActions}</div>
-      ) : null}
-
       {loading ? null : items.length === 0 ? (
         <SurfaceCard className="py-10 text-center text-sm text-text-secondary">
           Belum ada harga Gemini.
@@ -182,16 +140,6 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
                         >
                           <Edit2 size={15} />
                         </button>
-                        <button
-                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(244,63,94,0.24)] text-danger transition hover:bg-[rgba(244,63,94,0.08)]"
-                          type="button"
-                          disabled={saving}
-                          onClick={() => void handleDelete(item)}
-                          aria-label="Hapus harga"
-                          title="Hapus harga"
-                        >
-                          <Trash2 size={15} />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -205,7 +153,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
 
       <Modal
         open={isModalOpen}
-        title={editingItem ? "Edit Harga" : "Tambah Harga"}
+        title="Edit Harga"
         onClose={() => setIsModalOpen(false)}
       >
         <form className="space-y-5" onSubmit={handleSubmit}>
@@ -213,8 +161,8 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
             <span className="text-sm font-semibold text-text-secondary">Nama</span>
             <input
               value={form.label}
-              onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))}
-              placeholder="contoh: 1 Bulan"
+              readOnly
+              disabled
             />
           </label>
 
@@ -222,7 +170,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
             <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
             <select
               value={form.durationDays}
-              onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))}
+              disabled
             >
               <option value="30">1 Bulan</option>
               <option value="60">2 Bulan</option>
@@ -253,7 +201,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
           </label>
 
           <button
-            className="inline-flex w-full items-center justify-center rounded-[14px] bg-[rgba(15,23,42,0.96)] px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center rounded-[20px] bg-linear-to-r from-primary to-accent px-4 py-3.5 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:opacity-60"
             type="submit"
             disabled={saving}
           >
