@@ -11,6 +11,18 @@ function getInitials(email: string) {
   return name.slice(0, 2).toUpperCase();
 }
 
+function normalizeGoogleAccountEmail(value: string) {
+  const raw = value.trim();
+  if (!raw) return "";
+  const [emailPart, ...metadataParts] = raw.split("|");
+  const email = emailPart.trim().toLowerCase();
+  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
+    throw new Error(`Email akun Google harus berakhiran @gmail.com: ${email || raw}`);
+  }
+  const metadata = metadataParts.join("|").trim();
+  return metadata ? `${email} | ${metadata}` : email;
+}
+
 type SelectedMember = {
   key: string;
   transactionId: number;
@@ -87,14 +99,20 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const emails = [
-      ...new Set(
-        emailText
-          .split(/[\n,;]+/)
-          .map((value) => value.trim())
-          .filter(Boolean),
-      ),
-    ];
+    let emails: string[];
+    try {
+      emails = [
+        ...new Set(
+          emailText
+            .split(/[\n,;]+/)
+            .map((value) => normalizeGoogleAccountEmail(value))
+            .filter(Boolean),
+        ),
+      ];
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Email akun Google harus berakhiran @gmail.com.", "danger");
+      return;
+    }
     if (emails.length === 0) {
       showToast("Email akun Google wajib diisi.", "danger");
       return;
@@ -296,7 +314,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
               className="min-h-[150px]"
               value={emailText}
               onChange={(event) => setEmailText(event.target.value)}
-              placeholder={"contoh: wisnusuro09\nmegayuro01\nmegayuro02"}
+              placeholder={"contoh: wisnusuro09@gmail.com\nmegayuro01@gmail.com\nmegayuro02@gmail.com"}
             />
             <span className="block text-xs text-text-muted">
               Bisa isi banyak akun, pisahkan dengan baris baru, koma, atau titik koma.

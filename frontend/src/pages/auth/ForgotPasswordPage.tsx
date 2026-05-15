@@ -42,8 +42,8 @@ export function ForgotPasswordPage() {
 
   async function handleSavePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (newPassword.length < 3) {
-      showToast("Password baru minimal 3 karakter", "danger", toastPosition);
+    if (newPassword.length < 8) {
+      showToast("Password baru minimal 8 karakter", "danger", toastPosition);
       return;
     }
     if (newPassword !== confirmPassword) {

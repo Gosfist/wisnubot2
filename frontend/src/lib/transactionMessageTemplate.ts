@@ -1,6 +1,18 @@
 import type { TransactionModel } from "../types/models";
 
-export const DEFAULT_TRANSACTION_MESSAGE_TEMPLATE = "";
+export const DEFAULT_TRANSACTION_MESSAGE_TEMPLATE = [
+  "Transaksi selesai",
+  "",
+  "ID Trx: {idTrx}",
+  "Produk: {produk}",
+  "Akun Google: {akunGoogle}",
+  "Email: {emailBuyer}",
+  "Platform: {platform}",
+  "Nominal: Rp {nominal}",
+  "Masa Aktif: {activeStart} - {activeExp}",
+  "Garansi: {garansiExp}",
+  "Saluran: {saluran}",
+].join("\n");
 
 export const DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE = DEFAULT_TRANSACTION_MESSAGE_TEMPLATE;
 
@@ -61,20 +73,24 @@ export function normalizeTransactionTemplatePlatform(platform?: string | null): 
   return String(platform ?? "").trim().toLowerCase() === "whatsapp" ? "whatsapp" : "shopee";
 }
 
+export function createDefaultTransactionMessageTemplates(): TransactionMessageTemplateConfig {
+  return {
+    shopee: DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+    whatsapp: DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE,
+  };
+}
+
 export function parseTransactionMessageTemplates(value?: string | null): TransactionMessageTemplateConfig {
   const raw = String(value ?? "").trim();
   if (!raw) {
-    return {
-      shopee: "",
-      whatsapp: "",
-    };
+    return createDefaultTransactionMessageTemplates();
   }
 
   try {
     const parsed = JSON.parse(raw) as Partial<TransactionMessageTemplateConfig>;
     return {
-      shopee: String(parsed.shopee ?? ""),
-      whatsapp: String(parsed.whatsapp ?? ""),
+      shopee: String(parsed.shopee ?? "").trim() || DEFAULT_TRANSACTION_MESSAGE_TEMPLATE,
+      whatsapp: String(parsed.whatsapp ?? "").trim() || DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE,
     };
   } catch {
     return {

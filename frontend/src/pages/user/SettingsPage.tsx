@@ -8,7 +8,6 @@ import { useAuth } from "../../hooks/useAuth";
 import { useToast } from "../../hooks/useToast";
 import { appConfig } from "../../lib/config";
 import { apiFetch, withJsonBody } from "../../lib/http";
-import { getToken } from "../../lib/storage";
 
 function normalizeGoogleDriveFolderId(value: string) {
   const raw = value.trim();
@@ -255,13 +254,9 @@ export function SettingsPage() {
   async function handleExportDatabase() {
     setIsExportingDb(true);
     try {
-      const headers = new Headers();
-      const token = getToken();
-      if (token) headers.set("Authorization", `Bearer ${token}`);
-
       const response = await fetch(`${appConfig.apiBaseUrl}/settings/export`, {
         method: "GET",
-        headers,
+        credentials: "include",
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);

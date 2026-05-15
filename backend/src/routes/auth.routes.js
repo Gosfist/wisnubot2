@@ -6,15 +6,18 @@ import {
   me,
   updateProfile,
   changePassword,
+  verifyResetSecret,
   resetPassword,
 } from "../controllers/auth.controller.js";
 import { validate } from "../middleware/validate.js";
 import { authenticate } from "../middleware/auth.js";
+import { loginLimiter, resetSecretLimiter } from "../middleware/rate-limiters.js";
 
 const router = Router();
 
 router.post(
   "/login",
+  loginLimiter,
   [
     body("username").trim().notEmpty().withMessage("Username wajib diisi"),
     body("password").notEmpty().withMessage("Password wajib diisi"),
@@ -42,7 +45,9 @@ router.post(
   "/change-password",
   authenticate,
   [
-    body("newPassword").notEmpty().withMessage("Password baru wajib diisi"),
+    body("newPassword")
+      .isLength({ min: 8 })
+      .withMessage("Password baru minimal 8 karakter"),
     body("secretKey").trim().notEmpty().withMessage("Secret key wajib diisi"),
     validate,
   ],
@@ -50,9 +55,22 @@ router.post(
 );
 
 router.post(
-  "/reset-password",
+  "/verify-reset-secret",
+  resetSecretLimiter,
   [
-    body("newPassword").notEmpty().withMessage("Password baru wajib diisi"),
+    body("secretKey").trim().notEmpty().withMessage("Secret key wajib diisi"),
+    validate,
+  ],
+  verifyResetSecret,
+);
+
+router.post(
+  "/reset-password",
+  resetSecretLimiter,
+  [
+    body("newPassword")
+      .isLength({ min: 8 })
+      .withMessage("Password baru minimal 8 karakter"),
     body("confirmPassword").notEmpty().withMessage("Konfirmasi password wajib diisi"),
     body("secretKey").trim().notEmpty().withMessage("Secret key wajib diisi"),
     validate,

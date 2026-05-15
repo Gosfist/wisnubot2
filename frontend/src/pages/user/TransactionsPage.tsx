@@ -1,10 +1,11 @@
 import { CalendarDays, ChevronDown, Copy, Download, Edit2, Plus, Search, Trash2, Upload } from "lucide-react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImportConfirmModal } from "../../components/ImportConfirmModal";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
+import { copyTextToClipboard } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { formatCurrency } from "../../lib/format";
 import {
@@ -188,15 +189,36 @@ function getCell(row: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
-function normalizeBuyerEmail(value: unknown) {
-  return [
+function normalizeBuyerEmail(value: unknown, options: { requireGmail?: boolean } = {}) {
+  const emails = [
     ...new Set(
       String(value ?? "")
         .split(/[,;\n]+/)
-        .map((item) => item.trim().replace(/@gmail\.com$/i, ""))
+        .map((item) => item.trim().toLowerCase())
         .filter(Boolean),
     ),
-  ].join(",");
+  ];
+
+  if (options.requireGmail) {
+    const invalidEmail = emails.find((email) => !/^[^\s@,;]+@gmail\.com$/i.test(email));
+    if (invalidEmail) {
+      throw new Error(`Email buyer harus berakhiran @gmail.com: ${invalidEmail}`);
+    }
+  }
+
+  return emails.join(",");
+}
+
+function normalizeGoogleAccountEmail(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const [emailPart, ...metadataParts] = raw.split("|");
+  const email = emailPart.trim().toLowerCase();
+  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
+    throw new Error(`Akun Google harus berakhiran @gmail.com: ${email || raw}`);
+  }
+  const metadata = metadataParts.join("|").trim();
+  return metadata ? `${email} | ${metadata}` : email;
 }
 
 function countBuyerEmails(value: unknown) {
@@ -572,7 +594,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         pricePlanId: selectedPlan.id,
         platform: manualForm.platform,
         noPesanan: manualForm.noPesanan,
-        buyerEmail: normalizeBuyerEmail(manualForm.buyerEmail),
+        buyerEmail: normalizeBuyerEmail(manualForm.buyerEmail, { requireGmail: true }),
         amount: selectedPlan.price * Math.max(1, countBuyerEmails(manualForm.buyerEmail)),
         activeDurationDays: selectedPlan.durationDays,
         startDate: manualForm.startDate,
@@ -667,13 +689,13 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         const noPesanan = String(getCell(row, ["No Pesanan", "ID TRX", "ID Trx", "idTrx", "IDTRX", "No Order"])).trim();
         if (!noPesanan) continue;
         const orderKey = noPesanan.toLowerCase();
-        const buyerEmail = normalizeBuyerEmail(getCell(row, ["Email", "Email Buyer", "Buyer Email"]));
+        const buyerEmail = normalizeBuyerEmail(getCell(row, ["Email", "Email Buyer", "Buyer Email"]), { requireGmail: true });
         const existingRow = groupedRows.get(orderKey);
         if (!existingRow) {
           groupedRows.set(orderKey, { ...row, __buyerEmails: buyerEmail });
           continue;
         }
-        const mergedEmails = normalizeBuyerEmail(`${String(existingRow.__buyerEmails ?? "")},${buyerEmail}`);
+        const mergedEmails = normalizeBuyerEmail(`${String(existingRow.__buyerEmails ?? "")},${buyerEmail}`, { requireGmail: true });
         existingRow.__buyerEmails = mergedEmails;
       }
       const seenOrders = new Set<string>();
@@ -681,7 +703,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       let skipped = 0;
       let createdAccounts = 0;
       for (const row of groupedRows.values()) {
-        const accountEmail = String(getCell(row, ["Akun Google", "Google Account", "akun_google"])).trim();
+        const accountEmail = normalizeGoogleAccountEmail(getCell(row, ["Akun Google", "Google Account", "akun_google"]));
         if (!accountEmail) {
           throw new Error("Akun Google wajib diisi di file Excel.");
         }
@@ -701,7 +723,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         }
         seenOrders.add(orderKey);
 
-        const buyerEmail = normalizeBuyerEmail(row.__buyerEmails ?? getCell(row, ["Email", "Email Buyer", "Buyer Email"]));
+        const buyerEmail = normalizeBuyerEmail(row.__buyerEmails ?? getCell(row, ["Email", "Email Buyer", "Buyer Email"]), { requireGmail: true });
         const buyerCount = Math.max(1, countBuyerEmails(buyerEmail));
         const platform = normalizePlatformImport(getCell(row, ["Platform"]));
         const startDate = formatDateInput(getCell(row, ["Start", "Tanggal Start", "Start Date"]));
@@ -775,8 +797,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       await appData.updateTransaction(editingItem.id, {
         googleAccountId: Number(editForm.googleAccountId),
         idTrx: editForm.idTrx,
-        buyerEmail: normalizeBuyerEmail(editForm.buyerEmail),
-        noBuyer: normalizeBuyerEmail(editForm.buyerEmail),
+        buyerEmail: normalizeBuyerEmail(editForm.buyerEmail, { requireGmail: true }),
+        noBuyer: normalizeBuyerEmail(editForm.buyerEmail, { requireGmail: true }),
         platform: editForm.platform,
         reportStatus: editForm.reportStatus,
         activeStatus: editForm.activeStatus,
@@ -810,7 +832,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
   }
 
   async function handleCopySuccessMessage() {
-    await navigator.clipboard.writeText(successMessagePreview);
+    const copied = await copyTextToClipboard(successMessagePreview);
+    if (!copied) {
+      showToast("Gagal menyalin template pesan.", "danger");
+      return;
+    }
     setSuccessMessagePreview("");
     showToast("Template pesan berhasil disalin.", "success");
   }
@@ -839,7 +865,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       previewTransaction,
       { saluran: settings?.testimonialChannelLink ?? "" },
     );
-    await navigator.clipboard.writeText(text);
+    const copied = await copyTextToClipboard(text);
+    if (!copied) {
+      showToast("Gagal menyalin template pesan.", "danger");
+      return;
+    }
     showToast("Template pesan berhasil disalin.", "success");
   }
 
@@ -1224,8 +1254,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <span className="text-sm font-semibold text-text-secondary">Email</span>
               <input
                 value={manualForm.buyerEmail}
-                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: event.target.value.replace(/@gmail\.com/gi, "") }))}
-                placeholder="email1,email2,email3"
+                onChange={(event) => setManualForm((current) => ({ ...current, buyerEmail: event.target.value }))}
+                placeholder="email1@gmail.com,email2@gmail.com"
               />
             </label>
 
@@ -1408,8 +1438,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               <input
                 className={editControlClass}
                 value={editForm.buyerEmail}
-                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: event.target.value.replace(/@gmail\.com/gi, "") }))}
-                placeholder="email buyer"
+                onChange={(event) => setEditForm((current) => ({ ...current, buyerEmail: event.target.value }))}
+                placeholder="emailbuyer@gmail.com"
               />
             </label>
 

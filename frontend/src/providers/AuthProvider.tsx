@@ -1,7 +1,7 @@
 ﻿import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { UserModel } from "../types/models";
-import { ApiError, apiFetch, withJsonBody } from "../lib/http";
+import { apiFetch, withJsonBody } from "../lib/http";
 import { clearSession, getStoredUser, saveSession } from "../lib/storage";
 import { socketService } from "../lib/socket";
 
@@ -35,12 +35,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    const storedUser = getStoredUser();
-    if (!storedUser) {
-      setRestoringSession(false);
-      return;
-    }
-
     apiFetch("/auth/me")
       .then((data) => {
         if (!mounted) return;
@@ -66,8 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(username: string, password: string): Promise<UserModel> {
     const data = await apiFetch("/auth/login", withJsonBody({ username, password }));
     const loggedInUser = parseUser((data as { user: Record<string, unknown> }).user);
-    const token = String((data as { token: string }).token ?? "");
-    saveSession(loggedInUser, token);
+    saveSession(loggedInUser);
     setUser(loggedInUser);
     return loggedInUser;
   }
@@ -91,9 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function verifyResetSecret(secretKey: string): Promise<void> {
-    if (!secretKey.trim()) {
-      throw new Error("Secret key wajib diisi");
-    }
+    await apiFetch("/auth/verify-reset-secret", withJsonBody({ secretKey }));
   }
 
   async function resetPassword(secretKey: string, newPassword: string, confirmPassword: string): Promise<void> {

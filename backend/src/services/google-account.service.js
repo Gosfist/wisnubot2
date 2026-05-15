@@ -1,7 +1,17 @@
 import { getPool } from "../config/database.js";
 
 function normalizeEmail(value) {
-  return String(value ?? "").trim();
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const [emailPart, ...metadataParts] = raw.split("|");
+  const email = emailPart.trim().toLowerCase();
+  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
+    throw new Error("Email akun Google harus berakhiran @gmail.com");
+  }
+
+  const metadata = metadataParts.join("|").trim();
+  return metadata ? `${email} | ${metadata}` : email;
 }
 
 function isFullPrivateAccount(email) {

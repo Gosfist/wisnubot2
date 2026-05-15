@@ -1,11 +1,11 @@
 import { getPool } from "../config/database.js";
 
-const VALID_TYPES = new Set(["link", "buy", "reply"]);
+const VALID_TYPES = new Set(["link", "buy", "reply", "contact_owner"]);
 
 function normalizeButton(payload) {
   const type = String(payload?.buttonType ?? "").toLowerCase();
   if (!VALID_TYPES.has(type)) {
-    throw new Error("Tipe button tidak valid (link|buy|reply)");
+    throw new Error("Tipe button tidak valid (link|buy|reply|contact_owner)");
   }
 
   const label = String(payload?.label ?? "").trim();
@@ -22,9 +22,14 @@ function normalizeButton(payload) {
   }
 
   const replyText =
-    type === "reply" ? String(payload?.replyText ?? "").trim() : null;
+    ["reply", "contact_owner"].includes(type)
+      ? String(payload?.replyText ?? "").trim()
+      : null;
   if (type === "reply" && !replyText) {
     throw new Error("Button reply wajib punya teks balasan");
+  }
+  if (type === "contact_owner" && !replyText) {
+    throw new Error("Button contact owner wajib punya teks pesan");
   }
 
   const price =

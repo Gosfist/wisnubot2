@@ -121,6 +121,17 @@ function extractIncomingTextContent(message) {
   return "";
 }
 
+function normalizeIncomingCommandText(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const slashAliases = new Map([
+    ["/start", "start"],
+    ["/menu", "menu"],
+    ["/welcome", "welcome"],
+  ]);
+
+  return slashAliases.get(text) ?? text;
+}
+
 function extractQuotedMessageId(message) {
   if (!message || typeof message !== "object") {
     return "";
@@ -145,6 +156,15 @@ function normalizeJid(value) {
   if (digits.startsWith("0")) return `62${digits.slice(1)}@s.whatsapp.net`;
   if (digits.startsWith("8")) return `62${digits}@s.whatsapp.net`;
   return `${digits}@s.whatsapp.net`;
+}
+
+function normalizeWaMePhone(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("62")) return digits;
+  if (digits.startsWith("0")) return `62${digits.slice(1)}`;
+  if (digits.startsWith("8")) return `62${digits}`;
+  return digits;
 }
 
 function isOwnerMessage(context, remoteJid) {
@@ -172,13 +192,26 @@ function buildSingleSelectButton(label, id, sectionTitle = "Pilih Menu") {
   };
 }
 
-function buildCommandInteractiveMessage(remoteJid, entry) {
+function buildContactOwnerUrl(context, messageText) {
+  const ownerPhone = normalizeWaMePhone(
+    context?.contactOwnerPhoneNumber || context?.userPhoneNumber,
+  );
+  if (!ownerPhone) return "";
+
+  const text = String(messageText ?? "").trim();
+  return text
+    ? `https://wa.me/${ownerPhone}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/${ownerPhone}`;
+}
+
+function buildCommandInteractiveMessage(remoteJid, entry, context) {
   const buttons = [];
   for (const button of entry.buttons ?? []) {
     const label = String(button.label ?? "").trim();
     if (!label) continue;
 
     let id = "";
+    let nativeButton = null;
     if (button.buttonType === "link" && button.targetCommand) {
       id = String(button.targetCommand)
         .replace(/^[/.]+/, "")
@@ -188,6 +221,21 @@ function buildCommandInteractiveMessage(remoteJid, entry) {
       id = `cs_buy:${entry.id}:${button.id}`;
     } else if (button.buttonType === "reply" && button.replyText) {
       id = `cs_reply:${button.id}`;
+    } else if (button.buttonType === "contact_owner" && button.replyText) {
+      const url = buildContactOwnerUrl(context, button.replyText);
+      if (!url) continue;
+      nativeButton = {
+        name: "cta_url",
+        buttonParamsJson: JSON.stringify({
+          display_text: label,
+          url,
+        }),
+      };
+    }
+
+    if (nativeButton) {
+      buttons.push(nativeButton);
+      continue;
     }
 
     if (!id) continue;
@@ -1114,9 +1162,9 @@ class BaileysManager {
             if (activeConnection?.botPurpose === "push_contact") {
               continue;
             }
-            const incomingText = extractIncomingTextContent(message.message)
-              .trim()
-              .toLowerCase();
+            const incomingText = normalizeIncomingCommandText(
+              extractIncomingTextContent(message.message),
+            );
 
             await messageService.markIncomingMessageAsRead(
               sock,
@@ -1749,6 +1797,7 @@ class BaileysManager {
             const interactiveMessage = buildCommandInteractiveMessage(
               remoteJid,
               commandEntry,
+              customerServiceContext,
             );
             if (interactiveMessage) {
               await messageService.sendCustomerServiceRelayMessage(

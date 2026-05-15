@@ -1,4 +1,4 @@
-import { config } from './src/config/env.js';
+import { assertSecurityConfig, config } from './src/config/env.js';
 import { initDatabase } from './src/config/database.js';
 import { httpServer } from './src/app.js';
 import { baileysManager } from './src/services/baileys.service.js';
@@ -10,6 +10,8 @@ let shuttingDown = false;
 async function start() {
   try {
     logger.info('=== WisnuBot API Starting ===');
+
+    assertSecurityConfig();
 
     // 1. Initialize database
     await initDatabase();

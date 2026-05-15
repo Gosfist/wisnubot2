@@ -1,6 +1,5 @@
 import { io, Socket } from "socket.io-client";
 import { appConfig } from "./config";
-import { getStoredUser, getToken } from "./storage";
 
 type BotStatusListener = (payload: Record<string, unknown>) => void;
 type TrxGeminiListener = (payload: Record<string, unknown>) => void;
@@ -9,7 +8,6 @@ type QrListener = (qr: string) => void;
 class SocketService {
   private socket: Socket | null = null;
   private connecting: Promise<void> | null = null;
-  private joinedUserId: number | null = null;
   private qrListeners = new Set<QrListener>();
   private botStatusListeners = new Set<BotStatusListener>();
   private trxGeminiListeners = new Set<TrxGeminiListener>();
@@ -29,11 +27,7 @@ class SocketService {
   }
 
   private async connectInternal() {
-    const token = getToken();
-    const user = getStoredUser();
-
     if (this.socket?.connected) {
-      this.joinUserRoom(user?.id ?? null);
       return;
     }
 
@@ -41,11 +35,7 @@ class SocketService {
       this.socket = io(appConfig.socketBaseUrl, {
         transports: ["websocket"],
         autoConnect: false,
-        extraHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
-
-      this.socket.on("connect", () => {
-        this.joinUserRoom(user?.id ?? null);
+        withCredentials: true,
       });
 
       this.socket.on("qr", (payload: unknown) => {
@@ -86,32 +76,21 @@ class SocketService {
           );
         }
       });
-
-      this.socket.on("disconnect", () => {
-        this.joinedUserId = null;
-      });
     }
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       this.socket?.connect();
       if (this.socket?.connected) {
         resolve();
         return;
       }
       this.socket?.once("connect", () => resolve());
+      this.socket?.once("connect_error", (error) => reject(error));
     });
   }
 
   private emitBotStatus(payload: Record<string, unknown>) {
     this.botStatusListeners.forEach((listener) => listener(payload));
-  }
-
-  private joinUserRoom(userId: number | null) {
-    if (!userId || !this.socket?.connected || this.joinedUserId === userId) {
-      return;
-    }
-    this.socket.emit("join", userId);
-    this.joinedUserId = userId;
   }
 
   onQr(listener: QrListener) {
@@ -133,7 +112,6 @@ class SocketService {
     this.socket?.disconnect();
     this.socket?.removeAllListeners();
     this.socket = null;
-    this.joinedUserId = null;
     this.connecting = null;
   }
 }

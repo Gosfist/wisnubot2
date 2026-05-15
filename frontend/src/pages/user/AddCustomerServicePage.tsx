@@ -26,6 +26,7 @@ const BUTTON_TYPE_OPTIONS: { value: CsButtonType; label: string }[] = [
   { value: "link", label: "Menu (link ke perintah)" },
   { value: "buy", label: "Beli (payment Pakasir)" },
   { value: "reply", label: "Reply (kirim teks)" },
+  { value: "contact_owner", label: "Contact Owner" },
 ];
 
 function makeEmptyButton(): CsButtonModel {
@@ -242,6 +243,9 @@ export function AddCustomerServicePage() {
       if (b.buttonType === "reply" && !b.replyText?.trim()) {
         return `Button "${label}": isi teks balasan`;
       }
+      if (b.buttonType === "contact_owner" && !b.replyText?.trim()) {
+        return `Button "${label}": isi teks pesan untuk owner`;
+      }
       if (b.buttonType === "buy") {
         const priceNum = Number(b.price ?? 0);
         if (!Number.isFinite(priceNum) || priceNum <= 0) {
@@ -348,7 +352,9 @@ export function AddCustomerServicePage() {
             label: b.label.trim(),
             targetCommand: b.buttonType === "link" ? stripPrefix(b.targetCommand ?? "") : null,
             targetUrl: null,
-            replyText: b.buttonType === "reply" ? b.replyText?.trim() ?? null : null,
+            replyText: ["reply", "contact_owner"].includes(b.buttonType)
+              ? b.replyText?.trim() ?? null
+              : null,
             price: b.buttonType === "buy" ? Number(b.price) : null,
             activeDurationDays: b.buttonType === "buy" ? b.activeDurationDays : null,
             warrantyDurationDays: b.buttonType === "buy" ? b.warrantyDurationDays : null,
@@ -575,6 +581,16 @@ export function AddCustomerServicePage() {
                         <textarea
                           className="min-h-[86px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
                           placeholder="Teks yang akan dikirim saat button ditekan"
+                          rows={2}
+                          value={b.replyText ?? ""}
+                          onChange={(e) => updateButton(index, { replyText: e.target.value })}
+                        />
+                      )}
+
+                      {b.buttonType === "contact_owner" && (
+                        <textarea
+                          className="min-h-[86px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                          placeholder="Teks pesan yang otomatis terisi saat customer menghubungi owner"
                           rows={2}
                           value={b.replyText ?? ""}
                           onChange={(e) => updateButton(index, { replyText: e.target.value })}

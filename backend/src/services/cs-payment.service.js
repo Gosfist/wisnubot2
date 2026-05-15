@@ -128,7 +128,12 @@ function mapPaidTransactionRow(row) {
 }
 
 function normalizeBuyerEmail(value) {
-  return String(value ?? "").trim().replace(/@gmail\.com$/i, "");
+  const email = String(value ?? "").trim().toLowerCase();
+  if (!email) return "";
+  if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
+    throw new Error("Email buyer harus berakhiran @gmail.com");
+  }
+  return email;
 }
 
 function normalizeBuyerEmailList(value) {
