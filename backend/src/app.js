@@ -112,7 +112,7 @@ app.use(cookieParser());
 app.use('/api', apiLimiter);
 app.use((req, res, next) => {
   const limit = req.method === 'POST' && req.path === '/api/settings/import'
-    ? '50mb'
+    ? '200mb'
     : '1mb';
   express.json({ limit })(req, res, next);
 });

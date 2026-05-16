@@ -55,6 +55,12 @@ const FULL_TABLES = [
 ];
 
 const FULL_SECTION_KEYS = FULL_TABLES.map((item) => item.key);
+const SCOPED_ARRAY_SECTION_KEYS = new Set(
+  SECTION_KEYS.filter((key) => key !== "appSettings"),
+);
+const SCOPED_OBJECT_SECTION_KEYS = new Set(["appSettings"]);
+const FULL_ARRAY_SECTION_KEYS = new Set(FULL_SECTION_KEYS);
+const FULL_IMPORT_REQUIRED_ARRAY_KEYS = ["users"];
 const JSON_COLUMN_NAMES = new Set([
   "target_group_ids",
   "target_excluded_group_ids",
@@ -193,6 +199,66 @@ function requireArray(value, name) {
   return value;
 }
 
+function requirePlainObject(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`File import tidak valid: ${name} harus berupa object`);
+  }
+  return value;
+}
+
+function validateSectionManifest(payload, data, arrayKeys, objectKeys = new Set()) {
+  if (payload.sections === undefined || payload.sections === null) {
+    return;
+  }
+  if (!Array.isArray(payload.sections)) {
+    throw new Error("File import tidak valid: sections harus berupa array");
+  }
+
+  for (const [index, section] of payload.sections.entries()) {
+    if (!section || typeof section !== "object" || Array.isArray(section)) {
+      throw new Error(`File import tidak valid: sections[${index}] harus berupa object`);
+    }
+    const key = String(section.key ?? "").trim();
+    const count = Number(section.count ?? 0);
+    if (!key) {
+      throw new Error(`File import tidak valid: sections[${index}].key kosong`);
+    }
+    if (!Number.isFinite(count) || count < 0) {
+      throw new Error(`File import tidak valid: sections[${key}].count tidak valid`);
+    }
+    if (count === 0) {
+      continue;
+    }
+
+    if (arrayKeys.has(key) && !Array.isArray(data[key])) {
+      throw new Error(`File import tidak valid: data.${key} harus berupa array`);
+    }
+    if (objectKeys.has(key) && (data[key] === undefined || data[key] === null)) {
+      throw new Error(`File import tidak valid: data.${key} wajib ada`);
+    }
+  }
+}
+
+function validateFullImportData(payload, data) {
+  validateSectionManifest(payload, data, FULL_ARRAY_SECTION_KEYS);
+
+  for (const tableMeta of FULL_TABLES) {
+    if (data[tableMeta.key] !== undefined && !Array.isArray(data[tableMeta.key])) {
+      throw new Error(`File import tidak valid: data.${tableMeta.key} harus berupa array`);
+    }
+  }
+
+  for (const key of FULL_IMPORT_REQUIRED_ARRAY_KEYS) {
+    if (!Array.isArray(data[key]) || data[key].length === 0) {
+      throw new Error(`Backup full DB tidak memiliki data ${key}; import dibatalkan`);
+    }
+  }
+
+  if (Number(payload.version) >= 7 && !Array.isArray(data.csRestockReminders)) {
+    throw new Error("Backup full DB versi 7 wajib memiliki section csRestockReminders");
+  }
+}
+
 function compactRow(row, excludedKeys = []) {
   const result = {};
   const excluded = new Set(excludedKeys);
@@ -240,6 +306,33 @@ async function getTableColumns(connection, tableName) {
     [tableName],
   );
   return rows.map((row) => String(row.column_name));
+}
+
+async function tableExists(connection, tableName) {
+  const [rows] = await connection.execute(
+    `SELECT 1
+       FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name = ?
+      LIMIT 1`,
+    [tableName],
+  );
+  return rows.length > 0;
+}
+
+async function assertFullSchemaReady(connection) {
+  const missing = [];
+  for (const tableMeta of FULL_TABLES) {
+    if (!(await tableExists(connection, tableMeta.table))) {
+      missing.push(tableMeta.table);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Schema DB belum siap untuk import/export full. Jalankan npm run migrate dulu. Tabel belum ada: ${missing.join(", ")}`,
+    );
+  }
 }
 
 async function filterExistingColumns(connection, tableName, columns) {
@@ -599,6 +692,7 @@ async function exportScopedForUser(user) {
 
 async function exportForUser(user) {
   const pool = getPool();
+  await assertFullSchemaReady(pool);
   const data = {};
 
   for (const tableMeta of FULL_TABLES) {
@@ -1090,10 +1184,13 @@ async function importScopedForUser(user, payload) {
     throw new Error("File import bukan export DB WisnuBot2 yang valid");
   }
 
-  const data = payload.data;
-  if (!data || typeof data !== "object") {
-    throw new Error("File import tidak memiliki data");
-  }
+  const data = requirePlainObject(payload.data, "data");
+  validateSectionManifest(
+    payload,
+    data,
+    SCOPED_ARRAY_SECTION_KEYS,
+    SCOPED_OBJECT_SECTION_KEYS,
+  );
 
   const userId = Number(user.id);
   const pool = getPool();
@@ -1168,10 +1265,8 @@ async function importFullDatabase(payload) {
     throw new Error("File import bukan backup full DB WisnuBot2 yang valid");
   }
 
-  const data = payload.data;
-  if (!data || typeof data !== "object") {
-    throw new Error("File import tidak memiliki data");
-  }
+  const data = requirePlainObject(payload.data, "data");
+  validateFullImportData(payload, data);
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -1179,6 +1274,7 @@ async function importFullDatabase(payload) {
 
   try {
     await connection.beginTransaction();
+    await assertFullSchemaReady(connection);
     await truncateFullTables(connection);
 
     for (const tableMeta of FULL_TABLES) {
