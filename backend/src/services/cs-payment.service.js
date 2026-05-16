@@ -247,6 +247,22 @@ function formatDateId(value, withTime = false) {
   }).format(date);
 }
 
+function formatTemplateDateId(value) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  }).formatToParts(date);
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  return `${day}-${month}-${year}`;
+}
+
 function buildLifecyclePatch(startValue, activeDays, warrantyDays) {
   const start = startValue ? new Date(startValue) : new Date();
   const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
@@ -291,6 +307,12 @@ function buildTemplateData(row) {
       row.dataAkun ??
       "",
   );
+  const activeDurationDays = normalizeDurationDays(
+    row.active_duration_days ?? row.activeDurationDays,
+  );
+  const warrantyDurationDays = normalizeDurationDays(
+    row.warranty_duration_days ?? row.warrantyDurationDays,
+  );
   const now = new Date();
 
   return {
@@ -329,22 +351,18 @@ function buildTemplateData(row) {
     }).format(now),
     tanggal: formatDateId(now),
     doneAt: formatDateId(completedAt, true),
-    activeStart: formatDateId(activeStartAt),
-    activeExp: formatDateId(activeExpiresAt),
-    activeExpiresAt: formatDateId(activeExpiresAt),
-    garansiStart: formatDateId(warrantyStartAt),
-    garansiExp: formatDateId(warrantyExpiresAt),
-    warrantyStart: formatDateId(warrantyStartAt),
-    warrantyExp: formatDateId(warrantyExpiresAt),
+    activeStart: formatTemplateDateId(activeStartAt),
+    activeExp: formatTemplateDateId(activeExpiresAt),
+    activeExpiresAt: formatTemplateDateId(activeExpiresAt),
+    garansiStart: formatTemplateDateId(warrantyStartAt),
+    garansiExp: formatTemplateDateId(warrantyExpiresAt),
+    warrantyStart: formatTemplateDateId(warrantyStartAt),
+    warrantyExp: formatTemplateDateId(warrantyExpiresAt),
     dataAkun: stockContent,
     data_akun: stockContent,
     stockContent,
-    masaAktif: row.active_duration_days
-      ? `${Number(row.active_duration_days)} hari`
-      : "-",
-    masaGaransi: row.warranty_duration_days
-      ? `${Number(row.warranty_duration_days)} hari`
-      : "-",
+    masaAktif: activeDurationDays ? `${activeDurationDays} Hari` : "-",
+    masaGaransi: warrantyDurationDays ? `${warrantyDurationDays} Hari` : "-",
   };
 }
 

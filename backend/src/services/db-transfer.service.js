@@ -1,11 +1,11 @@
 import { getPool } from "../config/database.js";
 
 const EXPORT_FORMAT = "wisnubot2-db-export";
-const SCOPED_EXPORT_VERSION = 2;
-const FULL_EXPORT_VERSION = 5;
+const SCOPED_EXPORT_VERSION = 3;
+const FULL_EXPORT_VERSION = 6;
 const EXPORT_VERSION = FULL_EXPORT_VERSION;
-const SUPPORTED_SCOPED_EXPORT_VERSIONS = new Set([1, SCOPED_EXPORT_VERSION]);
-const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, 3, 4, FULL_EXPORT_VERSION]);
+const SUPPORTED_SCOPED_EXPORT_VERSIONS = new Set([1, 2, SCOPED_EXPORT_VERSION]);
+const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, 3, 4, 5, FULL_EXPORT_VERSION]);
 const BULK_BATCH_SIZE = 300;
 
 const SECTION_KEYS = [
@@ -87,6 +87,7 @@ const CS_BUTTON_COLUMNS = [
   "price",
   "active_duration_days",
   "warranty_duration_days",
+  "parent_id",
 ];
 
 const CS_STOCK_COLUMNS = [
@@ -230,6 +231,11 @@ async function getTableColumns(connection, tableName) {
   return rows.map((row) => String(row.column_name));
 }
 
+async function filterExistingColumns(connection, tableName, columns) {
+  const existing = new Set(await getTableColumns(connection, tableName));
+  return columns.filter((column) => existing.has(column));
+}
+
 function normalizeFullTableRow(tableMeta, row, columns) {
   const result = {};
   for (const column of columns) {
@@ -317,6 +323,12 @@ async function bulkInsertRows(connection, tableName, rows, columns, options = {}
   return inserted;
 }
 
+async function bulkInsertTableRows(connection, tableName, rows, columns, options = {}) {
+  const insertColumns = await filterExistingColumns(connection, tableName, columns);
+  if (insertColumns.length === 0) return 0;
+  return bulkInsertRows(connection, quoteTable(tableName), rows, insertColumns, options);
+}
+
 async function selectAll(pool, sql, params) {
   const [rows] = await pool.execute(sql, params);
   return rows;
@@ -373,6 +385,22 @@ function stockKey(row) {
     normalizeText(row.created_at),
     normalizeText(row.used_by_jid),
     normalizeText(row.used_at),
+  ].join("|");
+}
+
+function buttonKey(row) {
+  return [
+    Number(row.cs_id ?? 0),
+    normalizeText(row.label),
+    normalizeText(row.button_type),
+    normalizeText(row.target_command),
+    normalizeText(row.target_url),
+    normalizeText(row.reply_text),
+    normalizeText(row.order_index),
+    normalizeText(row.price),
+    normalizeText(row.active_duration_days),
+    normalizeText(row.warranty_duration_days),
+    normalizeText(row.created_at),
   ].join("|");
 }
 
@@ -707,7 +735,7 @@ async function importSettings(connection, userId, data) {
 
 async function importCustomerService(connection, userId, data) {
   const rows = requireArray(data.customerService ?? [], "customerService");
-  await bulkInsertRows(
+  await bulkInsertTableRows(
     connection,
     "customer_service",
     rows.map((row) => ({
@@ -729,16 +757,49 @@ async function importCustomerService(connection, userId, data) {
 }
 
 async function importCsButtons(connection, data, csIdMap) {
-  const rows = requireArray(data.csButtons ?? [], "csButtons")
+  const sourceRows = requireArray(data.csButtons ?? [], "csButtons");
+  const rows = sourceRows
     .map((row) => {
       const csId = csIdMap.get(Number(row.cs_id));
       if (!csId) return null;
-      return { ...compactRow(row, ["id", "cs_id"]), cs_id: csId };
+      return {
+        ...compactRow(row, ["id", "cs_id", "parent_id"]),
+        old_id: Number(row.id),
+        old_parent_id: row.parent_id ? Number(row.parent_id) : null,
+        cs_id: csId,
+        parent_id: null,
+      };
     })
     .filter(Boolean);
 
-  await bulkInsertRows(connection, "cs_buttons", rows, CS_BUTTON_COLUMNS);
-  return rows.length;
+  await bulkInsertTableRows(connection, "cs_buttons", rows, CS_BUTTON_COLUMNS);
+
+  if (rows.length === 0) {
+    return { count: 0, idMap: new Map() };
+  }
+
+  const csIds = [...new Set(rows.map((row) => Number(row.cs_id)))];
+  const [insertedRows] = await connection.execute(
+    `SELECT * FROM cs_buttons WHERE cs_id IN (${csIds.map(() => "?").join(",")}) ORDER BY id`,
+    csIds,
+  );
+  const idMap = mapInsertedIdsByQueue(rows, insertedRows, buttonKey, "old_id");
+  const tableColumns = await getTableColumns(connection, "cs_buttons");
+
+  if (tableColumns.includes("parent_id")) {
+    for (const row of rows) {
+      const buttonId = idMap.get(Number(row.old_id));
+      const parentId = row.old_parent_id ? idMap.get(Number(row.old_parent_id)) : null;
+      if (buttonId && parentId) {
+        await connection.execute(
+          "UPDATE cs_buttons SET parent_id = ? WHERE id = ?",
+          [parentId, buttonId],
+        );
+      }
+    }
+  }
+
+  return { count: rows.length, idMap };
 }
 
 async function importCsStocks(connection, data, csIdMap) {
@@ -751,7 +812,7 @@ async function importCsStocks(connection, data, csIdMap) {
     })
     .filter(Boolean);
 
-  await bulkInsertRows(connection, "cs_stocks", rows, CS_STOCK_COLUMNS);
+  await bulkInsertTableRows(connection, "cs_stocks", rows, CS_STOCK_COLUMNS);
 
   if (rows.length === 0) {
     return { count: 0, idMap: new Map() };
@@ -773,7 +834,7 @@ async function importContacts(connection, userId, data) {
     ...compactRow(row, ["id", "user_id"]),
     user_id: userId,
   }));
-  await bulkInsertRows(connection, "customer_service_contacts", rows, CONTACT_COLUMNS);
+  await bulkInsertTableRows(connection, "customer_service_contacts", rows, CONTACT_COLUMNS);
   return rows.length;
 }
 
@@ -783,7 +844,7 @@ async function importGoogleAccounts(connection, userId, data) {
     user_id: userId,
     email: normalizeGoogleAccountEmailValue(row.email),
   }));
-  await bulkInsertRows(connection, "google_accounts", rows, GOOGLE_ACCOUNT_COLUMNS, {
+  await bulkInsertTableRows(connection, "google_accounts", rows, GOOGLE_ACCOUNT_COLUMNS, {
     onConflict: `ON CONFLICT (user_id, lower(email)) DO UPDATE SET
       total_slots = EXCLUDED.total_slots,
       created_at = EXCLUDED.created_at,
@@ -806,7 +867,7 @@ async function importGeminiPrices(connection, userId, data) {
     ...compactRow(row, ["id", "user_id"]),
     user_id: userId,
   }));
-  await bulkInsertRows(connection, "gemini_price_plans", rows, GEMINI_PRICE_COLUMNS, {
+  await bulkInsertTableRows(connection, "gemini_price_plans", rows, GEMINI_PRICE_COLUMNS, {
     onConflict: `ON CONFLICT (user_id, lower(label)) DO UPDATE SET
       duration_days = EXCLUDED.duration_days,
       price = EXCLUDED.price,
@@ -854,7 +915,7 @@ async function importBroadcasts(connection, userId, data, lookup) {
     };
   });
 
-  await bulkInsertRows(connection, "broadcasts", rows, BROADCAST_COLUMNS);
+  await bulkInsertTableRows(connection, "broadcasts", rows, BROADCAST_COLUMNS);
 
   if (rows.length === 0) {
     return { count: 0, idMap: new Map() };
@@ -898,16 +959,16 @@ async function importBroadcastRelations(connection, data, lookup, broadcastIdMap
     }
   }
 
-  await bulkInsertRows(connection, "broadcast_target_groups", targetGroups, BROADCAST_GROUP_COLUMNS, {
+  await bulkInsertTableRows(connection, "broadcast_target_groups", targetGroups, BROADCAST_GROUP_COLUMNS, {
     onConflict: "ON CONFLICT DO NOTHING",
   });
-  await bulkInsertRows(connection, "broadcast_excluded_groups", excludedGroups, BROADCAST_GROUP_COLUMNS, {
+  await bulkInsertTableRows(connection, "broadcast_excluded_groups", excludedGroups, BROADCAST_GROUP_COLUMNS, {
     onConflict: "ON CONFLICT DO NOTHING",
   });
-  await bulkInsertRows(connection, "broadcast_schedule_entries", schedules, BROADCAST_SCHEDULE_COLUMNS, {
+  await bulkInsertTableRows(connection, "broadcast_schedule_entries", schedules, BROADCAST_SCHEDULE_COLUMNS, {
     onConflict: "ON CONFLICT DO NOTHING",
   });
-  await bulkInsertRows(connection, "broadcast_target_bots", targetBots, BROADCAST_BOT_COLUMNS, {
+  await bulkInsertTableRows(connection, "broadcast_target_bots", targetBots, BROADCAST_BOT_COLUMNS, {
     onConflict: "ON CONFLICT DO NOTHING",
   });
 
@@ -924,7 +985,7 @@ async function importPushTemplates(connection, userId, data) {
     ...compactRow(row, ["id", "user_id"]),
     user_id: userId,
   }));
-  await bulkInsertRows(connection, "push_contact_templates", rows, PUSH_TEMPLATE_COLUMNS);
+  await bulkInsertTableRows(connection, "push_contact_templates", rows, PUSH_TEMPLATE_COLUMNS);
   return rows.length;
 }
 
@@ -942,7 +1003,7 @@ async function importGroupPushExclusions(connection, data, lookup) {
     })
     .filter((row) => row && row.phone_number);
 
-  await bulkInsertRows(connection, "group_push_exclusions", rows, GROUP_PUSH_EXCLUSION_COLUMNS, {
+  await bulkInsertTableRows(connection, "group_push_exclusions", rows, GROUP_PUSH_EXCLUSION_COLUMNS, {
     onConflict: "ON CONFLICT (group_id, phone_number) DO UPDATE SET label = EXCLUDED.label",
   });
   return rows.length;
@@ -959,7 +1020,7 @@ async function importTransactions(connection, userId, data, maps) {
     gemini_price_plan_id: row.gemini_price_plan_id ? maps.pricePlanIdMap.get(Number(row.gemini_price_plan_id)) ?? null : null,
   }));
 
-  await bulkInsertRows(connection, "cs_transactions", rows, TRANSACTION_COLUMNS);
+  await bulkInsertTableRows(connection, "cs_transactions", rows, TRANSACTION_COLUMNS);
 
   if (rows.length === 0) {
     return { count: 0, idMap: new Map() };
@@ -986,7 +1047,7 @@ async function importRelaySessions(connection, data, txIdMap) {
     })
     .filter(Boolean);
 
-  await bulkInsertRows(connection, "cs_relay_sessions", rows, RELAY_SESSION_COLUMNS);
+  await bulkInsertTableRows(connection, "cs_relay_sessions", rows, RELAY_SESSION_COLUMNS);
   return rows.length;
 }
 
@@ -1016,7 +1077,8 @@ async function importScopedForUser(user, payload) {
     const csResult = await importCustomerService(connection, userId, data);
     counts.customerService = csResult.count;
 
-    counts.csButtons = await importCsButtons(connection, data, csResult.idMap);
+    const buttonResult = await importCsButtons(connection, data, csResult.idMap);
+    counts.csButtons = buttonResult.count;
 
     const stockResult = await importCsStocks(connection, data, csResult.idMap);
     counts.csStocks = stockResult.count;

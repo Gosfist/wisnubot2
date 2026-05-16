@@ -18,14 +18,14 @@ const SYSTEM_PLACEHOLDERS = [
   ["{platform}", "Sumber transaksi: whatsapp, shopee, dll"],
   ["{saluran}", "Link saluran testimoni dari Settings"],
   ["{jam}", "Jam saat pesan dibuat"],
-  ["{tanggal}", "Tanggal saat pesan dibuat"],
+  ["{tanggal}", "Tanggal saat pesan dibuat, contoh 14-06-2026"],
   ["{doneAt}", "Tanggal dan jam transaksi selesai"],
-  ["{masaAktif}", "Durasi masa aktif"],
-  ["{activeStart}", "Tanggal mulai masa aktif"],
-  ["{activeExp}", "Tanggal expired masa aktif"],
-  ["{masaGaransi}", "Durasi masa garansi"],
-  ["{garansiStart}", "Tanggal mulai garansi"],
-  ["{garansiExp}", "Tanggal expired garansi"],
+  ["{masaAktif}", "Durasi masa aktif yang dibeli, contoh 30 Hari"],
+  ["{activeStart}", "Tanggal mulai masa aktif, contoh 14-06-2026"],
+  ["{activeExp}", "Tanggal expired masa aktif, contoh 14-06-2026"],
+  ["{masaGaransi}", "Durasi masa garansi, contoh 15 Hari"],
+  ["{garansiStart}", "Tanggal mulai garansi, contoh 14-06-2026"],
+  ["{garansiExp}", "Tanggal expired garansi, contoh 14-06-2026"],
 ];
 
 export function DocumentationPage() {

@@ -90,6 +90,24 @@ export async function createManualTransaction(req, res) {
           targetPhone,
         })
       : { sent: false, reason: null };
+    let testimonial = null;
+    if (item?.reportStatus === "selesai") {
+      try {
+        testimonial = await csPaymentService.sendTransactionTestimonialForUser({
+          user: req.user,
+          idTrx: item.idTrx,
+          sock: baileysManager.getSocket(req.user.id),
+          force: false,
+        });
+      } catch (err) {
+        logger.warn(err, "Send transaction testimonial after manual create failed");
+        testimonial = {
+          sent: false,
+          reason: err instanceof Error ? err.message : "Gagal mengirim testimoni",
+          idTrx: item.idTrx,
+        };
+      }
+    }
     realtimeService.emitTrxGeminiChanged(req.user.id, { source: "manual_transaction_create" });
     res.status(201).json({
       message: sendResult.sent
@@ -97,6 +115,7 @@ export async function createManualTransaction(req, res) {
         : "Transaksi berhasil disimpan",
       item,
       notification: sendResult,
+      testimonial,
     });
   } catch (err) {
     logger.error(err, "Create manual transaction error");

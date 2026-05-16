@@ -128,11 +128,16 @@ function formatDateId(value: string | null) {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "-";
-  return new Intl.DateTimeFormat("id-ID", {
+  const parts = new Intl.DateTimeFormat("id-ID", {
     day: "2-digit",
-    month: "short",
+    month: "2-digit",
     year: "numeric",
-  }).format(parsed);
+    timeZone: "Asia/Jakarta",
+  }).formatToParts(parsed);
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  return `${day}-${month}-${year}`;
 }
 
 function formatDateTimeId(value: string | null) {
@@ -172,7 +177,7 @@ export function renderTransactionMessageTemplate(
     status: transaction.status,
     saluran: context.saluran ?? "",
     linkSaluran: context.saluran ?? "",
-    tanggal: new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(now),
+    tanggal: formatDateId(now.toISOString()),
     jam: new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(now),
     doneAt: formatDateTimeId(transaction.completedAt ?? transaction.deliveredAt ?? transaction.paidAt),
     activeStart: formatDateId(transaction.activeStartAt),
@@ -182,8 +187,8 @@ export function renderTransactionMessageTemplate(
     garansiExp: formatDateId(transaction.warrantyExpiresAt),
     warrantyStart: formatDateId(transaction.warrantyStartAt),
     warrantyExp: formatDateId(transaction.warrantyExpiresAt),
-    masaAktif: transaction.activeDurationDays ? `${transaction.activeDurationDays} hari` : "-",
-    masaGaransi: transaction.warrantyDurationDays ? `${transaction.warrantyDurationDays} hari` : "-",
+    masaAktif: transaction.activeDurationDays ? `${transaction.activeDurationDays} Hari` : "-",
+    masaGaransi: transaction.warrantyDurationDays ? `${transaction.warrantyDurationDays} Hari` : "-",
   };
   for (const item of getCustomTransactionPlaceholders()) {
     data[item.slug] = item.value;

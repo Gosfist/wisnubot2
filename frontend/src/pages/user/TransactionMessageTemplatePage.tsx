@@ -68,7 +68,19 @@ export function TransactionMessageTemplatePage() {
     showToast("Placeholder disalin.", "success");
   }
 
-  const placeholders = ["{activeExp}", "{garansiExp}", "{idTrx}", "{akunGoogle}", "{emailBuyer}", "{nominal}", "{saluran}"];
+  const placeholders = [
+    "{masaAktif}",
+    "{activeStart}",
+    "{activeExp}",
+    "{masaGaransi}",
+    "{garansiStart}",
+    "{garansiExp}",
+    "{idTrx}",
+    "{akunGoogle}",
+    "{emailBuyer}",
+    "{nominal}",
+    "{saluran}",
+  ];
   const activeTemplate = templates[activeTab];
 
   return (
