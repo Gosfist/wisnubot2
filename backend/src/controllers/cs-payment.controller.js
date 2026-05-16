@@ -112,10 +112,55 @@ export async function updateTransactionReport(req, res) {
       req.body,
     );
     realtimeService.emitTrxGeminiChanged(req.user.id, { source: "transaction_report_update" });
-    res.json({ message: "Status laporan berhasil diperbarui", item });
+    let testimonial = null;
+    if (item?.reportStatus === "selesai") {
+      try {
+        testimonial = await csPaymentService.sendTransactionTestimonialForUser({
+          user: req.user,
+          idTrx: item.idTrx,
+          sock: baileysManager.getSocket(req.user.id),
+          force: false,
+        });
+      } catch (err) {
+        logger.warn(err, "Send transaction testimonial after report update failed");
+        testimonial = {
+          sent: false,
+          reason: err instanceof Error ? err.message : "Gagal mengirim testimoni",
+          idTrx: item.idTrx,
+        };
+      }
+    }
+
+    res.json({
+      message: "Status laporan berhasil diperbarui",
+      item,
+      testimonial,
+    });
   } catch (err) {
     logger.error(err, "Update transaction report error");
     res.status(400).json({ error: err instanceof Error ? err.message : "Gagal memperbarui laporan" });
+  }
+}
+
+export async function sendTransactionTestimonial(req, res) {
+  try {
+    const result = await csPaymentService.sendTransactionTestimonialForUser({
+      user: req.user,
+      idTrx: req.body?.idTrx ?? req.body?.id_trx ?? req.body?.orderId,
+      sock: baileysManager.getSocket(req.user.id),
+      force: req.body?.force === true || req.body?.force === "true",
+    });
+
+    res.status(result.sent ? 200 : 400).json({
+      message: result.sent ? "Testimoni berhasil dikirim ke saluran" : result.reason,
+      sent: result.sent,
+      reason: result.reason,
+      idTrx: result.idTrx,
+      preview: result.preview,
+    });
+  } catch (err) {
+    logger.error(err, "Send transaction testimonial error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Gagal mengirim testimoni" });
   }
 }
 

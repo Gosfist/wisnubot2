@@ -5,6 +5,7 @@ import {
   listPaidTransactions,
   pakasirWebhook,
   pakasirWebhookInfo,
+  sendTransactionTestimonial,
   updateTransactionReport,
   updateTransaction,
 } from "../controllers/cs-payment.controller.js";
@@ -15,6 +16,7 @@ const router = Router();
 
 router.get("/transactions", authenticate, listPaidTransactions);
 router.post("/transactions", authenticate, proofImageUploadMiddleware, createManualTransaction);
+router.post("/transactions/testimonial", authenticate, sendTransactionTestimonial);
 router.patch("/transactions/:transactionId/report", authenticate, updateTransactionReport);
 router.put("/transactions/:transactionId", authenticate, updateTransaction);
 router.delete("/transactions/:transactionId", authenticate, deleteTransaction);

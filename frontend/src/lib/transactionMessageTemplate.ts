@@ -40,6 +40,7 @@ export const CUSTOM_TRANSACTION_PLACEHOLDERS_STORAGE_KEY = "wisnubot2_custom_tra
 
 const DEFAULT_CUSTOM_TRANSACTION_PLACEHOLDERS: CustomTransactionPlaceholder[] = [
   { slug: "produkgemini", value: "Gemini" },
+  { slug: "produkcanva", value: "Canva" },
 ];
 
 export function normalizeCustomTransactionPlaceholderSlug(value: string) {
@@ -159,6 +160,8 @@ export function renderTransactionMessageTemplate(
     idtrx: transaction.idTrx,
     orderId: transaction.idTrx,
     produk: transaction.commandName ?? transaction.googleAccountEmail ?? "",
+    produkgemini: "Gemini",
+    produkcanva: "Canva",
     commandName: transaction.commandName ?? "",
     akunGoogle: transaction.googleAccountEmail ?? "",
     emailBuyer: transaction.buyerEmail ?? transaction.customerJid.replace("@s.whatsapp.net", ""),

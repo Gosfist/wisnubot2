@@ -6,7 +6,10 @@ import { googleDriveService } from "./google-drive.service.js";
 import { messageService } from "./message.service.js";
 import { realtimeService } from "./realtime.service.js";
 import { logger } from "../utils/logger.js";
-import { getNewsletterViewerRole, isNewsletterAdminRole } from "../utils/newsletter.js";
+import {
+  getNewsletterViewerRole,
+  isNewsletterAdminRole,
+} from "../utils/newsletter.js";
 
 const PAKASIR_BASE_URL = "https://app.pakasir.com";
 const PAID_STATUSES = new Set(["completed", "paid", "success"]);
@@ -76,7 +79,9 @@ function normalizeDurationDays(value) {
 }
 
 function normalizePlatform(value) {
-  const platform = String(value ?? "").trim().toLowerCase();
+  const platform = String(value ?? "")
+    .trim()
+    .toLowerCase();
   return platform || "whatsapp";
 }
 
@@ -85,19 +90,25 @@ function isValidManualPlatform(value) {
 }
 
 function normalizeActiveStatus(value) {
-  const status = String(value ?? "").trim().toLowerCase();
+  const status = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!status) return null;
   return status === "expired" ? "expired" : "aktif";
 }
 
 function normalizeOrderStatus(value) {
-  const status = String(value ?? "").trim().toLowerCase();
+  const status = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!status) return null;
   return status === "dikirim" ? "dikirim" : "selesai";
 }
 
 function normalizeReportStatus(value) {
-  const status = String(value ?? "").trim().toLowerCase();
+  const status = String(value ?? "")
+    .trim()
+    .toLowerCase();
   return status === "selesai" ? "selesai" : "proses";
 }
 
@@ -107,40 +118,83 @@ function normalizeReportStatusForPlatform(platform, value) {
     : "selesai";
 }
 
+function isReportReadyForTestimonial(value) {
+  return normalizeReportStatus(value) === "selesai";
+}
+
+function isPrivateTestimonialPlatform(value) {
+  return normalizePlatform(value) === "pribadi";
+}
+
 function mapPaidTransactionRow(row) {
   return {
     id: Number(row.id),
     idTrx: String(row.pakasir_order_id ?? ""),
-    paymentGatewayOrderId: row.pakasir_gateway_order_id ? String(row.pakasir_gateway_order_id) : null,
-    googleAccountId: row.google_account_id === null ? null : Number(row.google_account_id),
-    geminiPricePlanId: row.gemini_price_plan_id === null ? null : Number(row.gemini_price_plan_id),
+    paymentGatewayOrderId: row.pakasir_gateway_order_id
+      ? String(row.pakasir_gateway_order_id)
+      : null,
+    googleAccountId:
+      row.google_account_id === null ? null : Number(row.google_account_id),
+    geminiPricePlanId:
+      row.gemini_price_plan_id === null
+        ? null
+        : Number(row.gemini_price_plan_id),
     customerJid: String(row.customer_jid ?? ""),
     amount: Number(row.amount ?? 0),
     buyerCount: Math.max(1, Number(row.buyer_count ?? 1)),
     status: String(row.status ?? ""),
     orderStatus: row.order_status ? String(row.order_status) : null,
-    commandName: row.nama_perintah ? String(row.nama_perintah) : row.google_account_email ? String(row.google_account_email) : null,
-    googleAccountEmail: row.google_account_email ? String(row.google_account_email) : null,
+    commandName: row.nama_perintah
+      ? String(row.nama_perintah)
+      : row.google_account_email
+        ? String(row.google_account_email)
+        : null,
+    googleAccountEmail: row.google_account_email
+      ? String(row.google_account_email)
+      : null,
     buyerEmail: row.buyer_email ? String(row.buyer_email) : null,
     stockContent: row.stock_content ? String(row.stock_content) : null,
     platform: String(row.platform ?? "whatsapp"),
     activeStatus: normalizeActiveStatus(row.active_status),
     memberStatus: String(row.member_status ?? "anggota"),
     reportStatus: normalizeReportStatus(row.report_status),
-    proofDriveFileId: row.proof_drive_file_id ? String(row.proof_drive_file_id) : null,
+    proofDriveFileId: row.proof_drive_file_id
+      ? String(row.proof_drive_file_id)
+      : null,
     proofDriveUrl: row.proof_drive_url ? String(row.proof_drive_url) : null,
-    proofUploadedAt: row.proof_uploaded_at ? String(row.proof_uploaded_at) : null,
+    proofUploadedAt: row.proof_uploaded_at
+      ? String(row.proof_uploaded_at)
+      : null,
     isManual: Boolean(Number(row.is_manual ?? 0)),
-    activeDurationDays: row.active_duration_days === null ? null : Number(row.active_duration_days),
-    warrantyDurationDays: row.warranty_duration_days === null ? null : Number(row.warranty_duration_days),
+    activeDurationDays:
+      row.active_duration_days === null
+        ? null
+        : Number(row.active_duration_days),
+    warrantyDurationDays:
+      row.warranty_duration_days === null
+        ? null
+        : Number(row.warranty_duration_days),
     completedAt: row.completed_at ? String(row.completed_at) : null,
     activeStartAt: row.active_start_at ? String(row.active_start_at) : null,
-    activeExpiresAt: row.active_expires_at ? String(row.active_expires_at) : null,
-    warrantyStartAt: row.warranty_start_at ? String(row.warranty_start_at) : null,
-    warrantyExpiresAt: row.warranty_expires_at ? String(row.warranty_expires_at) : null,
-    warrantyStatus: String(row.warranty_status ?? "open") === "selesai" ? "selesai" : "open",
-    warrantyClaimedAt: row.warranty_claimed_at ? String(row.warranty_claimed_at) : null,
-    warrantyClaimStockId: row.warranty_claim_stock_id === null || row.warranty_claim_stock_id === undefined ? null : Number(row.warranty_claim_stock_id),
+    activeExpiresAt: row.active_expires_at
+      ? String(row.active_expires_at)
+      : null,
+    warrantyStartAt: row.warranty_start_at
+      ? String(row.warranty_start_at)
+      : null,
+    warrantyExpiresAt: row.warranty_expires_at
+      ? String(row.warranty_expires_at)
+      : null,
+    warrantyStatus:
+      String(row.warranty_status ?? "open") === "selesai" ? "selesai" : "open",
+    warrantyClaimedAt: row.warranty_claimed_at
+      ? String(row.warranty_claimed_at)
+      : null,
+    warrantyClaimStockId:
+      row.warranty_claim_stock_id === null ||
+      row.warranty_claim_stock_id === undefined
+        ? null
+        : Number(row.warranty_claim_stock_id),
     paidAt: row.paid_at ? String(row.paid_at) : null,
     deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
     createdAt: row.created_at ? String(row.created_at) : null,
@@ -148,7 +202,9 @@ function mapPaidTransactionRow(row) {
 }
 
 function normalizeBuyerEmail(value) {
-  const email = String(value ?? "").trim().toLowerCase();
+  const email = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!email) return "";
   if (!/^[^\s@,;]+@gmail\.com$/i.test(email)) {
     throw new Error("Email buyer harus berakhiran @gmail.com");
@@ -207,12 +263,34 @@ function buildLifecyclePatch(startValue, activeDays, warrantyDays) {
 
 function buildTemplateData(row) {
   const idTrx = String(row.pakasir_order_id ?? row.idTrx ?? row.id_trx ?? "");
-  const activeStartAt = row.active_start_at ?? row.activeStartAt ?? row.completed_at ?? row.completedAt ?? null;
-  const warrantyStartAt = row.warranty_start_at ?? row.warrantyStartAt ?? row.completed_at ?? row.completedAt ?? null;
+  const activeStartAt =
+    row.active_start_at ??
+    row.activeStartAt ??
+    row.completed_at ??
+    row.completedAt ??
+    null;
+  const warrantyStartAt =
+    row.warranty_start_at ??
+    row.warrantyStartAt ??
+    row.completed_at ??
+    row.completedAt ??
+    null;
   const activeExpiresAt = row.active_expires_at ?? row.activeExpiresAt ?? null;
-  const warrantyExpiresAt = row.warranty_expires_at ?? row.warrantyExpiresAt ?? null;
-  const completedAt = row.completed_at ?? row.completedAt ?? row.delivered_at ?? row.deliveredAt ?? null;
-  const stockContent = String(row.stock_content ?? row.stockContent ?? row.data_akun ?? row.dataAkun ?? "");
+  const warrantyExpiresAt =
+    row.warranty_expires_at ?? row.warrantyExpiresAt ?? null;
+  const completedAt =
+    row.completed_at ??
+    row.completedAt ??
+    row.delivered_at ??
+    row.deliveredAt ??
+    null;
+  const stockContent = String(
+    row.stock_content ??
+      row.stockContent ??
+      row.data_akun ??
+      row.dataAkun ??
+      "",
+  );
   const now = new Date();
 
   return {
@@ -221,18 +299,34 @@ function buildTemplateData(row) {
     orderId: idTrx,
     produk: String(row.nama_perintah ?? row.commandName ?? ""),
     produkgemini: "Gemini",
+    produkcanva: "Canva",
+    hargaproduk: inferTestimonialProduct(row),
     commandName: String(row.nama_perintah ?? row.commandName ?? ""),
-    akunGoogle: String(row.google_account_email ?? row.googleAccountEmail ?? ""),
+    akunGoogle: String(
+      row.google_account_email ?? row.googleAccountEmail ?? "",
+    ),
     emailBuyer: String(row.buyer_email ?? row.buyerEmail ?? ""),
-    nomorWa: String(row.customer_jid ?? row.customerJid ?? "").replace("@s.whatsapp.net", ""),
+    nomorWa: String(row.customer_jid ?? row.customerJid ?? "").replace(
+      "@s.whatsapp.net",
+      "",
+    ),
     customerJid: String(row.customer_jid ?? row.customerJid ?? ""),
     nominal: Number(row.amount ?? 0).toLocaleString("id-ID"),
     amount: String(row.amount ?? 0),
     platform: String(row.platform ?? "whatsapp"),
+    payment: formatPaymentLabel(row.platform ?? "whatsapp"),
+    paymentMethod: formatPaymentLabel(row.platform ?? "whatsapp"),
     status: String(row.status ?? ""),
-    saluran: String(row.testimonial_channel_link ?? row.testimonialChannelLink ?? ""),
-    linkSaluran: String(row.testimonial_channel_link ?? row.testimonialChannelLink ?? ""),
-    jam: new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(now),
+    saluran: String(
+      row.testimonial_channel_link ?? row.testimonialChannelLink ?? "",
+    ),
+    linkSaluran: String(
+      row.testimonial_channel_link ?? row.testimonialChannelLink ?? "",
+    ),
+    jam: new Intl.DateTimeFormat("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(now),
     tanggal: formatDateId(now),
     doneAt: formatDateId(completedAt, true),
     activeStart: formatDateId(activeStartAt),
@@ -245,34 +339,141 @@ function buildTemplateData(row) {
     dataAkun: stockContent,
     data_akun: stockContent,
     stockContent,
-    masaAktif: row.active_duration_days ? `${Number(row.active_duration_days)} hari` : "-",
-    masaGaransi: row.warranty_duration_days ? `${Number(row.warranty_duration_days)} hari` : "-",
+    masaAktif: row.active_duration_days
+      ? `${Number(row.active_duration_days)} hari`
+      : "-",
+    masaGaransi: row.warranty_duration_days
+      ? `${Number(row.warranty_duration_days)} hari`
+      : "-",
   };
 }
 
-function formatRupiah(value) {
+function formatPlatformLabel(value) {
+  const platform = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (platform === "whatsapp") return "WhatsApp";
+  if (platform === "shopee") return "Shopee";
+  if (platform === "pribadi") return "Pribadi";
+  return platform || "-";
+}
+
+function formatPaymentLabel(value) {
+  const platform = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (platform === "whatsapp") return "QRIS";
+  if (platform === "shopee") return "ShopeePay";
+  return "-";
+}
+
+function formatShortDateId(value) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  }).formatToParts(date);
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  return `${day}-${month}-${year}`;
+}
+
+function formatTestimonialPrice(value) {
   return Number(value ?? 0).toLocaleString("id-ID");
 }
 
-function maskBuyerNumber(jid) {
-  const digits = String(jid ?? "").replace("@s.whatsapp.net", "").replace(/\D/g, "");
-  if (!digits) return "-";
-  const local = digits.startsWith("62") ? `0${digits.slice(2)}` : digits;
-  if (local.length <= 6) return `${local.slice(0, 3)}***`;
-  return `${local.slice(0, Math.max(0, local.length - 3))}***`;
+function calculateInclusiveDays(startValue, endValue) {
+  if (!startValue || !endValue) return null;
+  const start = startValue instanceof Date ? startValue : new Date(startValue);
+  const end = endValue instanceof Date ? endValue : new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return Math.max(
+    1,
+    Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
+  );
+}
+
+function formatTestimonialActiveDuration(transaction) {
+  const days =
+    normalizeDurationDays(
+      transaction.active_duration_days ?? transaction.activeDurationDays,
+    ) ??
+    calculateInclusiveDays(
+      transaction.active_start_at ?? transaction.activeStartAt,
+      transaction.active_expires_at ?? transaction.activeExpiresAt,
+    );
+  return days ? `${days} Day` : "-";
+}
+
+function inferTestimonialProduct(transaction) {
+  const commandName = String(
+    transaction.nama_perintah ?? transaction.commandName ?? "",
+  ).trim();
+  const planLabel = String(
+    transaction.gemini_price_plan_label ??
+      transaction.geminiPricePlanLabel ??
+      "",
+  ).trim();
+  const source = `${commandName} ${planLabel}`.trim();
+  const lowered = source.toLowerCase();
+
+  if (lowered.includes("canva")) return "Canva";
+  if (
+    lowered.includes("gemini") ||
+    transaction.gemini_price_plan_id ||
+    transaction.geminiPricePlanId
+  ) {
+    return "Gemini";
+  }
+
+  return commandName.replace(/^\/+/, "") || planLabel || "-";
 }
 
 function buildTestimonialMessage(transaction) {
   return (
-    `idTrx: ${transaction.pakasir_order_id}\n` +
-    `Produk: /${transaction.nama_perintah ?? "-"}\n` +
-    `Harga: Rp ${formatRupiah(transaction.amount)}\n` +
-    `No Pembeli: ${maskBuyerNumber(transaction.customer_jid)}`
+    `Transaksi Berhasil\n` +
+    `==========================\n\n` +
+    `Rincian Produk` +
+    "```\n" +
+    `idTrx       : ${transaction.pakasir_order_id ?? transaction.idTrx ?? "-"}\n` +
+    `Harga       : ${formatTestimonialPrice(transaction.amount)}\n` +
+    `Produk      : ${inferTestimonialProduct(transaction)}\n` +
+    `Platform    : ${formatPlatformLabel(transaction.platform)}\n` +
+    `Payment     : ${formatPaymentLabel(transaction.platform)}\n` +
+    `Masa aktif  : ${formatTestimonialActiveDuration(transaction)}\n` +
+    `Start       : ${formatShortDateId(transaction.active_start_at ?? transaction.activeStartAt)}\n` +
+    `Expired     : ${formatShortDateId(transaction.active_expires_at ?? transaction.activeExpiresAt)}\n` +
+    "```\n" +
+    `==========================\n` +
+    `Terima Kasih Sudah Order\n` +
+    `🔥 WISNU STORE 🔥\n` +
+    `Semoga Jadi Langganan\n` +
+    `==========================`
   );
 }
 
-async function sendTransactionTestimonial(sock, transaction) {
-  if (!sock || !transaction || transaction.testimonial_sent_at) {
+function withLifecycleDates(transaction, lifecycle) {
+  return {
+    ...transaction,
+    completed_at: transaction.completed_at ?? lifecycle.completedAt,
+    active_start_at: transaction.active_start_at ?? lifecycle.activeStartAt,
+    active_expires_at:
+      transaction.active_expires_at ?? lifecycle.activeExpiresAt,
+    warranty_start_at:
+      transaction.warranty_start_at ?? lifecycle.warrantyStartAt,
+    warranty_expires_at:
+      transaction.warranty_expires_at ?? lifecycle.warrantyExpiresAt,
+  };
+}
+
+async function sendTransactionTestimonial(sock, transaction, options = {}) {
+  const force = Boolean(options.force);
+  if (!sock || !transaction || (!force && transaction.testimonial_sent_at)) {
     return false;
   }
 
@@ -283,16 +484,29 @@ async function sendTransactionTestimonial(sock, transaction) {
 
   const pool = getPool();
   const [currentRows] = await pool.execute(
-    "SELECT testimonial_sent_at FROM cs_transactions WHERE id = ? LIMIT 1",
+    "SELECT testimonial_sent_at, report_status, platform FROM cs_transactions WHERE id = ? LIMIT 1",
     [Number(transaction.id)],
   );
-  if (currentRows[0]?.testimonial_sent_at) {
+  const current = currentRows[0] ?? {};
+  if (
+    isPrivateTestimonialPlatform(current.platform ?? transaction.platform) ||
+    !isReportReadyForTestimonial(
+      current.report_status ?? transaction.report_status ?? transaction.reportStatus,
+    )
+  ) {
+    return false;
+  }
+  if (!force && current.testimonial_sent_at) {
     return false;
   }
 
   try {
     if (typeof sock.newsletterMetadata === "function") {
-      const metadata = await sock.newsletterMetadata("jid", channelJid, "ADMIN");
+      const metadata = await sock.newsletterMetadata(
+        "jid",
+        channelJid,
+        "ADMIN",
+      );
       const role = getNewsletterViewerRole(metadata);
       if (role && !isNewsletterAdminRole(role)) {
         await pool.execute(
@@ -307,14 +521,26 @@ async function sendTransactionTestimonial(sock, transaction) {
       }
     }
 
-    await sock.sendMessage(channelJid, { text: buildTestimonialMessage(transaction) });
-    await pool.execute(
-      "UPDATE cs_transactions SET testimonial_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND testimonial_sent_at IS NULL",
-      [Number(transaction.id)],
-    );
+    await sock.sendMessage(channelJid, {
+      text: buildTestimonialMessage(transaction),
+    });
+    if (force) {
+      await pool.execute(
+        "UPDATE cs_transactions SET testimonial_sent_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [Number(transaction.id)],
+      );
+    } else {
+      await pool.execute(
+        "UPDATE cs_transactions SET testimonial_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND testimonial_sent_at IS NULL",
+        [Number(transaction.id)],
+      );
+    }
     return true;
   } catch (err) {
-    logger.warn(err, `Testimonial channel send failed for ${transaction.pakasir_order_id}`);
+    logger.warn(
+      err,
+      `Testimonial channel send failed for ${transaction.pakasir_order_id}`,
+    );
     await pool.execute(
       "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
       [
@@ -331,17 +557,126 @@ function applyTemplate(text, row) {
   const source = String(text ?? "");
   if (!source) return "";
   const data = buildTemplateData(row);
-  const rendered = source.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_match, a, b) => {
-    const key = a || b;
-    return data[key] ?? data[key?.toLowerCase?.()] ?? "";
-  });
-  if (String(row?.platform ?? "").trim().toLowerCase() === "whatsapp") {
+  const rendered = source.replace(
+    /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}|\{\s*([a-zA-Z0-9_]+)\s*\}/g,
+    (_match, a, b) => {
+      const key = a || b;
+      return data[key] ?? data[key?.toLowerCase?.()] ?? "";
+    },
+  );
+  if (
+    String(row?.platform ?? "")
+      .trim()
+      .toLowerCase() === "whatsapp"
+  ) {
     return rendered
       .split(/\r?\n/)
       .filter((line) => !/^Platform\s*:\s*whatsapp\s*$/i.test(line.trim()))
       .join("\n");
   }
   return rendered;
+}
+
+async function findTestimonialTransactionForUser(userId, idTrx) {
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+            tx.amount, tx.status, tx.platform, tx.gemini_price_plan_id,
+            tx.active_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
+            tx.report_status, tx.testimonial_sent_at, cs.nama_perintah,
+            gp.label AS gemini_price_plan_label,
+            s.testimonial_channel_jid, s.testimonial_channel_name
+       FROM cs_transactions tx
+       LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+       LEFT JOIN gemini_price_plans gp ON gp.id = tx.gemini_price_plan_id
+       LEFT JOIN app_settings s ON s.user_id = tx.user_id
+      WHERE tx.user_id = ?
+        AND UPPER(tx.pakasir_order_id) = UPPER(?)
+      LIMIT 1`,
+    [Number(userId), String(idTrx)],
+  );
+  return rows[0] ?? null;
+}
+
+async function sendTransactionTestimonialForUser({
+  user,
+  idTrx,
+  sock,
+  force = false,
+}) {
+  const trxId = String(idTrx ?? "").trim();
+  if (!trxId) {
+    throw new Error("idTrx wajib diisi");
+  }
+
+  const transaction = await findTestimonialTransactionForUser(user.id, trxId);
+  if (!transaction) {
+    throw new Error(`Transaksi tidak ditemukan: ${trxId}`);
+  }
+
+  const message = buildTestimonialMessage(transaction);
+  const status = String(transaction.status ?? "")
+    .trim()
+    .toLowerCase();
+  const reportStatus = normalizeReportStatus(transaction.report_status);
+  if (!PAID_STATUSES.has(status)) {
+    return {
+      sent: false,
+      reason: `Transaksi belum sukses. Status: ${status || "-"}`,
+      preview: message,
+      idTrx: String(transaction.pakasir_order_id ?? trxId),
+    };
+  }
+  if (isPrivateTestimonialPlatform(transaction.platform)) {
+    return {
+      sent: false,
+      reason: "Platform pribadi tidak dikirim ke saluran testimoni.",
+      preview: message,
+      idTrx: String(transaction.pakasir_order_id ?? trxId),
+    };
+  }
+  if (!isReportReadyForTestimonial(reportStatus)) {
+    return {
+      sent: false,
+      reason: `Status laporan masih ${reportStatus}. Testimoni dikirim setelah laporan selesai.`,
+      preview: message,
+      idTrx: String(transaction.pakasir_order_id ?? trxId),
+    };
+  }
+  if (!force && transaction.testimonial_sent_at) {
+    return {
+      sent: false,
+      reason: "Testimoni transaksi ini sudah pernah dikirim.",
+      preview: message,
+      idTrx: String(transaction.pakasir_order_id ?? trxId),
+    };
+  }
+  if (!String(transaction.testimonial_channel_jid ?? "").trim()) {
+    return {
+      sent: false,
+      reason: "Saluran testimoni belum diatur atau belum terhubung.",
+      preview: message,
+      idTrx: String(transaction.pakasir_order_id ?? trxId),
+    };
+  }
+  if (!sock) {
+    return {
+      sent: false,
+      reason: "Bot utama belum online.",
+      preview: message,
+      idTrx: String(transaction.pakasir_order_id ?? trxId),
+    };
+  }
+
+  const sent = await sendTransactionTestimonial(sock, transaction, { force });
+  return {
+    sent,
+    reason: sent ? null : "Gagal mengirim testimoni ke saluran.",
+    preview: message,
+    idTrx: String(transaction.pakasir_order_id ?? trxId),
+  };
 }
 
 function renderPaymentSuccessText(transaction, fallback, stockContent = "") {
@@ -356,11 +691,24 @@ function renderPaymentSuccessText(transaction, fallback, stockContent = "") {
 
 function getTransactionMessageTemplateForPlatform(value, platform) {
   const raw = String(value ?? "").trim();
-  const key = String(platform ?? "").trim().toLowerCase() === "whatsapp" ? "whatsapp" : "shopee";
-  if (!raw) return key === "whatsapp" ? DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE : DEFAULT_TRANSACTION_MESSAGE_TEMPLATE;
+  const key =
+    String(platform ?? "")
+      .trim()
+      .toLowerCase() === "whatsapp"
+      ? "whatsapp"
+      : "shopee";
+  if (!raw)
+    return key === "whatsapp"
+      ? DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE
+      : DEFAULT_TRANSACTION_MESSAGE_TEMPLATE;
   try {
     const parsed = JSON.parse(raw);
-    return String(parsed?.[key] ?? "").trim() || (key === "whatsapp" ? DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE : DEFAULT_TRANSACTION_MESSAGE_TEMPLATE);
+    return (
+      String(parsed?.[key] ?? "").trim() ||
+      (key === "whatsapp"
+        ? DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE
+        : DEFAULT_TRANSACTION_MESSAGE_TEMPLATE)
+    );
   } catch {
     return raw;
   }
@@ -383,7 +731,14 @@ function buildPaymentView(row) {
     ? Number(row.total_payment)
     : price + adminFee;
 
-  const idTrx = String(row.pakasir_order_id ?? row.idTrx ?? row.id_trx ?? row.orderId ?? row.order_id ?? "");
+  const idTrx = String(
+    row.pakasir_order_id ??
+      row.idTrx ??
+      row.id_trx ??
+      row.orderId ??
+      row.order_id ??
+      "",
+  );
   const createdAt = row.created_at ?? row.createdAt ?? null;
   const createdMs = createdAt ? new Date(createdAt).getTime() : NaN;
   const expiresAt = Number.isNaN(createdMs)
@@ -392,7 +747,9 @@ function buildPaymentView(row) {
   return {
     idTrx,
     orderId: idTrx,
-    paymentGatewayOrderId: row.pakasir_gateway_order_id ? String(row.pakasir_gateway_order_id) : null,
+    paymentGatewayOrderId: row.pakasir_gateway_order_id
+      ? String(row.pakasir_gateway_order_id)
+      : null,
     paymentUrl: String(row.pakasir_payment_url ?? row.paymentUrl ?? ""),
     qrisString: row.qris_string ? String(row.qris_string) : null,
     amount: price,
@@ -491,11 +848,15 @@ async function closePendingTransaction(transaction, status) {
     await cancelPakasirTransaction({
       slug: transaction.pakasir_slug,
       apiKey: transaction.pakasir_api_key,
-      orderId: transaction.pakasir_gateway_order_id || transaction.pakasir_order_id,
+      orderId:
+        transaction.pakasir_gateway_order_id || transaction.pakasir_order_id,
       amount: transaction.amount,
     });
   } catch (err) {
-    logger.warn(err, `Pakasir cancel failed for ${transaction.pakasir_order_id}`);
+    logger.warn(
+      err,
+      `Pakasir cancel failed for ${transaction.pakasir_order_id}`,
+    );
   }
 
   await pool.execute(
@@ -506,16 +867,22 @@ async function closePendingTransaction(transaction, status) {
 }
 
 function schedulePendingExpiry(transaction) {
-  const createdAt = transaction?.created_at ?? transaction?.createdAt ?? Date.now();
+  const createdAt =
+    transaction?.created_at ?? transaction?.createdAt ?? Date.now();
   const createdMs = new Date(createdAt).getTime();
   const delayMs = Math.max(
     0,
-    (Number.isNaN(createdMs) ? Date.now() : createdMs) + PAYMENT_EXPIRY_MS - Date.now(),
+    (Number.isNaN(createdMs) ? Date.now() : createdMs) +
+      PAYMENT_EXPIRY_MS -
+      Date.now(),
   );
 
   const timer = setTimeout(() => {
     closePendingTransaction(transaction, "expired").catch((err) => {
-      logger.warn(err, `Failed to expire transaction ${transaction?.pakasir_order_id ?? "-"}`);
+      logger.warn(
+        err,
+        `Failed to expire transaction ${transaction?.pakasir_order_id ?? "-"}`,
+      );
     });
   }, delayMs);
 
@@ -548,7 +915,10 @@ async function findPendingTransactionsForCustomer(userId, customerJid) {
 }
 
 async function enforcePendingTransactionLock(userId, customerJid) {
-  const pendingRows = await findPendingTransactionsForCustomer(userId, customerJid);
+  const pendingRows = await findPendingTransactionsForCustomer(
+    userId,
+    customerJid,
+  );
   for (const row of pendingRows) {
     if (isPaymentExpired(row)) {
       await closePendingTransaction(row, "expired");
@@ -585,7 +955,12 @@ async function getEntryForUser(userId, csId, buttonId = null) {
   return row;
 }
 
-async function createBuyTransaction({ userId, csId, buttonId = null, customerJid }) {
+async function createBuyTransaction({
+  userId,
+  csId,
+  buttonId = null,
+  customerJid,
+}) {
   const entry = await getEntryForUser(userId, csId, buttonId);
   if (!entry) {
     throw new Error("Produk customer service tidak ditemukan");
@@ -632,15 +1007,19 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
   const totalPayment = Number.isFinite(Number(pakasirPayment.total_payment))
     ? Number(pakasirPayment.total_payment)
     : price + adminFee;
-  const paymentUrl = buildPaymentUrl(settings.pakasirSlug, price, gatewayOrderId);
+  const paymentUrl = buildPaymentUrl(
+    settings.pakasirSlug,
+    price,
+    gatewayOrderId,
+  );
 
   const pool = getPool();
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
          qris_string, amount, platform, active_duration_days, warranty_duration_days,
-         pakasir_gateway_order_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         pakasir_gateway_order_id, report_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(userId),
       Number(csId),
@@ -653,6 +1032,7 @@ async function createBuyTransaction({ userId, csId, buttonId = null, customerJid
       normalizeDurationDays(entry.active_duration_days),
       normalizeDurationDays(entry.warranty_duration_days),
       gatewayOrderId,
+      "selesai",
     ],
   );
   if (insertResult.insertId) {
@@ -713,16 +1093,18 @@ async function createOwnerManualTransaction({
     entry.warranty_duration_days,
   );
   const targetJid = normalizeJid(customerJid) || String(ownerJid);
+  const normalizedPlatform = normalizePlatform(platform);
+  const reportStatus = normalizeReportStatusForPlatform(normalizedPlatform);
 
   const pool = getPool();
   const settings = await appSettingsService.getRawForUserId(userId);
   const [insertResult] = await pool.execute(
     `INSERT INTO cs_transactions
        (user_id, cs_id, customer_jid, pakasir_order_id, pakasir_payment_url,
-        qris_string, amount, status, paid_at, delivered_at, platform, is_manual,
+        qris_string, amount, status, paid_at, delivered_at, platform, report_status, is_manual,
         active_duration_days, warranty_duration_days, completed_at, active_start_at,
         active_expires_at, warranty_start_at, warranty_expires_at)
-     VALUES (?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, NULL, NULL, ?, 'paid', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Number(userId),
       Number(csId),
@@ -731,7 +1113,8 @@ async function createOwnerManualTransaction({
       price,
       completedAt,
       completedAt,
-      normalizePlatform(platform),
+      normalizedPlatform,
+      reportStatus,
       normalizeDurationDays(entry.active_duration_days),
       normalizeDurationDays(entry.warranty_duration_days),
       lifecycle.completedAt,
@@ -741,7 +1124,9 @@ async function createOwnerManualTransaction({
       lifecycle.warrantyExpiresAt,
     ],
   );
-  realtimeService.emitTrxGeminiChanged(userId, { source: "owner_manual_transaction_create" });
+  realtimeService.emitTrxGeminiChanged(userId, {
+    source: "owner_manual_transaction_create",
+  });
 
   return {
     id: Number(insertResult.insertId ?? 0),
@@ -755,10 +1140,16 @@ async function createOwnerManualTransaction({
     orderId,
     amount: price,
     price,
-    platform: normalizePlatform(platform),
+    platform: normalizedPlatform,
+    report_status: reportStatus,
+    reportStatus,
     commandName: String(entry.nama_perintah ?? ""),
-    activeExpiresAt: lifecycle.activeExpiresAt ? lifecycle.activeExpiresAt.toISOString() : null,
-    warrantyExpiresAt: lifecycle.warrantyExpiresAt ? lifecycle.warrantyExpiresAt.toISOString() : null,
+    activeExpiresAt: lifecycle.activeExpiresAt
+      ? lifecycle.activeExpiresAt.toISOString()
+      : null,
+    warrantyExpiresAt: lifecycle.warrantyExpiresAt
+      ? lifecycle.warrantyExpiresAt.toISOString()
+      : null,
   };
 }
 
@@ -788,7 +1179,7 @@ async function findTransaction(orderId, amount) {
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
             tx.pakasir_gateway_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
-            tx.platform, tx.active_duration_days, tx.warranty_duration_days,
+            tx.platform, tx.report_status, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt, cs.payment_success_text,
@@ -813,7 +1204,7 @@ async function findTransactionByOrderForUser(userId, orderId) {
     `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
             tx.pakasir_gateway_order_id,
             tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
-            tx.platform, tx.active_duration_days, tx.warranty_duration_days,
+            tx.platform, tx.report_status, tx.active_duration_days, tx.warranty_duration_days,
             tx.completed_at, tx.active_start_at, tx.active_expires_at,
             tx.warranty_start_at, tx.warranty_expires_at,
             cs.nama_perintah, cs.delivery_mode, cs.relay_prompt, cs.payment_success_text,
@@ -898,7 +1289,9 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
       WHERE id = ?`,
     [Number(tx.id)],
   );
-  realtimeService.emitTrxGeminiChanged(tx.user_id, { source: "transaction_paid" });
+  realtimeService.emitTrxGeminiChanged(tx.user_id, {
+    source: "transaction_paid",
+  });
 
   return {
     paid: true,
@@ -907,7 +1300,13 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
   };
 }
 
-async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, sock }) {
+async function checkAndDeliverPayment({
+  userId,
+  idTrx,
+  orderId,
+  customerJid,
+  sock,
+}) {
   const trxId = idTrx ?? orderId;
   const tx = await findTransactionByOrderForUser(userId, trxId);
   if (!tx) {
@@ -940,8 +1339,7 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
         sock,
         null,
         String(tx.customer_jid),
-        tx.relay_prompt ||
-          "Pembayaran berhasil. Pesanan kamu sudah diproses.",
+        tx.relay_prompt || "Pembayaran berhasil. Pesanan kamu sudah diproses.",
       );
       return { paid: true, reason: null, transaction: buildPaymentView(tx) };
     }
@@ -980,7 +1378,9 @@ async function checkAndDeliverPayment({ userId, idTrx, orderId, customerJid, soc
       WHERE id = ?`,
     [Number(tx.id)],
   );
-  realtimeService.emitTrxGeminiChanged(userId, { source: "transaction_paid_check" });
+  realtimeService.emitTrxGeminiChanged(userId, {
+    source: "transaction_paid_check",
+  });
 
   await deliverPaidTransaction(sock, { ...tx, status: "paid" });
   return { paid: true, reason: null, transaction: buildPaymentView(tx) };
@@ -1019,12 +1419,18 @@ async function cancelTransactionForCustomer({ userId, idTrx, customerJid }) {
     return {
       cancelled: true,
       paid: false,
-      message: tx.status === "expired" ? "Transaksi sudah expired." : "Transaksi sudah dibatalkan.",
+      message:
+        tx.status === "expired"
+          ? "Transaksi sudah expired."
+          : "Transaksi sudah dibatalkan.",
       transaction: buildPaymentView(tx),
     };
   }
 
-  await closePendingTransaction(tx, isPaymentExpired(tx) ? "expired" : "failed");
+  await closePendingTransaction(
+    tx,
+    isPaymentExpired(tx) ? "expired" : "failed",
+  );
   return {
     cancelled: true,
     paid: false,
@@ -1069,26 +1475,41 @@ async function claimWarrantyForCustomer({ userId, idTrx, customerJid }) {
 
     if (customerJid && String(tx.customer_jid) !== String(customerJid)) {
       await conn.rollback();
-      return { claimed: false, message: "Transaksi ini bukan milik nomor kamu." };
+      return {
+        claimed: false,
+        message: "Transaksi ini bukan milik nomor kamu.",
+      };
     }
 
     if (String(tx.status) !== "paid") {
       await conn.rollback();
-      return { claimed: false, message: "Garansi hanya bisa diklaim setelah transaksi sukses." };
+      return {
+        claimed: false,
+        message: "Garansi hanya bisa diklaim setelah transaksi sukses.",
+      };
     }
 
     if (String(tx.warranty_status ?? "open") === "selesai") {
       await conn.rollback();
-      return { claimed: false, message: `Garansi ${tx.pakasir_order_id} sudah selesai atau sudah pernah diklaim.` };
+      return {
+        claimed: false,
+        message: `Garansi ${tx.pakasir_order_id} sudah selesai atau sudah pernah diklaim.`,
+      };
     }
 
     if (!tx.warranty_expires_at) {
       await conn.rollback();
-      return { claimed: false, message: "Transaksi ini tidak memiliki masa garansi." };
+      return {
+        claimed: false,
+        message: "Transaksi ini tidak memiliki masa garansi.",
+      };
     }
 
     const warrantyExpiresAt = new Date(tx.warranty_expires_at);
-    if (Number.isNaN(warrantyExpiresAt.getTime()) || warrantyExpiresAt.getTime() < Date.now()) {
+    if (
+      Number.isNaN(warrantyExpiresAt.getTime()) ||
+      warrantyExpiresAt.getTime() < Date.now()
+    ) {
       await conn.rollback();
       return {
         claimed: false,
@@ -1098,7 +1519,10 @@ async function claimWarrantyForCustomer({ userId, idTrx, customerJid }) {
 
     if (!tx.cs_id) {
       await conn.rollback();
-      return { claimed: false, message: "Produk transaksi tidak ditemukan untuk claim garansi." };
+      return {
+        claimed: false,
+        message: "Produk transaksi tidak ditemukan untuk claim garansi.",
+      };
     }
 
     const [stockRows] = await conn.execute(
@@ -1120,10 +1544,9 @@ async function claimWarrantyForCustomer({ userId, idTrx, customerJid }) {
       };
     }
 
-    await conn.execute(
-      `DELETE FROM cs_stocks WHERE id = ? AND is_used = 0`,
-      [Number(stock.id)],
-    );
+    await conn.execute(`DELETE FROM cs_stocks WHERE id = ? AND is_used = 0`, [
+      Number(stock.id),
+    ]);
     await conn.execute(
       `UPDATE cs_transactions
           SET warranty_status = 'selesai',
@@ -1157,8 +1580,17 @@ async function deliverPaidTransaction(sock, transaction) {
     return false;
   }
 
+  const deliveryLifecycle = buildLifecyclePatch(
+    new Date(),
+    transaction.active_duration_days,
+    transaction.warranty_duration_days,
+  );
+
   if (transaction.delivered_at) {
-    await sendTransactionTestimonial(sock, transaction);
+    await sendTransactionTestimonial(
+      sock,
+      withLifecycleDates(transaction, deliveryLifecycle),
+    );
     return true;
   }
 
@@ -1167,11 +1599,6 @@ async function deliverPaidTransaction(sock, transaction) {
   const csId = Number(transaction.cs_id);
   const customerJid = String(transaction.customer_jid);
   const mode = String(transaction.delivery_mode ?? "none");
-  const deliveryLifecycle = buildLifecyclePatch(
-    new Date(),
-    transaction.active_duration_days,
-    transaction.warranty_duration_days,
-  );
 
   if (mode === "stock") {
     const stock = await csStockService.reserveOne(csId, customerJid);
@@ -1213,7 +1640,10 @@ async function deliverPaidTransaction(sock, transaction) {
         stock.content,
       ),
     );
-    await sendTransactionTestimonial(sock, transaction);
+    await sendTransactionTestimonial(
+      sock,
+      withLifecycleDates(transaction, deliveryLifecycle),
+    );
     return true;
   }
 
@@ -1268,7 +1698,10 @@ async function deliverPaidTransaction(sock, transaction) {
       "Pembayaran berhasil. Pesanan kamu sedang diproses.",
     ),
   );
-  await sendTransactionTestimonial(sock, transaction);
+  await sendTransactionTestimonial(
+    sock,
+    withLifecycleDates(transaction, deliveryLifecycle),
+  );
   return true;
 }
 
@@ -1329,19 +1762,18 @@ async function handleCustomerRelayInput({ userId, customerJid, text, sock }) {
   const ownerInstruction =
     session.relay_owner_instruction ||
     "Reply pesan ini dengan jawaban done jika selesai.";
-  const ownerMessage =
-    applyTemplate(
-      `Transaksi customer service perlu diproses.\n\n` +
-        `idTrx: {idTrx}\n` +
-        `Produk: /{produk}\n` +
-        `Nomor WA: {nomorWa}\n` +
-        `Platform: {platform}\n` +
-        `Nominal: Rp {nominal}\n\n` +
-        `Status Pembayaran: Paid\n\n` +
-        `Text: ${text}\n\n` +
-        ownerInstruction,
-      session,
-    );
+  const ownerMessage = applyTemplate(
+    `Transaksi customer service perlu diproses.\n\n` +
+      `idTrx: {idTrx}\n` +
+      `Produk: /{produk}\n` +
+      `Nomor WA: {nomorWa}\n` +
+      `Platform: {platform}\n` +
+      `Nominal: Rp {nominal}\n\n` +
+      `Status Pembayaran: Paid\n\n` +
+      `Text: ${text}\n\n` +
+      ownerInstruction,
+    session,
+  );
 
   const sent = await sock.sendMessage(ownerJid, { text: ownerMessage });
   const ownerMsgId = sent?.key?.id ?? null;
@@ -1465,13 +1897,13 @@ async function handleOwnerDone({
     String(session.customer_jid),
     applyTemplate(
       `idTrx: {idTrx}\n` +
-      `Produk: /{produk}\n` +
-      `Status: Done\n` +
-      `Masa Aktif: {masaAktif}\n` +
-      `Exp Aktif: {activeExp}\n` +
-      `Masa Garansi: {masaGaransi}\n` +
-      `Exp Garansi: {garansiExp}\n` +
-      `\nText: ${doneText}`,
+        `Produk: /{produk}\n` +
+        `Status: Done\n` +
+        `Masa Aktif: {masaAktif}\n` +
+        `Exp Aktif: {activeExp}\n` +
+        `Masa Garansi: {masaGaransi}\n` +
+        `Exp Garansi: {garansiExp}\n` +
+        `\nText: ${doneText}`,
       completedSession,
     ),
   );
@@ -1560,43 +1992,104 @@ async function generateWhatsappManualIdTrx(userId) {
 }
 
 async function createManualTransactionForUser(user, payload) {
-  const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
-  const pricePlanId = Number(payload.pricePlanId ?? payload.geminiPricePlanId ?? payload.gemini_price_plan_id ?? 0);
+  const googleAccountId = Number(
+    payload.googleAccountId ?? payload.google_account_id ?? 0,
+  );
+  const pricePlanId = Number(
+    payload.pricePlanId ??
+      payload.geminiPricePlanId ??
+      payload.gemini_price_plan_id ??
+      0,
+  );
   const platform = normalizePlatform(payload.platform || "shopee");
-  const idTrx = platform === "whatsapp"
-    ? await generateWhatsappManualIdTrx(user.id)
-    : String(payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "").trim();
-  const { buyerEmail, buyerCount } = normalizeBuyerEmailList(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
-  const customerJid = normalizeCustomerJid(
-    payload.phoneNumber ?? payload.phone_number ?? payload.noHp ?? payload.no_hp ?? payload.waNumber ?? payload.wa_number ?? payload.customerJid ?? payload.customer_jid,
-  ) || buyerEmail;
-  const pricePlan = pricePlanId ? await geminiPriceService.getActiveForUser(user.id, pricePlanId) : null;
+  const idTrx =
+    platform === "whatsapp"
+      ? await generateWhatsappManualIdTrx(user.id)
+      : String(
+          payload.idTrx ?? payload.noPesanan ?? payload.no_pesanan ?? "",
+        ).trim();
+  const { buyerEmail, buyerCount } = normalizeBuyerEmailList(
+    payload.buyerEmail ?? payload.email ?? payload.buyer_email,
+  );
+  const customerJid =
+    normalizeCustomerJid(
+      payload.phoneNumber ??
+        payload.phone_number ??
+        payload.noHp ??
+        payload.no_hp ??
+        payload.waNumber ??
+        payload.wa_number ??
+        payload.customerJid ??
+        payload.customer_jid,
+    ) || buyerEmail;
+  const pricePlan = pricePlanId
+    ? await geminiPriceService.getActiveForUser(user.id, pricePlanId)
+    : null;
   if (pricePlanId && !pricePlan) {
     throw new Error("Paket harga tidak ditemukan atau non aktif");
   }
   const activeDurationDays = pricePlan
     ? normalizeDurationDays(pricePlan.durationDays)
-    : normalizeDurationDays(payload.activeDurationDays ?? payload.masaAktif ?? 30) ?? 30;
+    : (normalizeDurationDays(
+        payload.activeDurationDays ?? payload.masaAktif ?? 30,
+      ) ?? 30);
   const payloadAmount = Number(payload.amount);
-  const amount = Number.isFinite(payloadAmount) && payloadAmount >= 0
-    ? Math.floor(payloadAmount)
-    : pricePlan ? Number(pricePlan.price) * buyerCount : 0;
+  const amount =
+    Number.isFinite(payloadAmount) && payloadAmount >= 0
+      ? Math.floor(payloadAmount)
+      : pricePlan
+        ? Number(pricePlan.price) * buyerCount
+        : 0;
   const warrantyDurationDays = Math.max(1, Math.floor(activeDurationDays / 2));
-  const startAt = parseManualStartDate(payload.startDate ?? payload.start ?? payload.activeStartAt);
-  const lifecycle = buildLifecyclePatch(startAt, activeDurationDays, warrantyDurationDays);
-  const activeStartAt = parseManualNullableDate(payload.activeStartAt ?? payload.active_start_at) ?? lifecycle.activeStartAt;
-  const activeExpiresAt = parseManualNullableDate(payload.activeExpiresAt ?? payload.active_expires_at) ?? lifecycle.activeExpiresAt;
-  const warrantyStartAt = parseManualNullableDate(payload.warrantyStartAt ?? payload.warranty_start_at) ?? lifecycle.warrantyStartAt;
-  const warrantyExpiresAt = parseManualNullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at) ?? lifecycle.warrantyExpiresAt;
-  const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
-  const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
-  const orderStatus = normalizeOrderStatus(payload.orderStatus ?? payload.order_status ?? payload.statusText);
-  const reportStatus = normalizeReportStatusForPlatform(platform, payload.reportStatus ?? payload.report_status);
+  const startAt = parseManualStartDate(
+    payload.startDate ?? payload.start ?? payload.activeStartAt,
+  );
+  const lifecycle = buildLifecyclePatch(
+    startAt,
+    activeDurationDays,
+    warrantyDurationDays,
+  );
+  const activeStartAt =
+    parseManualNullableDate(payload.activeStartAt ?? payload.active_start_at) ??
+    lifecycle.activeStartAt;
+  const activeExpiresAt =
+    parseManualNullableDate(
+      payload.activeExpiresAt ?? payload.active_expires_at,
+    ) ?? lifecycle.activeExpiresAt;
+  const warrantyStartAt =
+    parseManualNullableDate(
+      payload.warrantyStartAt ?? payload.warranty_start_at,
+    ) ?? lifecycle.warrantyStartAt;
+  const warrantyExpiresAt =
+    parseManualNullableDate(
+      payload.warrantyExpiresAt ?? payload.warranty_expires_at,
+    ) ?? lifecycle.warrantyExpiresAt;
+  const activeStatus = normalizeActiveStatus(
+    payload.activeStatus ?? payload.active_status,
+  );
+  const memberStatus =
+    String(payload.memberStatus ?? payload.member_status ?? "anggota")
+      .trim()
+      .toLowerCase() === "kick"
+      ? "kick"
+      : "anggota";
+  const orderStatus = normalizeOrderStatus(
+    payload.orderStatus ?? payload.order_status ?? payload.statusText,
+  );
+  const reportStatus = normalizeReportStatusForPlatform(
+    platform,
+    payload.reportStatus ?? payload.report_status,
+  );
   const now = new Date();
 
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
   if (!pricePlanId) throw new Error("Paket harga wajib dipilih");
-  if (!idTrx) throw new Error(platform === "shopee" ? "ID pesanan Shopee wajib diisi" : "No pesanan wajib diisi");
+  if (!idTrx)
+    throw new Error(
+      platform === "shopee"
+        ? "ID pesanan Shopee wajib diisi"
+        : "No pesanan wajib diisi",
+    );
   if (!buyerEmail) throw new Error("Email buyer wajib diisi");
   if (!isValidManualPlatform(platform)) {
     throw new Error("Platform tidak valid");
@@ -1622,8 +2115,12 @@ async function createManualTransactionForUser(user, payload) {
   let proofUpload = null;
   if (payload.proofImage?.buffer) {
     const settings = await appSettingsService.getRawForUserId(user.id);
-    const originalName = String(payload.proofImage.originalname ?? "bukti-transaksi.jpg");
-    const extension = originalName.includes(".") ? originalName.split(".").pop() : "jpg";
+    const originalName = String(
+      payload.proofImage.originalname ?? "bukti-transaksi.jpg",
+    );
+    const extension = originalName.includes(".")
+      ? originalName.split(".").pop()
+      : "jpg";
     proofUpload = await googleDriveService.uploadImage({
       oauthClientId: settings.googleDriveClientId,
       oauthClientSecret: settings.googleDriveClientSecret,
@@ -1691,8 +2188,15 @@ async function createManualTransactionForUser(user, payload) {
   return mapPaidTransactionRow({ ...rows[0], stock_content: null });
 }
 
-async function sendManualTransactionTemplate({ user, transaction, sock, targetPhone }) {
-  const targetJid = normalizeCustomerJid(targetPhone) || normalizeCustomerJid(transaction?.customerJid);
+async function sendManualTransactionTemplate({
+  user,
+  transaction,
+  sock,
+  targetPhone,
+}) {
+  const targetJid =
+    normalizeCustomerJid(targetPhone) ||
+    normalizeCustomerJid(transaction?.customerJid);
   if (!targetJid) {
     return { sent: false, reason: "Nomor WA kosong" };
   }
@@ -1709,7 +2213,12 @@ async function sendManualTransactionTemplate({ user, transaction, sock, targetPh
     ...transaction,
     testimonialChannelLink: settings.testimonialChannelLink,
   });
-  const sent = await messageService.sendCustomerServiceMessage(sock, null, targetJid, text);
+  const sent = await messageService.sendCustomerServiceMessage(
+    sock,
+    null,
+    targetJid,
+    text,
+  );
   return {
     sent,
     reason: sent ? null : "Gagal mengirim template ke nomor WA",
@@ -1720,7 +2229,8 @@ function normalizePhone(value) {
   const digits = String(value ?? "").replace(/\D/g, "");
   if (!digits) return "";
   if (digits.startsWith("62")) return digits;
-  if (digits.startsWith("0") && digits.length > 1) return `62${digits.slice(1)}`;
+  if (digits.startsWith("0") && digits.length > 1)
+    return `62${digits.slice(1)}`;
   if (digits.startsWith("8")) return `62${digits}`;
   return digits;
 }
@@ -1738,7 +2248,9 @@ function nullableDate(value) {
   const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (slashMatch) {
     const [, day, month, year] = slashMatch;
-    return new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00+07:00`).toISOString();
+    return new Date(
+      `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00+07:00`,
+    ).toISOString();
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return new Date(`${raw}T00:00:00+07:00`).toISOString();
@@ -1748,27 +2260,57 @@ function nullableDate(value) {
 }
 
 async function updateTransactionForUser(user, transactionId, payload) {
-  if (String(payload.mode ?? payload.type ?? "").trim().toLowerCase() === "bot_wa") {
+  if (
+    String(payload.mode ?? payload.type ?? "")
+      .trim()
+      .toLowerCase() === "bot_wa"
+  ) {
     return updateBotWaTransactionForUser(user, transactionId, payload);
   }
 
   const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
-  const googleAccountId = Number(payload.googleAccountId ?? payload.google_account_id ?? 0);
-  const { buyerEmail, buyerCount } = normalizeBuyerEmailList(payload.buyerEmail ?? payload.email ?? payload.buyer_email);
-  const customerJid = buyerEmail || normalizeCustomerJid(payload.noBuyer ?? payload.customerJid ?? payload.customer_jid);
+  const googleAccountId = Number(
+    payload.googleAccountId ?? payload.google_account_id ?? 0,
+  );
+  const { buyerEmail, buyerCount } = normalizeBuyerEmailList(
+    payload.buyerEmail ?? payload.email ?? payload.buyer_email,
+  );
+  const customerJid =
+    buyerEmail ||
+    normalizeCustomerJid(
+      payload.noBuyer ?? payload.customerJid ?? payload.customer_jid,
+    );
   const platform = normalizePlatform(payload.platform || "shopee");
-  const memberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").trim().toLowerCase() === "kick" ? "kick" : "anggota";
-  const reportStatus = normalizeReportStatusForPlatform(platform, payload.reportStatus ?? payload.report_status);
-  const amountRaw = payload.amount === undefined ? null : Number(payload.amount);
-  const activeStatus = normalizeActiveStatus(payload.activeStatus ?? payload.active_status);
-  const activeStartAt = nullableDate(payload.activeStartAt ?? payload.active_start_at);
-  const activeExpiresAt = nullableDate(payload.activeExpiresAt ?? payload.active_expires_at);
-  const warrantyExpiresAt = nullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at);
+  const memberStatus =
+    String(payload.memberStatus ?? payload.member_status ?? "anggota")
+      .trim()
+      .toLowerCase() === "kick"
+      ? "kick"
+      : "anggota";
+  const reportStatus = normalizeReportStatusForPlatform(
+    platform,
+    payload.reportStatus ?? payload.report_status,
+  );
+  const amountRaw =
+    payload.amount === undefined ? null : Number(payload.amount);
+  const activeStatus = normalizeActiveStatus(
+    payload.activeStatus ?? payload.active_status,
+  );
+  const activeStartAt = nullableDate(
+    payload.activeStartAt ?? payload.active_start_at,
+  );
+  const activeExpiresAt = nullableDate(
+    payload.activeExpiresAt ?? payload.active_expires_at,
+  );
+  const warrantyExpiresAt = nullableDate(
+    payload.warrantyExpiresAt ?? payload.warranty_expires_at,
+  );
 
   if (!idTrx) throw new Error("idTrx wajib diisi");
   if (!googleAccountId) throw new Error("Akun Google wajib dipilih");
   if (!buyerEmail) throw new Error("Email buyer wajib diisi");
-  if (amountRaw !== null && (!Number.isFinite(amountRaw) || amountRaw < 0)) throw new Error("Nominal tidak valid");
+  if (amountRaw !== null && (!Number.isFinite(amountRaw) || amountRaw < 0))
+    throw new Error("Nominal tidak valid");
 
   const pool = getPool();
   const [accounts] = await pool.execute(
@@ -1841,10 +2383,16 @@ async function updateTransactionForUser(user, transactionId, payload) {
 
 async function updateBotWaTransactionForUser(user, transactionId, payload) {
   const idTrx = String(payload.idTrx ?? payload.id_trx ?? "").trim();
-  const customerJid = normalizeCustomerJid(payload.customerJid ?? payload.waPembeli ?? payload.customer_jid);
-  const warrantyExpiresAt = nullableDate(payload.warrantyExpiresAt ?? payload.warranty_expires_at);
+  const customerJid = normalizeCustomerJid(
+    payload.customerJid ?? payload.waPembeli ?? payload.customer_jid,
+  );
+  const warrantyExpiresAt = nullableDate(
+    payload.warrantyExpiresAt ?? payload.warranty_expires_at,
+  );
   const warrantyStatus =
-    String(payload.warrantyStatus ?? payload.warranty_status ?? "open").trim().toLowerCase() === "selesai"
+    String(payload.warrantyStatus ?? payload.warranty_status ?? "open")
+      .trim()
+      .toLowerCase() === "selesai"
       ? "selesai"
       : "open";
 
@@ -1911,7 +2459,9 @@ async function updateBotWaTransactionForUser(user, transactionId, payload) {
 }
 
 async function updateTransactionReportForUser(user, transactionId, payload) {
-  const reportStatus = normalizeReportStatus(payload.reportStatus ?? payload.report_status);
+  const reportStatus = normalizeReportStatus(
+    payload.reportStatus ?? payload.report_status,
+  );
   const pool = getPool();
   const [result] = await pool.execute(
     `UPDATE cs_transactions
@@ -1941,7 +2491,9 @@ async function updateTransactionReportForUser(user, transactionId, payload) {
     [Number(transactionId), Number(user.id)],
   );
 
-  return items[0] ? mapPaidTransactionRow({ ...items[0], stock_content: null }) : null;
+  return items[0]
+    ? mapPaidTransactionRow({ ...items[0], stock_content: null })
+    : null;
 }
 
 async function deleteTransactionForUser(user, transactionId) {
@@ -1957,6 +2509,7 @@ export const csPaymentService = {
   createBuyTransaction,
   createOwnerManualTransaction,
   sendTransactionTestimonial,
+  sendTransactionTestimonialForUser,
   markPaidFromPakasir,
   deliverPaidTransaction,
   checkAndDeliverPayment,
