@@ -2094,6 +2094,17 @@ class BaileysManager {
             logger.error(err, `Gagal sinkronisasi grup untuk user ${userId}`);
           });
 
+          if (activeBotPurpose === "main") {
+            csPaymentService
+              .deliverUndeliveredPaidTransactionsForUser({ userId, sock })
+              .catch((err) => {
+                logger.error(
+                  err,
+                  `Gagal memulihkan pengiriman transaksi paid untuk user ${userId}`,
+                );
+              });
+          }
+
           const pool = getPool();
           await pool.execute(
             "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",

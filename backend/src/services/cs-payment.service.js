@@ -45,6 +45,23 @@ const DEFAULT_WHATSAPP_TRANSACTION_MESSAGE_TEMPLATE = [
   "Saluran: {saluran}",
 ].join("\n");
 
+function normalizeComparable(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizePakasirStatus(value) {
+  return normalizeComparable(value);
+}
+
+function getPakasirVerificationOrderId(transaction, fallbackOrderId) {
+  return String(
+    transaction?.pakasir_gateway_order_id ||
+      transaction?.pakasir_order_id ||
+      fallbackOrderId ||
+      "",
+  );
+}
+
 function normalizeJid(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -1191,6 +1208,34 @@ async function fetchPakasirStatus({ slug, apiKey, orderId, amount }) {
   return payload?.transaction ?? null;
 }
 
+function validatePakasirDetail(detail, { transaction, orderId, amount, project }) {
+  if (!detail) {
+    return "Transaksi tidak ditemukan di Pakasir";
+  }
+
+  const detailOrderId = String(detail.order_id ?? detail.orderId ?? "").trim();
+  if (detailOrderId && detailOrderId !== String(orderId)) {
+    return "Order ID Pakasir tidak cocok";
+  }
+
+  const detailAmount = Number(detail.amount);
+  if (Number.isFinite(detailAmount) && detailAmount !== Number(amount)) {
+    return "Amount Pakasir tidak cocok";
+  }
+
+  const expectedProject = transaction?.pakasir_slug ?? project;
+  const detailProject = detail.project ?? detail.slug;
+  if (
+    detailProject &&
+    expectedProject &&
+    normalizeComparable(detailProject) !== normalizeComparable(expectedProject)
+  ) {
+    return "Project Pakasir tidak cocok";
+  }
+
+  return null;
+}
+
 async function findTransaction(orderId, amount) {
   const pool = getPool();
   const [rows] = await pool.execute(
@@ -1253,12 +1298,20 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
   if (
     project &&
     tx.pakasir_slug &&
-    String(project) !== String(tx.pakasir_slug)
+    normalizeComparable(project) !== normalizeComparable(tx.pakasir_slug)
   ) {
     return {
       paid: false,
       transaction: tx,
       reason: "Project Pakasir tidak cocok",
+    };
+  }
+
+  if (!tx.pakasir_slug || !tx.pakasir_api_key) {
+    return {
+      paid: false,
+      transaction: tx,
+      reason: "Slug/API key Pakasir belum tersimpan",
     };
   }
 
@@ -1279,17 +1332,30 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
     };
   }
 
-  let finalStatus = String(status ?? "").toLowerCase();
-  if (tx.pakasir_api_key) {
-    const detail = await fetchPakasirStatus({
-      slug: tx.pakasir_slug,
-      apiKey: tx.pakasir_api_key,
-      orderId,
-      amount,
-    });
-    if (detail?.status) {
-      finalStatus = String(detail.status).toLowerCase();
-    }
+  const verificationOrderId = getPakasirVerificationOrderId(tx, orderId);
+  const detail = await fetchPakasirStatus({
+    slug: tx.pakasir_slug,
+    apiKey: tx.pakasir_api_key,
+    orderId: verificationOrderId,
+    amount,
+  });
+  const detailError = validatePakasirDetail(detail, {
+    transaction: tx,
+    orderId: verificationOrderId,
+    amount,
+    project,
+  });
+  if (detailError) {
+    return {
+      paid: false,
+      transaction: tx,
+      reason: detailError,
+    };
+  }
+
+  let finalStatus = normalizePakasirStatus(detail?.status ?? status);
+  if (!finalStatus && status) {
+    finalStatus = normalizePakasirStatus(status);
   }
 
   if (!PAID_STATUSES.has(finalStatus)) {
@@ -1314,6 +1380,86 @@ async function markPaidFromPakasir({ orderId, amount, project, status }) {
   return {
     paid: true,
     transaction: { ...tx, status: "paid" },
+    reason: null,
+  };
+}
+
+async function deliverUndeliveredPaidTransactionsForUser({
+  userId,
+  sock,
+  limit = 20,
+}) {
+  if (!sock) {
+    return {
+      attempted: 0,
+      delivered: 0,
+      failed: 0,
+      reason: "Bot utama belum online",
+    };
+  }
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT tx.id, tx.user_id, tx.cs_id, tx.customer_jid, tx.pakasir_order_id,
+            tx.pakasir_gateway_order_id,
+            tx.pakasir_payment_url, tx.qris_string, tx.amount, tx.status, tx.stock_id, tx.delivered_at, tx.created_at,
+            tx.platform, tx.report_status, tx.active_duration_days, tx.warranty_duration_days,
+            tx.completed_at, tx.active_start_at, tx.active_expires_at,
+            tx.warranty_start_at, tx.warranty_expires_at,
+            tx.buyer_email, tx.buyer_count, tx.gemini_price_plan_id,
+            cs.nama_perintah, cs.delivery_mode, cs.relay_prompt, cs.payment_success_text,
+            s.testimonial_channel_jid, s.testimonial_channel_name,
+            tx.testimonial_sent_at,
+            gp.label AS gemini_price_plan_label,
+            ga.email AS google_account_email
+       FROM cs_transactions tx
+       LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+       LEFT JOIN app_settings s ON s.user_id = tx.user_id
+       LEFT JOIN gemini_price_plans gp ON gp.id = tx.gemini_price_plan_id
+       LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
+      WHERE tx.user_id = ?
+        AND tx.status = 'paid'
+        AND tx.delivered_at IS NULL
+      ORDER BY COALESCE(tx.paid_at, tx.created_at) ASC
+      LIMIT ?`,
+    [Number(userId), safeLimit],
+  );
+
+  let delivered = 0;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      if (await deliverPaidTransaction(sock, row)) {
+        delivered += 1;
+      } else {
+        failed += 1;
+      }
+    } catch (err) {
+      failed += 1;
+      logger.warn(
+        err,
+        `Failed to recover paid transaction delivery ${row.pakasir_order_id}`,
+      );
+    }
+  }
+
+  if (rows.length > 0) {
+    logger.info(
+      {
+        userId: Number(userId),
+        attempted: rows.length,
+        delivered,
+        failed,
+      },
+      "Recovered undelivered paid transactions",
+    );
+  }
+
+  return {
+    attempted: rows.length,
+    delivered,
+    failed,
     reason: null,
   };
 }
@@ -1380,7 +1526,7 @@ async function checkAndDeliverPayment({
     orderId: tx.pakasir_gateway_order_id || tx.pakasir_order_id,
     amount: tx.amount,
   });
-  const status = String(detail?.status ?? "").toLowerCase();
+  const status = normalizePakasirStatus(detail?.status);
   if (!PAID_STATUSES.has(status)) {
     return {
       paid: false,
@@ -1948,8 +2094,12 @@ async function handleWebhookAndDeliver(payload, sockResolver) {
   }
 
   const sock = sockResolver(Number(result.transaction.user_id));
-  await deliverPaidTransaction(sock, result.transaction);
-  return result;
+  const delivered = await deliverPaidTransaction(sock, result.transaction);
+  return {
+    ...result,
+    delivered,
+    deliveryReason: delivered ? null : "Bot utama belum online atau pesanan belum bisa dikirim",
+  };
 }
 
 async function listPaidTransactionsForUser(user) {
@@ -2530,6 +2680,7 @@ export const csPaymentService = {
   sendTransactionTestimonialForUser,
   markPaidFromPakasir,
   deliverPaidTransaction,
+  deliverUndeliveredPaidTransactionsForUser,
   checkAndDeliverPayment,
   cancelTransactionForCustomer,
   handleCustomerRelayInput,

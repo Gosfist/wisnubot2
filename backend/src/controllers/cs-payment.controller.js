@@ -48,7 +48,9 @@ export async function pakasirWebhook(req, res) {
     res.json({
       message: result.paid ? "Pembayaran diproses" : "Webhook diterima",
       paid: result.paid,
+      delivered: result.delivered ?? false,
       reason: result.reason,
+      deliveryReason: result.deliveryReason ?? null,
     });
   } catch (err) {
     logger.error(err, "Pakasir webhook error");
