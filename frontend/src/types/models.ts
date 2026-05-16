@@ -81,7 +81,12 @@ export interface BroadcastModel {
 
 export type CsDeliveryMode = "none" | "stock" | "relay";
 
-export type CsButtonType = "link" | "buy" | "reply" | "contact_owner";
+export type CsButtonType =
+  | "link"
+  | "buy"
+  | "reply"
+  | "contact_owner"
+  | "external_link";
 
 export interface CsButtonModel {
   id?: number;

@@ -1,11 +1,36 @@
 import { getPool } from "../config/database.js";
 
-const VALID_TYPES = new Set(["link", "buy", "reply", "contact_owner"]);
+const VALID_TYPES = new Set([
+  "link",
+  "buy",
+  "reply",
+  "contact_owner",
+  "external_link",
+]);
+
+function normalizeExternalUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const candidate = /^https?:\/\//i.test(raw)
+    ? raw
+    : `https://${raw.replace(/^\/+/, "")}`;
+
+  try {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
 
 function normalizeButton(payload) {
   const type = String(payload?.buttonType ?? "").toLowerCase();
   if (!VALID_TYPES.has(type)) {
-    throw new Error("Tipe button tidak valid (link|buy|reply|contact_owner)");
+    throw new Error(
+      "Tipe button tidak valid (link|buy|reply|contact_owner|external_link)",
+    );
   }
 
   const label = String(payload?.label ?? "").trim();
@@ -19,6 +44,14 @@ function normalizeButton(payload) {
       : null;
   if (type === "link" && !targetCommand) {
     throw new Error("Button link wajib punya target command");
+  }
+
+  const targetUrl =
+    type === "external_link"
+      ? normalizeExternalUrl(payload?.targetUrl ?? payload?.target_url)
+      : null;
+  if (type === "external_link" && !targetUrl) {
+    throw new Error("Button link external wajib punya URL yang valid");
   }
 
   const replyText =
@@ -68,7 +101,7 @@ function normalizeButton(payload) {
     label,
     type,
     targetCommand,
-    targetUrl: null,
+    targetUrl,
     replyText,
     price,
     activeDurationDays,

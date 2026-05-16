@@ -27,6 +27,7 @@ const BUTTON_TYPE_OPTIONS: { value: CsButtonType; label: string }[] = [
   { value: "buy", label: "Beli (payment Pakasir)" },
   { value: "reply", label: "Reply (kirim teks)" },
   { value: "contact_owner", label: "Contact Owner" },
+  { value: "external_link", label: "Link External" },
 ];
 
 function makeEmptyButton(): CsButtonModel {
@@ -50,6 +51,23 @@ function displayCommand(name: string): string {
 
 function stripPrefix(name: string): string {
   return name.replace(/^\/+/, "").trim().toLowerCase();
+}
+
+function normalizeExternalUrl(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const candidate = /^https?:\/\//i.test(raw)
+    ? raw
+    : `https://${raw.replace(/^\/+/, "")}`;
+
+  try {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 export function AddCustomerServicePage() {
@@ -248,6 +266,9 @@ export function AddCustomerServicePage() {
       if (b.buttonType === "contact_owner" && !b.replyText?.trim()) {
         return `Button "${label}": isi teks pesan untuk owner`;
       }
+      if (b.buttonType === "external_link" && !normalizeExternalUrl(b.targetUrl)) {
+        return `Button "${label}": isi URL link external yang valid`;
+      }
       if (b.buttonType === "buy") {
         const priceNum = Number(b.price ?? 0);
         if (!Number.isFinite(priceNum) || priceNum <= 0) {
@@ -303,7 +324,6 @@ export function AddCustomerServicePage() {
         );
         return;
       }
-
     }
 
     if (deliveryMode === "relay" && !relayPrompt.trim()) {
@@ -354,7 +374,10 @@ export function AddCustomerServicePage() {
             ...b,
             label: b.label.trim(),
             targetCommand: b.buttonType === "link" ? stripPrefix(b.targetCommand ?? "") : null,
-            targetUrl: null,
+            targetUrl:
+              b.buttonType === "external_link"
+                ? normalizeExternalUrl(b.targetUrl)
+                : null,
             replyText: ["reply", "contact_owner"].includes(b.buttonType)
               ? b.replyText?.trim() ?? null
               : null,
@@ -598,6 +621,24 @@ export function AddCustomerServicePage() {
                           value={b.replyText ?? ""}
                           onChange={(e) => updateButton(index, { replyText: e.target.value })}
                         />
+                      )}
+
+                      {b.buttonType === "external_link" && (
+                        <label className="grid min-w-0 gap-2">
+                          <span className="block h-4 text-xs font-semibold leading-4 text-text-secondary">
+                            URL Link External
+                          </span>
+                          <input
+                            className="min-h-[58px] w-full rounded-[12px] border border-[rgba(56,189,248,0.2)] bg-[rgba(15,23,42,0.8)] px-4 py-3 text-sm leading-6 text-white outline-none focus:border-[rgba(56,189,248,0.5)]"
+                            placeholder="https://contoh.com"
+                            value={b.targetUrl ?? ""}
+                            onChange={(e) =>
+                              updateButton(index, {
+                                targetUrl: e.target.value.slice(0, 500),
+                              })
+                            }
+                          />
+                        </label>
                       )}
 
                       {b.buttonType === "buy" && (

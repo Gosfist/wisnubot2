@@ -204,6 +204,47 @@ function buildContactOwnerUrl(context, messageText) {
     : `https://wa.me/${ownerPhone}`;
 }
 
+function buildCtaUrlButton(label, url) {
+  const targetUrl = String(url ?? "").trim();
+  if (!targetUrl) return null;
+
+  return {
+    name: "cta_url",
+    buttonParamsJson: JSON.stringify({
+      display_text: label,
+      url: targetUrl,
+      merchant_url: targetUrl,
+    }),
+  };
+}
+
+function buildStartMenuButtons(listData, context) {
+  const buttons = [
+    {
+      name: "single_select",
+      buttonParamsJson: JSON.stringify(listData),
+    },
+  ];
+
+  const testimonialButton = buildCtaUrlButton(
+    "Testimoni",
+    context?.testimonialChannelLink,
+  );
+  if (testimonialButton) {
+    buttons.push(testimonialButton);
+  }
+
+  const contactOwnerButton = buildCtaUrlButton(
+    "Contact Owner",
+    buildContactOwnerUrl(context, ""),
+  );
+  if (contactOwnerButton) {
+    buttons.push(contactOwnerButton);
+  }
+
+  return buttons;
+}
+
 function buildCommandInteractiveMessage(remoteJid, entry, context) {
   const buttons = [];
   for (const button of entry.buttons ?? []) {
@@ -224,13 +265,9 @@ function buildCommandInteractiveMessage(remoteJid, entry, context) {
     } else if (button.buttonType === "contact_owner" && button.replyText) {
       const url = buildContactOwnerUrl(context, button.replyText);
       if (!url) continue;
-      nativeButton = {
-        name: "cta_url",
-        buttonParamsJson: JSON.stringify({
-          display_text: label,
-          url,
-        }),
-      };
+      nativeButton = buildCtaUrlButton(label, url);
+    } else if (button.buttonType === "external_link" && button.targetUrl) {
+      nativeButton = buildCtaUrlButton(label, button.targetUrl);
     }
 
     if (nativeButton) {
@@ -438,6 +475,53 @@ function buildRestockReminderContent(commandName) {
       ],
     },
   };
+}
+
+function getJakartaDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  return `${year}-${month}-${day}`;
+}
+
+async function reserveDailyRestockReminder({
+  userId,
+  customerJid,
+  commandName,
+  ownerJid,
+}) {
+  const pool = getPool();
+  const remindedOn = getJakartaDateKey();
+  const [rows] = await pool.execute(
+    `INSERT INTO cs_restock_reminders
+       (user_id, customer_jid, command_name, owner_jid, reminded_on)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, customer_jid, reminded_on) DO NOTHING
+     RETURNING id`,
+    [
+      Number(userId),
+      String(customerJid),
+      String(commandName ?? "").replace(/^[/.]+/, "").trim() || null,
+      String(ownerJid ?? "").trim() || null,
+      remindedOn,
+    ],
+  );
+
+  return rows[0]?.id ? Number(rows[0].id) : null;
+}
+
+async function releaseDailyRestockReminder(reminderId) {
+  if (!reminderId) return;
+  const pool = getPool();
+  await pool.execute("DELETE FROM cs_restock_reminders WHERE id = ?", [
+    Number(reminderId),
+  ]);
 }
 
 class BaileysManager {
@@ -1392,11 +1476,40 @@ class BaileysManager {
               const buyerNumber = String(remoteJid)
                 .replace("@s.whatsapp.net", "")
                 .replace(/\D/g, "");
-              await sock.sendMessage(infoJid, {
-                text:
-                  `Stock di perintah ${commandName || "-"} kosong dan ada yang mau beli.\n\n` +
-                  `Nomor pembeli: ${buyerNumber || remoteJid}`,
+
+              const reminderId = await reserveDailyRestockReminder({
+                userId: customerServiceContext.userId,
+                customerJid: remoteJid,
+                commandName,
+                ownerJid: infoJid,
               });
+              if (!reminderId) {
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  "Kamu sudah mengingatkan owner hari ini. Coba lagi besok jika stock masih kosong.",
+                );
+                continue;
+              }
+
+              try {
+                await sock.sendMessage(infoJid, {
+                  text:
+                    `Stock di perintah ${commandName || "-"} kosong dan ada yang mau beli.\n\n` +
+                    `Nomor pembeli: ${buyerNumber || remoteJid}`,
+                });
+              } catch (err) {
+                await releaseDailyRestockReminder(reminderId);
+                logger.warn(err, "Failed to send restock reminder to owner");
+                await messageService.sendCustomerServiceMessage(
+                  sock,
+                  message.key,
+                  remoteJid,
+                  "Gagal mengingatkan owner. Silakan coba lagi nanti.",
+                );
+                continue;
+              }
               await messageService.sendCustomerServiceMessage(
                 sock,
                 message.key,
@@ -1634,20 +1747,10 @@ class BaileysManager {
                                 nativeFlowMessage:
                                   proto.Message.InteractiveMessage.NativeFlowMessage.create(
                                     {
-                                      buttons: [
-                                        {
-                                          name: "single_select",
-                                          buttonParamsJson:
-                                            JSON.stringify(listData),
-                                        },
-                                        {
-                                          name: "cta_url",
-                                          buttonParamsJson: JSON.stringify({
-                                            display_text: "Contact Owner",
-                                            url: `https://wa.me/${customerServiceContext.userPhoneNumber}`,
-                                          }),
-                                        },
-                                      ],
+                                      buttons: buildStartMenuButtons(
+                                        listData,
+                                        customerServiceContext,
+                                      ),
                                     },
                                   ),
                               }),
@@ -1789,20 +1892,10 @@ class BaileysManager {
                                 nativeFlowMessage:
                                   proto.Message.InteractiveMessage.NativeFlowMessage.create(
                                     {
-                                      buttons: [
-                                        {
-                                          name: "single_select",
-                                          buttonParamsJson:
-                                            JSON.stringify(listData),
-                                        },
-                                        {
-                                          name: "cta_url",
-                                          buttonParamsJson: JSON.stringify({
-                                            display_text: "Contact Owner",
-                                            url: `https://wa.me/${customerServiceContext.userPhoneNumber}`,
-                                          }),
-                                        },
-                                      ],
+                                      buttons: buildStartMenuButtons(
+                                        listData,
+                                        customerServiceContext,
+                                      ),
                                     },
                                   ),
                               }),

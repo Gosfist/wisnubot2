@@ -56,6 +56,7 @@ function buildBotContext(row) {
     userPhoneNumber: contactOwnerPhone || botInfoPhone || String(row.phone_number ?? ""),
     contactOwnerPhoneNumber: contactOwnerPhone,
     botInfoPhoneNumber: botInfoPhone,
+    testimonialChannelLink: String(row.testimonial_channel_link ?? ""),
     entries: ENTRIES_TABLE,
     contacts: CONTACTS_TABLE,
   };
@@ -70,7 +71,8 @@ async function findBotRow(botId) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT b.id, b.user_id, b.phone_number, b.owner_phone_number,
-            s.contact_owner_phone_number, s.bot_info_phone_number
+            s.contact_owner_phone_number, s.bot_info_phone_number,
+            s.testimonial_channel_link
      FROM bots b
      LEFT JOIN app_settings s ON s.user_id = b.user_id
      WHERE b.id = ?

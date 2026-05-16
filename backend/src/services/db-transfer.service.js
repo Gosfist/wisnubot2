@@ -1,11 +1,11 @@
 import { getPool } from "../config/database.js";
 
 const EXPORT_FORMAT = "wisnubot2-db-export";
-const SCOPED_EXPORT_VERSION = 3;
-const FULL_EXPORT_VERSION = 6;
+const SCOPED_EXPORT_VERSION = 4;
+const FULL_EXPORT_VERSION = 7;
 const EXPORT_VERSION = FULL_EXPORT_VERSION;
-const SUPPORTED_SCOPED_EXPORT_VERSIONS = new Set([1, 2, SCOPED_EXPORT_VERSION]);
-const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, 3, 4, 5, FULL_EXPORT_VERSION]);
+const SUPPORTED_SCOPED_EXPORT_VERSIONS = new Set([1, 2, 3, SCOPED_EXPORT_VERSION]);
+const SUPPORTED_FULL_EXPORT_VERSIONS = new Set([2, 3, 4, 5, 6, FULL_EXPORT_VERSION]);
 const BULK_BATCH_SIZE = 300;
 
 const SECTION_KEYS = [
@@ -25,6 +25,7 @@ const SECTION_KEYS = [
   "groupPushExclusions",
   "csTransactions",
   "csRelaySessions",
+  "csRestockReminders",
 ];
 
 const FULL_TABLES = [
@@ -49,6 +50,7 @@ const FULL_TABLES = [
   { key: "pushContactRuns", table: "push_contact_runs", orderBy: "id" },
   { key: "csTransactions", table: "cs_transactions", orderBy: "id" },
   { key: "csRelaySessions", table: "cs_relay_sessions", orderBy: "id" },
+  { key: "csRestockReminders", table: "cs_restock_reminders", orderBy: "id" },
   { key: "securityEvents", table: "security_events", orderBy: "id" },
 ];
 
@@ -173,6 +175,15 @@ const RELAY_SESSION_COLUMNS = [
   "owner_msg_id",
   "created_at",
   "updated_at",
+];
+
+const RESTOCK_REMINDER_COLUMNS = [
+  "user_id",
+  "customer_jid",
+  "command_name",
+  "owner_jid",
+  "reminded_on",
+  "created_at",
 ];
 
 function requireArray(value, name) {
@@ -546,6 +557,11 @@ async function exportScopedForUser(user) {
         transactionIds,
       )
     : [];
+  const restockReminders = await selectAll(
+    pool,
+    `SELECT * FROM cs_restock_reminders WHERE user_id = ? ORDER BY id`,
+    [userId],
+  );
 
   const data = {
     appSettings: settingsRows[0] ?? null,
@@ -564,6 +580,7 @@ async function exportScopedForUser(user) {
     groupPushExclusions,
     csTransactions: transactions,
     csRelaySessions: relaySessions,
+    csRestockReminders: restockReminders,
   };
 
   return {
@@ -644,6 +661,7 @@ async function deleteCurrentUserData(connection, userId) {
   }
 
   await connection.execute("DELETE FROM cs_transactions WHERE user_id = ?", [userId]);
+  await connection.execute("DELETE FROM cs_restock_reminders WHERE user_id = ?", [userId]);
   await connection.execute("DELETE FROM customer_service_contacts WHERE user_id = ?", [userId]);
   await connection.execute("DELETE FROM customer_service WHERE user_id = ?", [userId]);
   await connection.execute("DELETE FROM google_accounts WHERE user_id = ?", [userId]);
@@ -1051,6 +1069,22 @@ async function importRelaySessions(connection, data, txIdMap) {
   return rows.length;
 }
 
+async function importRestockReminders(connection, userId, data) {
+  const rows = requireArray(data.csRestockReminders ?? [], "csRestockReminders")
+    .map((row) => ({
+      ...compactRow(row, ["id", "user_id"]),
+      user_id: userId,
+    }));
+
+  await bulkInsertTableRows(
+    connection,
+    "cs_restock_reminders",
+    rows,
+    RESTOCK_REMINDER_COLUMNS,
+  );
+  return rows.length;
+}
+
 async function importScopedForUser(user, payload) {
   if (!payload || payload.format !== EXPORT_FORMAT || !SUPPORTED_SCOPED_EXPORT_VERSIONS.has(Number(payload.version))) {
     throw new Error("File import bukan export DB WisnuBot2 yang valid");
@@ -1112,6 +1146,7 @@ async function importScopedForUser(user, payload) {
     counts.transactions = txResult.count;
 
     counts.csRelaySessions = await importRelaySessions(connection, data, txResult.idMap);
+    counts.csRestockReminders = await importRestockReminders(connection, userId, data);
 
     await connection.commit();
     return {
