@@ -41,7 +41,7 @@ export function LoginPage() {
         <div className="inline-flex justify-center">
           <WisnuBotLogo size={38} withContainer />
         </div>
-        <h1 className="text-[clamp(2rem,5vw,2.8rem)] font-black">WisnuBot2</h1>
+        <h1 className="text-[clamp(2rem,5vw,2.8rem)] font-black">StarrCloud</h1>
       </div>
 
       <form className="space-y-4" onSubmit={handleLogin}>
