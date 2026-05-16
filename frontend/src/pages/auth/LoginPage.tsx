@@ -58,7 +58,7 @@ export function LoginPage() {
             <input
               className="w-full border-0 bg-transparent p-0 text-sm leading-none text-text-primary shadow-none placeholder:text-text-muted focus:border-0 focus:ring-0"
               type="text"
-              placeholder="admin"
+              placeholder="username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               disabled={isLoading}
