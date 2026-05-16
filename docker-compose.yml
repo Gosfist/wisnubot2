@@ -6,7 +6,7 @@ services:
     env_file:
       - ./backend/.env.production
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${BACKEND_NODE_ENV:-production}
       PORT: 3000
       SESSION_DIR: /app/sessions
     volumes:
