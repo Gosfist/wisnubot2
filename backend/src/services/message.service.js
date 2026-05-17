@@ -5,8 +5,8 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const MESSAGE_DELAY_MIN_MS = 60 * 1000;
-const MESSAGE_DELAY_MAX_MS = 130 * 1000;
+const MESSAGE_DELAY_MIN_MS = 10 * 1000;
+const MESSAGE_DELAY_MAX_MS = 15 * 1000;
 const INCOMING_MESSAGE_READ_DELAY_MS = 0;
 const CUSTOMER_SERVICE_REPLY_DELAY_MIN_MS = 1000;
 const CUSTOMER_SERVICE_REPLY_DELAY_MAX_MS = 1000;
@@ -41,7 +41,7 @@ function isConnectionClosedError(err) {
 
 /**
  * Message service with anti-ban queue
- * - Random delay between messages (60-130 seconds)
+ * - Random delay between messages (10-15 seconds)
  * - Max 10 messages per 5 minutes per bot
  */
 class MessageService {

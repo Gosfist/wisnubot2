@@ -43,6 +43,17 @@ class SchedulerService {
     return [];
   }
 
+  isActiveFlag(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value === 1;
+    const normalized = String(value ?? "").trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes";
+  }
+
+  isGroupJid(value) {
+    return /^\d+@g\.us$/i.test(String(value ?? "").trim());
+  }
+
   toCronExpression(time, days) {
     const [hour, minute] = time.split(":");
     const dayMap = {
@@ -344,7 +355,7 @@ class SchedulerService {
       let groups = [];
       let closedGroups = [];
       if (targetGroupIds.length === 0) {
-        const clauses = ["b.user_id = ?", "g.is_active = 1", "COALESCE(b.bot_purpose, ?) = ?"];
+        const clauses = ["b.user_id = ?", "COALESCE(b.bot_purpose, ?) = ?"];
         const params = [userId, "main", "main"];
         if (targetBotIds.length > 0) {
           clauses.push(`b.id IN (${targetBotIds.map(() => "?").join(",")})`);
@@ -357,12 +368,13 @@ class SchedulerService {
           params.push(...targetExcludedGroupIds);
         }
         const [allActiveGroups] = await pool.execute(
-          `SELECT g.id, g.group_jid, g.name FROM \`groups\` g
+          `SELECT g.id, g.group_jid, g.name, g.is_active FROM \`groups\` g
            JOIN bots b ON b.id = g.bot_id
            WHERE ${clauses.join(" AND ")}`,
           params,
         );
-        groups = allActiveGroups;
+        groups = allActiveGroups.filter((group) => this.isActiveFlag(group.is_active));
+        closedGroups = allActiveGroups.filter((group) => !this.isActiveFlag(group.is_active));
       } else {
         const selectedClauses = [
           `g.id IN (${targetGroupIds.map(() => "?").join(",")})`,
@@ -385,8 +397,8 @@ class SchedulerService {
            WHERE ${selectedClauses.join(" AND ")}`,
           selectedParams,
         );
-        groups = selectedGroups.filter((group) => Number(group.is_active) === 1);
-        closedGroups = selectedGroups.filter((group) => Number(group.is_active) !== 1);
+        groups = selectedGroups.filter((group) => this.isActiveFlag(group.is_active));
+        closedGroups = selectedGroups.filter((group) => !this.isActiveFlag(group.is_active));
       }
 
       for (const group of closedGroups) {
@@ -401,9 +413,30 @@ class SchedulerService {
         );
       }
 
-      const groupJids = groups.map((g) => g.group_jid);
+      const invalidGroups = groups.filter((group) => !this.isGroupJid(group.group_jid));
+      for (const group of invalidGroups) {
+        logger.warn(
+          `Skipping invalid broadcast group JID for broadcast ${broadcastId}: ${group.group_jid}`,
+        );
+      }
+
+      const groupJids = [
+        ...new Set(
+          groups
+            .map((g) => String(g.group_jid ?? "").trim())
+            .filter((jid) => this.isGroupJid(jid)),
+        ),
+      ];
       if (groupJids.length === 0) {
         logger.warn(`No active groups for broadcast ${broadcastId}`);
+        await pool.execute(
+          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+          [
+            userId,
+            "broadcast_failed",
+            `Broadcast "${broadcast.title}" tidak berjalan karena tidak ada group aktif yang valid`,
+          ],
+        );
         return;
       }
 

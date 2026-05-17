@@ -233,7 +233,6 @@ async function resolveEffectiveTargetGroupIds(
   if (normalizedTargetGroupIds.length > 0) {
     const clauses = [
       `g.id IN (${normalizedTargetGroupIds.map(() => "?").join(",")})`,
-      "g.is_active = 1",
       "b.user_id = ?",
       "COALESCE(b.bot_purpose, 'main') = 'main'",
     ];
@@ -245,17 +244,24 @@ async function resolveEffectiveTargetGroupIds(
     }
 
     const [groups] = await pool.execute(
-      `SELECT g.id
+      `SELECT g.id, g.is_active
        FROM \`groups\` g
        JOIN bots b ON b.id = g.bot_id
        WHERE ${clauses.join(" AND ")}`,
       params,
     );
 
-    return [...new Set(groups.map((group) => Number(group.id)).filter((id) => id > 0))];
+    return [
+      ...new Set(
+        groups
+          .filter((group) => parseBooleanValue(group.is_active))
+          .map((group) => Number(group.id))
+          .filter((id) => id > 0),
+      ),
+    ];
   }
 
-  const clauses = ["b.user_id = ?", "g.is_active = 1", "COALESCE(b.bot_purpose, 'main') = 'main'"];
+  const clauses = ["b.user_id = ?", "COALESCE(b.bot_purpose, 'main') = 'main'"];
   const params = [user.id];
 
   if (normalizedTargetBotIds.length > 0) {
@@ -269,14 +275,21 @@ async function resolveEffectiveTargetGroupIds(
   }
 
   const [groups] = await pool.execute(
-    `SELECT g.id
+    `SELECT g.id, g.is_active
      FROM \`groups\` g
      JOIN bots b ON b.id = g.bot_id
      WHERE ${clauses.join(" AND ")}`,
     params,
   );
 
-  return [...new Set(groups.map((group) => Number(group.id)).filter((id) => id > 0))];
+  return [
+    ...new Set(
+      groups
+        .filter((group) => parseBooleanValue(group.is_active))
+        .map((group) => Number(group.id))
+        .filter((id) => id > 0),
+    ),
+  ];
 }
 
 async function ensureNoBroadcastScheduleConflict(
