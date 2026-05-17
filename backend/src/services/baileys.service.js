@@ -924,6 +924,23 @@ class BaileysManager {
     return conn?.sock || null;
   }
 
+  async markBotConnectionClosed(botId, userId = null) {
+    const key = Number(botId);
+    if (!Number.isFinite(key) || key <= 0) return;
+
+    const conn = this.connections.get(key);
+    this.connections.delete(key);
+
+    const pool = getPool();
+    await pool.execute("UPDATE bots SET is_online = 0 WHERE id = ?", [key]);
+
+    const reconnectUserId = Number(userId ?? conn?.userId ?? 0);
+    const sessionName = conn?.sessionName || null;
+    if (reconnectUserId > 0 && sessionName) {
+      await this.scheduleReconnect(reconnectUserId, key, sessionName, "Connection Closed");
+    }
+  }
+
   async getPreferredBroadcastConnection(userId, preferredBotIds = []) {
     const pool = getPool();
     const normalizedPreferredBotIds = Array.isArray(preferredBotIds)
@@ -949,9 +966,9 @@ class BaileysManager {
       `SELECT id, user_id, phone_number, bot_purpose
        FROM bots
        WHERE ${clauses.join(" AND ")}
-         AND COALESCE(bot_purpose, 'main') = 'main'
+         AND COALESCE(bot_purpose, ?) = ?
        ORDER BY created_at DESC`,
-      params,
+      [...params, "main", "main"],
     );
 
     for (const bot of bots) {

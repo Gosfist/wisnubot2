@@ -33,6 +33,12 @@ function getRandomCustomerServiceReplyDelayMs() {
   );
 }
 
+function isConnectionClosedError(err) {
+  const message = String(err?.message || "");
+  const statusCode = Number(err?.output?.statusCode || 0);
+  return message.includes("Connection Closed") || statusCode === 428;
+}
+
 /**
  * Message service with anti-ban queue
  * - Random delay between messages (60-130 seconds)
@@ -78,10 +84,10 @@ class MessageService {
         await sock.sendMessage(jid, { text });
       }
       logger.info(`Message sent to ${jid}`);
-      return true;
+      return { status: "sent" };
     } catch (err) {
       logger.error(err, `Failed to send message to ${jid}`);
-      return false;
+      return { status: isConnectionClosedError(err) ? "connection_closed" : "failed" };
     }
   }
 
@@ -229,8 +235,13 @@ class MessageService {
         break;
       }
 
-      const success = await this.sendMessage(sock, jid, text, imageUrl);
-      results.push({ jid, status: success ? "sent" : "failed" });
+      const result = await this.sendMessage(sock, jid, text, imageUrl);
+      results.push({ jid, status: result.status });
+
+      if (result.status === "connection_closed") {
+        logger.warn(`Broadcast stopped because WhatsApp connection closed at ${jid}`);
+        break;
+      }
 
       // Anti-ban: randomize the gap so the send pattern is less predictable.
       if (index < groupJids.length - 1) {

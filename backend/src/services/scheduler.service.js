@@ -344,8 +344,8 @@ class SchedulerService {
       let groups = [];
       let closedGroups = [];
       if (targetGroupIds.length === 0) {
-        const clauses = ["b.user_id = ?", "g.is_active = 1", "COALESCE(b.bot_purpose, 'main') = 'main"];
-        const params = [userId];
+        const clauses = ["b.user_id = ?", "g.is_active = 1", "COALESCE(b.bot_purpose, ?) = ?"];
+        const params = [userId, "main", "main"];
         if (targetBotIds.length > 0) {
           clauses.push(`b.id IN (${targetBotIds.map(() => "?").join(",")})`);
           params.push(...targetBotIds);
@@ -367,9 +367,9 @@ class SchedulerService {
         const selectedClauses = [
           `g.id IN (${targetGroupIds.map(() => "?").join(",")})`,
           "b.user_id = ?",
-          "COALESCE(b.bot_purpose, 'main') = 'main'",
+          "COALESCE(b.bot_purpose, ?) = ?",
         ];
-        const selectedParams = [...targetGroupIds, userId];
+        const selectedParams = [...targetGroupIds, userId, "main", "main"];
 
         if (targetBotIds.length > 0) {
           selectedClauses.push(
@@ -426,6 +426,7 @@ class SchedulerService {
       );
 
       const sentCount = results.filter((r) => r.status === "sent").length;
+      const connectionClosed = results.some((r) => r.status === "connection_closed");
       const groupNameByJid = new Map(
         groups.map((group) => [String(group.group_jid), String(group.name ?? group.group_jid)]),
       );
@@ -441,6 +442,26 @@ class SchedulerService {
           ],
         );
       }
+
+      if (connectionClosed) {
+        await baileysManager.markBotConnectionClosed(
+          preferredConnection.botId,
+          userId,
+        );
+        await pool.execute(
+          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+          [
+            userId,
+            "broadcast_failed",
+            `Broadcast "${broadcast.title}" berhenti karena koneksi bot WhatsApp terputus (${sentCount}/${groupJids.length} group terkirim)`,
+          ],
+        );
+        logger.warn(
+          `Broadcast ${broadcastId} stopped because bot ${preferredConnection.phoneNumber ?? preferredConnection.botId} connection closed`,
+        );
+        return;
+      }
+
       await pool.execute(
         "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
         [
