@@ -87,6 +87,8 @@ const insertIdTables = new Set([
   'bots',
   'groups',
   'broadcasts',
+  'broadcast_runs',
+  'broadcast_run_items',
   'activity_logs',
   'customer_service',
   'customer_service_contacts',

@@ -2120,6 +2120,17 @@ class BaileysManager {
                   `Gagal memulihkan pengiriman transaksi paid untuk user ${userId}`,
                 );
               });
+
+            import("./scheduler.service.js")
+              .then(({ schedulerService }) =>
+                schedulerService.resumeInterruptedBroadcasts(userId),
+              )
+              .catch((err) => {
+                logger.error(
+                  err,
+                  `Gagal melanjutkan broadcast tertunda untuk user ${userId}`,
+                );
+              });
           }
 
           const pool = getPool();

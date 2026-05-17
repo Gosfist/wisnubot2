@@ -39,6 +39,21 @@ function isConnectionClosedError(err) {
   return message.includes("Connection Closed") || statusCode === 428;
 }
 
+function isGroupClosedError(err) {
+  const message = String(err?.message || "").toLowerCase();
+  const statusCode = Number(err?.output?.statusCode || 0);
+  return (
+    statusCode === 403 ||
+    statusCode === 404 ||
+    message.includes("forbidden") ||
+    message.includes("not-authorized") ||
+    message.includes("not authorised") ||
+    message.includes("not-authorised") ||
+    message.includes("group closed") ||
+    message.includes("not a participant")
+  );
+}
+
 /**
  * Message service with anti-ban queue
  * - Random delay between messages (10-15 seconds)
@@ -87,7 +102,14 @@ class MessageService {
       return { status: "sent" };
     } catch (err) {
       logger.error(err, `Failed to send message to ${jid}`);
-      return { status: isConnectionClosedError(err) ? "connection_closed" : "failed" };
+      return {
+        status: isConnectionClosedError(err)
+          ? "connection_closed"
+          : isGroupClosedError(err)
+            ? "group_closed"
+            : "failed",
+        error: String(err?.message || err || ""),
+      };
     }
   }
 
@@ -225,18 +247,24 @@ class MessageService {
     }
   }
 
-  async sendBulkMessages(sock, userId, groupJids, text, imageUrl = null) {
+  async sendBulkMessages(sock, userId, groupJids, text, imageUrl = null, options = {}) {
     const results = [];
+    const onResult =
+      options && typeof options.onResult === "function" ? options.onResult : null;
 
     for (const [index, jid] of groupJids.entries()) {
       if (!this.checkRateLimit(userId)) {
         logger.warn(`Rate limit reached for user ${userId}`);
-        results.push({ jid, status: "rate_limited" });
+        const result = { jid, status: "rate_limited" };
+        results.push(result);
+        if (onResult) await onResult(result, index);
         break;
       }
 
       const result = await this.sendMessage(sock, jid, text, imageUrl);
-      results.push({ jid, status: result.status });
+      const item = { jid, status: result.status, error: result.error || null };
+      results.push(item);
+      if (onResult) await onResult(item, index);
 
       if (result.status === "connection_closed") {
         logger.warn(`Broadcast stopped because WhatsApp connection closed at ${jid}`);

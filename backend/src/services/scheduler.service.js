@@ -6,6 +6,8 @@ import { realtimeService } from "./realtime.service.js";
 import { resolveBroadcastTable, parseScheduleEntries } from "../utils/helpers.js";
 import { logger } from "../utils/logger.js";
 
+const EXPIRY_NOTIFY_LOOKBACK_DAYS = 2;
+
 class SchedulerService {
   constructor() {
     this.jobs = new Map();
@@ -165,6 +167,40 @@ class SchedulerService {
     }).format(date);
   }
 
+  normalizeCommandName(value) {
+    return String(value ?? "").trim().replace(/^\/+/, "");
+  }
+
+  formatTransactionProduct(row) {
+    const source = `${row.nama_perintah ?? ""} ${row.gemini_price_plan_label ?? ""}`.toLowerCase();
+    if (source.includes("canva")) return "Canva";
+    if (source.includes("gemini") || row.gemini_price_plan_id) return "Gemini";
+    return (
+      this.normalizeCommandName(row.nama_perintah) ||
+      String(row.gemini_price_plan_label ?? "").trim() ||
+      "-"
+    );
+  }
+
+  formatContactLines(row) {
+    const platform = String(row.platform ?? "whatsapp").trim().toLowerCase();
+    const customer = String(row.customer_jid ?? "").replace("@s.whatsapp.net", "");
+    const lines = [];
+
+    if (platform === "shopee") {
+      lines.push(`email: ${row.buyer_email || customer || "-"}`);
+    } else {
+      lines.push(`Nomor WA: ${customer || "-"}`);
+      if (row.buyer_email) lines.push(`email: ${row.buyer_email}`);
+    }
+
+    if (row.google_account_email) {
+      lines.push(`google: ${row.google_account_email}`);
+    }
+
+    return lines.join("\n");
+  }
+
   isPastDate(value) {
     if (!value) return false;
     const date = value instanceof Date ? value : new Date(value);
@@ -192,19 +228,17 @@ class SchedulerService {
     const isWarranty = type === "warranty";
     const expDate = isWarranty ? row.warranty_expires_at : row.active_expires_at;
     const duration = isWarranty ? row.warranty_duration_days : row.active_duration_days;
-    const label = isWarranty ? "garansi" : "masa aktif";
+    const contactLines = this.formatContactLines(row);
 
     return (
       `Notifikasi transaksi expired.\n\n` +
       `idTrx: ${row.pakasir_order_id}\n` +
-      `Produk: /${row.nama_perintah ?? "-"}\n` +
-      `Nomor WA: ${String(row.customer_jid ?? "").replace("@s.whatsapp.net", "")}\n` +
+      `Produk: ${this.formatTransactionProduct(row)}\n` +
+      `${contactLines}\n` +
       `Platform: ${row.platform ?? "whatsapp"}\n` +
       `Nominal: Rp ${Number(row.amount ?? 0).toLocaleString("id-ID")}\n` +
-      `Jenis Exp: ${label}\n` +
       `Durasi: ${duration ? `${Number(duration)} hari` : "-"}\n` +
-      `Tanggal Exp: ${this.formatDate(expDate)}\n\n` +
-      `Transaksi ini sudah melewati batas exp ${label}.`
+      `Tanggal Exp: ${this.formatDate(expDate)}`
     );
   }
 
@@ -275,11 +309,15 @@ class SchedulerService {
                 tx.platform, tx.active_duration_days, tx.warranty_duration_days,
                 tx.active_expires_at, tx.warranty_expires_at,
                 tx.active_exp_notified_at, tx.warranty_exp_notified_at,
-                cs.nama_perintah,
+                tx.google_account_id, tx.gemini_price_plan_id, tx.buyer_email,
+                cs.nama_perintah, ga.email AS google_account_email,
+                gp.label AS gemini_price_plan_label,
                 b.id AS bot_id,
                 COALESCE(s.bot_info_phone_number, b.owner_phone_number, b.phone_number) AS owner_phone_number
            FROM cs_transactions tx
            LEFT JOIN customer_service cs ON cs.id = tx.cs_id
+           LEFT JOIN google_accounts ga ON ga.id = tx.google_account_id
+           LEFT JOIN gemini_price_plans gp ON gp.id = tx.gemini_price_plan_id
            LEFT JOIN app_settings s ON s.user_id = tx.user_id
            JOIN LATERAL (
              SELECT id, owner_phone_number, phone_number
@@ -295,14 +333,17 @@ class SchedulerService {
               (tx.active_expires_at IS NOT NULL
                AND COALESCE(tx.platform, '') <> 'pribadi'
                AND tx.active_expires_at < CURRENT_TIMESTAMP
+               AND tx.active_expires_at >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
                AND tx.active_exp_notified_at IS NULL)
               OR
               (tx.warranty_expires_at IS NOT NULL
                AND tx.warranty_expires_at < CURRENT_TIMESTAMP
+               AND tx.warranty_expires_at >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')
                AND tx.warranty_exp_notified_at IS NULL)
             )
           ORDER BY tx.active_expires_at NULLS LAST, tx.warranty_expires_at NULLS LAST
           LIMIT 100`,
+        [EXPIRY_NOTIFY_LOOKBACK_DAYS, EXPIRY_NOTIFY_LOOKBACK_DAYS],
       );
 
       let sentCount = 0;
@@ -323,7 +364,112 @@ class SchedulerService {
     }
   }
 
-  async executeBroadcast(broadcastId, userId) {
+  async findInterruptedBroadcastRuns(userId) {
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      `SELECT br.id, br.broadcast_id, br.user_id
+         FROM broadcast_runs br
+         JOIN broadcasts b ON b.id = br.broadcast_id
+        WHERE br.user_id = ?
+          AND br.status = 'interrupted'
+          AND b.is_active = 1
+        ORDER BY br.started_at ASC`,
+      [Number(userId)],
+    );
+    return rows;
+  }
+
+  async resumeInterruptedBroadcasts(userId) {
+    const runs = await this.findInterruptedBroadcastRuns(userId);
+    for (const run of runs) {
+      await this.executeBroadcast(run.broadcast_id, run.user_id, {
+        resumeRunId: Number(run.id),
+      });
+    }
+  }
+
+  async createBroadcastRun(pool, broadcastId, userId, targetGroups) {
+    const [result] = await pool.execute(
+      `INSERT INTO broadcast_runs (broadcast_id, user_id, status, total_targets, processed_targets)
+       VALUES (?, ?, 'running', ?, 0)`,
+      [Number(broadcastId), Number(userId), targetGroups.length],
+    );
+    const runId = Number(result.insertId);
+
+    for (const group of targetGroups) {
+      const status = group.isClosed ? "closed" : "pending";
+      await pool.execute(
+        `INSERT INTO broadcast_run_items
+           (run_id, broadcast_id, user_id, group_jid, group_name, status, processed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ${status === "closed" ? "CURRENT_TIMESTAMP" : "NULL"})
+         ON CONFLICT (run_id, group_jid) DO NOTHING`,
+        [
+          runId,
+          Number(broadcastId),
+          Number(userId),
+          String(group.group_jid),
+          String(group.name ?? group.group_jid ?? "-"),
+          status,
+        ],
+      );
+    }
+
+    await this.refreshBroadcastRunProgress(pool, runId);
+    return runId;
+  }
+
+  async refreshBroadcastRunProgress(pool, runId, finalStatus = null) {
+    const [counts] = await pool.execute(
+      `SELECT
+          COUNT(*) AS total_targets,
+          COUNT(*) FILTER (WHERE status IN ('sent', 'closed')) AS processed_targets,
+          COUNT(*) FILTER (WHERE status = 'pending') AS pending_targets,
+          COUNT(*) FILTER (WHERE status = 'failed') AS failed_targets
+         FROM broadcast_run_items
+        WHERE run_id = ?`,
+      [Number(runId)],
+    );
+    const count = counts[0] ?? {};
+    const total = Number(count.total_targets ?? 0);
+    const processed = Number(count.processed_targets ?? 0);
+    const pending = Number(count.pending_targets ?? 0);
+    const failed = Number(count.failed_targets ?? 0);
+    const status =
+      finalStatus ||
+      (pending === 0
+        ? failed > 0
+          ? "partial"
+          : "completed"
+        : "running");
+
+    await pool.execute(
+      `UPDATE broadcast_runs
+          SET total_targets = ?,
+              processed_targets = ?,
+              status = ?,
+              completed_at = CASE WHEN ? IN ('completed', 'partial', 'failed') THEN CURRENT_TIMESTAMP ELSE completed_at END
+        WHERE id = ?`,
+      [total, processed, status, status, Number(runId)],
+    );
+
+    return { total, processed, pending, failed, status };
+  }
+
+  async markBroadcastRunItem(pool, runId, jid, status, errorText = null) {
+    await pool.execute(
+      `UPDATE broadcast_run_items
+          SET status = ?,
+              error_text = ?,
+              attempt_count = attempt_count + 1,
+              processed_at = CASE WHEN ? IN ('sent', 'closed') THEN CURRENT_TIMESTAMP ELSE processed_at END
+        WHERE run_id = ?
+          AND group_jid = ?`,
+      [status, errorText, status, Number(runId), String(jid)],
+    );
+    return this.refreshBroadcastRunProgress(pool, runId);
+  }
+
+  async executeBroadcast(broadcastId, userId, options = {}) {
     try {
       const pool = getPool();
       const broadcastTable = await resolveBroadcastTable(pool);
@@ -401,6 +547,56 @@ class SchedulerService {
         closedGroups = selectedGroups.filter((group) => !this.isActiveFlag(group.is_active));
       }
 
+      const groupByJid = new Map();
+      for (const group of [...groups, ...closedGroups]) {
+        const jid = String(group.group_jid ?? "").trim();
+        if (!jid) continue;
+        groupByJid.set(jid, {
+          ...group,
+          group_jid: jid,
+          isClosed: !this.isActiveFlag(group.is_active),
+        });
+      }
+
+      const targetGroups = [...groupByJid.values()].filter((group) =>
+        this.isGroupJid(group.group_jid),
+      );
+      if (targetGroups.length === 0) {
+        logger.warn(`No valid target groups for broadcast ${broadcastId}`);
+        await pool.execute(
+          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+          [
+            userId,
+            "broadcast_failed",
+            `Broadcast "${broadcast.title}" tidak berjalan karena tidak ada group target yang valid`,
+          ],
+        );
+        return;
+      }
+
+      let runId = Number(options.resumeRunId) > 0 ? Number(options.resumeRunId) : 0;
+      if (!runId) {
+        const [interruptedRuns] = await pool.execute(
+          `SELECT id
+             FROM broadcast_runs
+            WHERE broadcast_id = ?
+              AND user_id = ?
+              AND status = 'interrupted'
+            ORDER BY started_at ASC
+            LIMIT 1`,
+          [Number(broadcastId), Number(userId)],
+        );
+        runId = Number(interruptedRuns[0]?.id ?? 0);
+      }
+      if (!runId) {
+        runId = await this.createBroadcastRun(pool, broadcastId, userId, targetGroups);
+      } else {
+        await pool.execute(
+          "UPDATE broadcast_runs SET status = 'running' WHERE id = ? AND status = 'interrupted'",
+          [runId],
+        );
+      }
+
       for (const group of closedGroups) {
         const groupName = String(group.name ?? group.group_jid ?? "-");
         await pool.execute(
@@ -408,7 +604,7 @@ class SchedulerService {
           [
             userId,
             "broadcast_group_closed",
-            `Group ${groupName} status group close jam ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`,
+            `Group ${groupName} ditutup dan dianggap sudah di-broadcast jam ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`,
           ],
         );
       }
@@ -420,21 +616,23 @@ class SchedulerService {
         );
       }
 
-      const groupJids = [
-        ...new Set(
-          groups
-            .map((g) => String(g.group_jid ?? "").trim())
-            .filter((jid) => this.isGroupJid(jid)),
-        ),
-      ];
+      const [pendingItems] = await pool.execute(
+        `SELECT group_jid
+           FROM broadcast_run_items
+          WHERE run_id = ?
+            AND status IN ('pending', 'failed')
+          ORDER BY id ASC`,
+        [runId],
+      );
+      const groupJids = pendingItems.map((item) => String(item.group_jid));
       if (groupJids.length === 0) {
-        logger.warn(`No active groups for broadcast ${broadcastId}`);
+        const progress = await this.refreshBroadcastRunProgress(pool, runId);
         await pool.execute(
           "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
           [
             userId,
-            "broadcast_failed",
-            `Broadcast "${broadcast.title}" tidak berjalan karena tidak ada group aktif yang valid`,
+            "broadcast_sent",
+            `Broadcast "${broadcast.title}" selesai ${progress.processed}/${progress.total} group`,
           ],
         );
         return;
@@ -450,33 +648,54 @@ class SchedulerService {
         return;
       }
 
+      const groupNameByJid = new Map(
+        targetGroups.map((group) => [String(group.group_jid), String(group.name ?? group.group_jid)]),
+      );
       const results = await messageService.sendBulkMessages(
         preferredConnection.sock,
         userId,
         groupJids,
         broadcast.message_text,
         broadcast.image_url || null,
+        {
+          onResult: async (result) => {
+            const status =
+              result.status === "sent"
+                ? "sent"
+                : result.status === "group_closed"
+                  ? "closed"
+                  : result.status === "connection_closed"
+                    ? "pending"
+                    : "failed";
+            const progress = await this.markBroadcastRunItem(
+              pool,
+              runId,
+              result.jid,
+              status,
+              result.error || null,
+            );
+            if (status === "sent" || status === "closed") {
+              const groupName = groupNameByJid.get(String(result.jid)) ?? String(result.jid);
+              await pool.execute(
+                "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
+                [
+                  userId,
+                  status === "closed" ? "broadcast_group_closed" : "broadcast_group_sent",
+                  status === "closed"
+                    ? `Group ${groupName} ditutup dan dianggap sudah di-broadcast (${progress.processed}/${progress.total})`
+                    : `Group ${groupName} berhasil di broadcast (${progress.processed}/${progress.total}) jam ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`,
+                ],
+              );
+            }
+          },
+        },
       );
 
-      const sentCount = results.filter((r) => r.status === "sent").length;
       const connectionClosed = results.some((r) => r.status === "connection_closed");
-      const groupNameByJid = new Map(
-        groups.map((group) => [String(group.group_jid), String(group.name ?? group.group_jid)]),
-      );
-      for (const result of results) {
-        if (result.status !== "sent") continue;
-        const groupName = groupNameByJid.get(String(result.jid)) ?? String(result.jid);
-        await pool.execute(
-          "INSERT INTO activity_logs (user_id, action, detail) VALUES (?, ?, ?)",
-          [
-            userId,
-            "broadcast_group_sent",
-            `Group ${groupName} berhasil di broadcast jam ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`,
-          ],
-        );
-      }
+      const progress = await this.refreshBroadcastRunProgress(pool, runId);
 
       if (connectionClosed) {
+        await this.refreshBroadcastRunProgress(pool, runId, "interrupted");
         await baileysManager.markBotConnectionClosed(
           preferredConnection.botId,
           userId,
@@ -486,7 +705,7 @@ class SchedulerService {
           [
             userId,
             "broadcast_failed",
-            `Broadcast "${broadcast.title}" berhenti karena koneksi bot WhatsApp terputus (${sentCount}/${groupJids.length} group terkirim)`,
+            `Broadcast "${broadcast.title}" berhenti karena koneksi bot WhatsApp terputus (${progress.processed}/${progress.total} group sudah diproses). Akan dilanjutkan setelah bot reconnect.`,
           ],
         );
         logger.warn(
@@ -500,7 +719,7 @@ class SchedulerService {
         [
           userId,
           "broadcast_sent",
-          `Broadcast "${broadcast.title}" dikirim ke ${sentCount}/${groupJids.length} group`,
+          `Broadcast "${broadcast.title}" dikirim ke ${progress.processed}/${progress.total} group`,
         ],
       );
       baileysManager.io?.to(`user_${userId}`).emit("bot_status", {
