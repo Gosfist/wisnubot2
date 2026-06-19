@@ -139,10 +139,18 @@ export interface CsStockSummaryModel {
 
 export interface GoogleAccountModel {
   id: number;
+  category: string;
   email: string;
+  subscriptionExpiresAt: string | null;
   totalSlots: number;
   usedSlots: number;
   isSuspended: boolean;
+  createdAt: string | null;
+}
+
+export interface GoogleAccountCategoryModel {
+  id: number;
+  name: string;
   createdAt: string | null;
 }
 

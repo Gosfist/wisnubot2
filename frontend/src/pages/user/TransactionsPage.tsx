@@ -70,16 +70,20 @@ function getGoogleAccountUsedSlots(item: GoogleAccountModel) {
   return Math.min(Math.max(item.usedSlots, 0), getGoogleAccountTotalSlots(item));
 }
 
+function getGoogleAccountAvailableSlots(item: GoogleAccountModel) {
+  return Math.max(getGoogleAccountTotalSlots(item) - getGoogleAccountUsedSlots(item), 0);
+}
+
 function isGoogleAccountAvailable(item: GoogleAccountModel) {
-  return !item.isSuspended && getGoogleAccountUsedSlots(item) < getGoogleAccountTotalSlots(item);
+  return !item.isSuspended && getGoogleAccountAvailableSlots(item) > 0;
 }
 
 function sortAvailableGoogleAccounts(items: GoogleAccountModel[]) {
   return items
     .filter(isGoogleAccountAvailable)
     .sort((a, b) => {
-      const usedDiff = getGoogleAccountUsedSlots(b) - getGoogleAccountUsedSlots(a);
-      if (usedDiff !== 0) return usedDiff;
+      const availableDiff = getGoogleAccountAvailableSlots(a) - getGoogleAccountAvailableSlots(b);
+      if (availableDiff !== 0) return availableDiff;
       return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
     });
 }
@@ -445,7 +449,9 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     return items.filter((item) => {
       if (q) {
         const googleText = String(item.googleAccountEmail ?? "").toLowerCase();
-        const searchableText = `${item.idTrx} ${googleText}`.toLowerCase();
+        const buyerEmailText = String(item.buyerEmail ?? item.customerJid ?? "").toLowerCase();
+        const buyerNameText = formatBuyerEmailDisplay(buyerEmailText).toLowerCase();
+        const searchableText = `${item.idTrx} ${googleText} ${buyerEmailText} ${buyerNameText}`.toLowerCase();
         if (!searchableText.includes(q)) return false;
       }
       if (hasStatusFilter && String(item.platform ?? "").trim().toLowerCase() === "pribadi") return false;
@@ -498,7 +504,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         const isCurrentAccount =
           (currentAccountId !== null && account.id === currentAccountId) ||
           (currentAccountEmail && account.email.trim().toLowerCase() === currentAccountEmail);
-        const hasAvailableSlot = !account.isSuspended && getGoogleAccountUsedSlots(account) < getGoogleAccountTotalSlots(account);
+        const hasAvailableSlot = !account.isSuspended && getGoogleAccountAvailableSlots(account) > 0;
         return isCurrentAccount || hasAvailableSlot;
       })
       .sort((a, b) => {
@@ -509,8 +515,8 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           (currentAccountId !== null && b.id === currentAccountId) ||
           (currentAccountEmail && b.email.trim().toLowerCase() === currentAccountEmail);
         if (aCurrent !== bCurrent) return aCurrent ? -1 : 1;
-        const usedDiff = getGoogleAccountUsedSlots(b) - getGoogleAccountUsedSlots(a);
-        if (usedDiff !== 0) return usedDiff;
+        const availableDiff = getGoogleAccountAvailableSlots(a) - getGoogleAccountAvailableSlots(b);
+        if (availableDiff !== 0) return availableDiff;
         return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
       });
   }, [editingItem?.googleAccountEmail, editingItem?.googleAccountId, googleAccounts]);
@@ -969,7 +975,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 className="h-full w-full rounded-none border-0 bg-transparent py-0 pl-9 pr-3 text-sm text-white outline-none placeholder:text-text-muted focus:border-0"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cari idTrx / Google"
+                placeholder="Cari no pesanan / Google / Email"
               />
             </label>
             <label className="relative block">
@@ -1239,7 +1245,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   <option value="">Pilih akun Google</option>
                   {availableGoogleAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
-                      {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
+                      {account.email} - {getGoogleAccountAvailableSlots(account)}/{getGoogleAccountTotalSlots(account)}
                     </option>
                   ))}
                 </select>
@@ -1433,7 +1439,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                   <option value="">Pilih akun Google</option>
                   {editableGoogleAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
-                      {account.email} - {getGoogleAccountUsedSlots(account)}/{getGoogleAccountTotalSlots(account)}
+                      {account.email} - {getGoogleAccountAvailableSlots(account)}/{getGoogleAccountTotalSlots(account)}
                     </option>
                   ))}
                 </select>

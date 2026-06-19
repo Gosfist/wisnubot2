@@ -100,6 +100,7 @@ const insertIdTables = new Set([
   'group_push_exclusions',
   'push_contact_runs',
   'google_accounts',
+  'google_account_categories',
   'gemini_price_plans',
 ]);
 

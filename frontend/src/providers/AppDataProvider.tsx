@@ -14,6 +14,7 @@ import type {
   CsStockModel,
   CsStockSummaryModel,
   GeminiPricePlanModel,
+  GoogleAccountCategoryModel,
   GoogleAccountModel,
   CustomerServiceItemModel,
   GroupModel,
@@ -60,7 +61,12 @@ interface AppDataContextValue {
   deleteStock: (stockId: number) => Promise<string>;
   clearStocks: (csId: number) => Promise<string>;
   fetchGoogleAccounts: () => Promise<GoogleAccountModel[]>;
-  createGoogleAccount: (payload: { email: string }) => Promise<GoogleAccountModel>;
+  fetchGoogleAccountCategories: () => Promise<GoogleAccountCategoryModel[]>;
+  createGoogleAccountCategory: (payload: { name: string }) => Promise<GoogleAccountCategoryModel>;
+  updateGoogleAccountCategory: (categoryId: number, payload: { name: string }) => Promise<GoogleAccountCategoryModel>;
+  deleteGoogleAccountCategory: (categoryId: number) => Promise<string>;
+  createGoogleAccount: (payload: { email: string; category?: string; subscriptionExpiresAt?: string | null }) => Promise<GoogleAccountModel>;
+  updateGoogleAccount: (accountId: number, payload: { email?: string; category?: string; subscriptionExpiresAt?: string | null }) => Promise<GoogleAccountModel>;
   setGoogleAccountSuspended: (accountId: number, suspended: boolean) => Promise<GoogleAccountModel>;
   deleteGoogleAccount: (accountId: number) => Promise<string>;
   fetchGeminiPricePlans: () => Promise<GeminiPricePlanModel[]>;
@@ -334,10 +340,20 @@ function parseGoogleAccount(payload: Record<string, unknown>): GoogleAccountMode
   const isFullPrivate = /\|\s*full\s+private\b/i.test(email);
   return {
     id: Number(payload.id ?? 0),
+    category: String(payload.category ?? ""),
     email,
+    subscriptionExpiresAt: payload.subscriptionExpiresAt ?? payload.subscription_expires_at ? String(payload.subscriptionExpiresAt ?? payload.subscription_expires_at) : null,
     totalSlots: isFullPrivate ? 1 : Number(payload.totalSlots ?? payload.total_slots ?? 5),
     usedSlots: Number(payload.usedSlots ?? payload.used_slots ?? 0),
     isSuspended: Boolean(payload.isSuspended ?? payload.is_suspended ?? false),
+    createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
+  };
+}
+
+function parseGoogleAccountCategory(payload: Record<string, unknown>): GoogleAccountCategoryModel {
+  return {
+    id: Number(payload.id ?? 0),
+    name: String(payload.name ?? ""),
     createdAt: payload.createdAt ?? payload.created_at ? String(payload.createdAt ?? payload.created_at) : null,
   };
 }
@@ -678,8 +694,37 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return trxGeminiInflightRef.current.googleAccounts;
   }
 
-  async function createGoogleAccount(payload: { email: string }): Promise<GoogleAccountModel> {
+  async function fetchGoogleAccountCategories(): Promise<GoogleAccountCategoryModel[]> {
+    const data = await apiFetch("/google-account-categories");
+    return ((data as { items: Record<string, unknown>[] }).items ?? []).map(parseGoogleAccountCategory);
+  }
+
+  async function createGoogleAccountCategory(payload: { name: string }): Promise<GoogleAccountCategoryModel> {
+    const data = await apiFetch("/google-account-categories", withJsonBody(payload));
+    invalidateTrxGeminiCache();
+    return parseGoogleAccountCategory((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function updateGoogleAccountCategory(categoryId: number, payload: { name: string }): Promise<GoogleAccountCategoryModel> {
+    const data = await apiFetch(`/google-account-categories/${categoryId}`, withJsonBody(payload, "PUT"));
+    invalidateTrxGeminiCache();
+    return parseGoogleAccountCategory((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function deleteGoogleAccountCategory(categoryId: number): Promise<string> {
+    const data = await apiFetch(`/google-account-categories/${categoryId}`, { method: "DELETE" });
+    invalidateTrxGeminiCache();
+    return String((data as { message: string }).message ?? "Kategori berhasil dihapus");
+  }
+
+  async function createGoogleAccount(payload: { email: string; category?: string; subscriptionExpiresAt?: string | null }): Promise<GoogleAccountModel> {
     const data = await apiFetch("/google-accounts", withJsonBody(payload));
+    invalidateTrxGeminiCache();
+    return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
+  }
+
+  async function updateGoogleAccount(accountId: number, payload: { email?: string; category?: string; subscriptionExpiresAt?: string | null }): Promise<GoogleAccountModel> {
+    const data = await apiFetch(`/google-accounts/${accountId}`, withJsonBody(payload, "PUT"));
     invalidateTrxGeminiCache();
     return parseGoogleAccount((data as { item: Record<string, unknown> }).item ?? {});
   }
@@ -955,7 +1000,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       deleteStock,
       clearStocks,
       fetchGoogleAccounts,
+      fetchGoogleAccountCategories,
+      createGoogleAccountCategory,
+      updateGoogleAccountCategory,
+      deleteGoogleAccountCategory,
       createGoogleAccount,
+      updateGoogleAccount,
       setGoogleAccountSuspended,
       deleteGoogleAccount,
       fetchGeminiPricePlans,

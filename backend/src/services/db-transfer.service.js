@@ -108,7 +108,7 @@ const CS_STOCK_COLUMNS = [
 ];
 
 const CONTACT_COLUMNS = ["user_id", "contact_jid", "first_replied_at", "created_at"];
-const GOOGLE_ACCOUNT_COLUMNS = ["user_id", "email", "total_slots", "created_at", "is_suspended"];
+const GOOGLE_ACCOUNT_COLUMNS = ["user_id", "email", "category", "subscription_expires_at", "total_slots", "created_at", "is_suspended"];
 const GEMINI_PRICE_COLUMNS = ["user_id", "label", "duration_days", "price", "is_active", "created_at", "updated_at"];
 
 const BROADCAST_COLUMNS = [
@@ -959,6 +959,8 @@ async function importGoogleAccounts(connection, userId, data) {
   await bulkInsertTableRows(connection, "google_accounts", rows, GOOGLE_ACCOUNT_COLUMNS, {
     onConflict: `ON CONFLICT (user_id, lower(email)) DO UPDATE SET
       total_slots = EXCLUDED.total_slots,
+      category = EXCLUDED.category,
+      subscription_expires_at = EXCLUDED.subscription_expires_at,
       created_at = EXCLUDED.created_at,
       is_suspended = EXCLUDED.is_suspended`,
   });

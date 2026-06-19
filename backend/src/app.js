@@ -32,6 +32,7 @@ import settingsRoutes from './routes/settings.routes.js';
 import ownerRoutes from './routes/owner.routes.js';
 import pushContactRoutes from './routes/push-contact.routes.js';
 import googleAccountRoutes from './routes/google-account.routes.js';
+import googleAccountCategoryRoutes from './routes/google-account-category.routes.js';
 import geminiPriceRoutes from './routes/gemini-price.routes.js';
 
 const app = express();
@@ -143,6 +144,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/owner', ownerRoutes);
 app.use('/api/push-contact', pushContactRoutes);
 app.use('/api/google-accounts', googleAccountRoutes);
+app.use('/api/google-account-categories', googleAccountCategoryRoutes);
 app.use('/api/gemini-prices', geminiPriceRoutes);
 
 // Health check

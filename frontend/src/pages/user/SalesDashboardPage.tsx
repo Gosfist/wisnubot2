@@ -68,6 +68,20 @@ export function SalesDashboardPage() {
     [googleAccounts],
   );
 
+  const activeGoogleAccountCount = useMemo(
+    () => googleAccounts.filter((item) => !item.isSuspended).length,
+    [googleAccounts],
+  );
+
+  const totalGoogleSlots = useMemo(
+    () =>
+      googleAccounts.reduce((sum, item) => {
+        if (item.isSuspended) return sum;
+        return sum + getGoogleAccountTotalSlots(item);
+      }, 0),
+    [googleAccounts],
+  );
+
   const totalBuyerCount = useMemo(
     () => transactions.reduce((sum, item) => sum + Math.max(1, Number(item.buyerCount ?? 1)), 0),
     [transactions],
@@ -101,13 +115,11 @@ export function SalesDashboardPage() {
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Total Penjualan" value={`Rp ${formatCurrency(totalRevenue)}`} />
-            <StatCard label="Jumlah TRX Gemini" value={String(totalBuyerCount)} />
-            <StatCard label="Akun Google" value={String(googleAccounts.length)} />
+            <StatCard label="Total Google Account" value={String(activeGoogleAccountCount)} />
+            <StatCard label="Total Slot" value={String(totalGoogleSlots)} />
             <StatCard label="Slot Tersedia" value={String(availableGoogleSlots)} />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
             <StatCard label="TRX Shopee" value={String(platformStats.shopee)} />
+            <StatCard label="Jumlah TRX Gemini" value={String(totalBuyerCount)} />
             <StatCard label="TRX WhatsApp" value={String(platformStats.whatsapp)} />
             <StatCard label="TRX Pribadi" value={String(platformStats.pribadi)} />
           </div>

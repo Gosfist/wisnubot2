@@ -25,11 +25,44 @@ function getEffectiveTotalSlots(row) {
   return isFullPrivateAccount(row.email) ? 1 : Number(row.total_slots ?? 5);
 }
 
+function normalizeCategory(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeNullableDate(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return new Date(`${raw}T00:00:00+07:00`).toISOString();
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+const ACTIVE_MEMBER_SLOT_CONDITION = `
+        AND tx.status = 'paid'
+        AND COALESCE(tx.member_status, 'anggota') = 'anggota'
+        AND (
+          (
+            COALESCE(tx.active_status, '') = 'aktif'
+            AND COALESCE(tx.platform, '') = 'pribadi'
+          )
+          OR (
+            COALESCE(tx.active_status, '') <> 'expired'
+            AND (
+              tx.active_expires_at IS NULL
+              OR tx.active_expires_at >= CURRENT_TIMESTAMP
+            )
+          )
+        )`;
+
 function mapAccount(row) {
   const totalSlots = getEffectiveTotalSlots(row);
   return {
     id: Number(row.id),
+    category: String(row.category ?? ""),
     email: String(row.email ?? ""),
+    subscriptionExpiresAt: row.subscription_expires_at ? String(row.subscription_expires_at) : null,
     totalSlots,
     usedSlots: Number(row.used_slots ?? 0),
     isSuspended: Boolean(row.is_suspended),
@@ -39,28 +72,16 @@ function mapAccount(row) {
 
 async function findForUserByEmail(pool, userId, email) {
   const [rows] = await pool.execute(
-    `SELECT ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at,
+    `SELECT ga.id, ga.category, ga.email, ga.subscription_expires_at, ga.total_slots, ga.is_suspended, ga.created_at,
             COALESCE(SUM(CASE WHEN tx.id IS NULL THEN 0 ELSE GREATEST(COALESCE(tx.buyer_count, 1), 1) END), 0) AS used_slots
        FROM google_accounts ga
        LEFT JOIN cs_transactions tx
          ON tx.google_account_id = ga.id
         AND tx.user_id = ga.user_id
-        AND tx.status = 'paid'
-        AND NOT (
-          tx.member_status = 'kick'
-          AND COALESCE(
-            tx.active_status,
-            CASE
-              WHEN COALESCE(tx.platform, '') <> 'pribadi'
-               AND tx.active_expires_at IS NOT NULL
-               AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
-              ELSE 'aktif'
-            END
-          ) = 'expired'
-        )
+        ${ACTIVE_MEMBER_SLOT_CONDITION}
       WHERE ga.user_id = ?
         AND lower(ga.email) = lower(?)
-      GROUP BY ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at
+      GROUP BY ga.id, ga.category, ga.email, ga.subscription_expires_at, ga.total_slots, ga.is_suspended, ga.created_at
       LIMIT 1`,
     [Number(userId), email],
   );
@@ -71,27 +92,15 @@ async function findForUserByEmail(pool, userId, email) {
 async function listForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at,
+    `SELECT ga.id, ga.category, ga.email, ga.subscription_expires_at, ga.total_slots, ga.is_suspended, ga.created_at,
             COALESCE(SUM(CASE WHEN tx.id IS NULL THEN 0 ELSE GREATEST(COALESCE(tx.buyer_count, 1), 1) END), 0) AS used_slots
        FROM google_accounts ga
        LEFT JOIN cs_transactions tx
          ON tx.google_account_id = ga.id
         AND tx.user_id = ga.user_id
-        AND tx.status = 'paid'
-        AND NOT (
-          tx.member_status = 'kick'
-          AND COALESCE(
-            tx.active_status,
-            CASE
-              WHEN COALESCE(tx.platform, '') <> 'pribadi'
-               AND tx.active_expires_at IS NOT NULL
-               AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
-              ELSE 'aktif'
-            END
-          ) = 'expired'
-        )
+        ${ACTIVE_MEMBER_SLOT_CONDITION}
       WHERE ga.user_id = ?
-      GROUP BY ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at
+      GROUP BY ga.id, ga.category, ga.email, ga.subscription_expires_at, ga.total_slots, ga.is_suspended, ga.created_at
       ORDER BY ga.created_at DESC, ga.id DESC`,
     [Number(user.id)],
   );
@@ -100,6 +109,8 @@ async function listForUser(user) {
 
 async function createForUser(user, payload) {
   const email = normalizeEmail(payload.email);
+  const category = normalizeCategory(payload.category);
+  const subscriptionExpiresAt = normalizeNullableDate(payload.subscriptionExpiresAt ?? payload.subscription_expires_at);
   if (!email) {
     throw new Error("Email akun Google wajib diisi");
   }
@@ -115,9 +126,9 @@ async function createForUser(user, payload) {
   let insertId = 0;
   try {
     const [result] = await pool.execute(
-      `INSERT INTO google_accounts (user_id, email, total_slots)
-       VALUES (?, ?, ?)`,
-      [userId, email, totalSlots],
+      `INSERT INTO google_accounts (user_id, email, category, subscription_expires_at, total_slots)
+       VALUES (?, ?, ?, ?, ?)`,
+      [userId, email, category || null, subscriptionExpiresAt, totalSlots],
     );
     insertId = Number(result.insertId ?? 0);
   } catch (err) {
@@ -133,7 +144,7 @@ async function createForUser(user, payload) {
   }
 
   const [rows] = await pool.execute(
-    `SELECT id, email, total_slots, is_suspended, created_at, 0 AS used_slots
+    `SELECT id, category, email, subscription_expires_at, total_slots, is_suspended, created_at, 0 AS used_slots
        FROM google_accounts
       WHERE id = ? AND user_id = ?
       LIMIT 1`,
@@ -141,6 +152,39 @@ async function createForUser(user, payload) {
   );
 
   return mapAccount(rows[0]);
+}
+
+async function updateForUser(user, accountId, payload) {
+  const id = Number(accountId);
+  if (!id) {
+    throw new Error("Google Account tidak valid");
+  }
+
+  const email = normalizeEmail(payload.email);
+  if (!email) {
+    throw new Error("Email akun Google wajib diisi");
+  }
+
+  const category = normalizeCategory(payload.category);
+  const subscriptionExpiresAt = normalizeNullableDate(payload.subscriptionExpiresAt ?? payload.subscription_expires_at);
+  const totalSlots = isFullPrivateAccount(email) ? 1 : 5;
+  const pool = getPool();
+  const [result] = await pool.execute(
+    `UPDATE google_accounts
+        SET email = ?,
+            category = ?,
+            subscription_expires_at = ?,
+            total_slots = ?
+      WHERE id = ?
+        AND user_id = ?`,
+    [email, category || null, subscriptionExpiresAt, totalSlots, id, Number(user.id)],
+  );
+
+  if (Number(result.affectedRows ?? 0) === 0) {
+    throw new Error("Google Account tidak ditemukan");
+  }
+
+  return findForUserByEmail(pool, Number(user.id), email);
 }
 
 async function setSuspendedForUser(user, accountId, suspended) {
@@ -164,28 +208,16 @@ async function setSuspendedForUser(user, accountId, suspended) {
   }
 
   const [rows] = await pool.execute(
-    `SELECT ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at,
+    `SELECT ga.id, ga.category, ga.email, ga.subscription_expires_at, ga.total_slots, ga.is_suspended, ga.created_at,
             COALESCE(SUM(CASE WHEN tx.id IS NULL THEN 0 ELSE GREATEST(COALESCE(tx.buyer_count, 1), 1) END), 0) AS used_slots
        FROM google_accounts ga
        LEFT JOIN cs_transactions tx
          ON tx.google_account_id = ga.id
         AND tx.user_id = ga.user_id
-        AND tx.status = 'paid'
-        AND NOT (
-          tx.member_status = 'kick'
-          AND COALESCE(
-            tx.active_status,
-            CASE
-              WHEN COALESCE(tx.platform, '') <> 'pribadi'
-               AND tx.active_expires_at IS NOT NULL
-               AND tx.active_expires_at < CURRENT_TIMESTAMP THEN 'expired'
-              ELSE 'aktif'
-            END
-          ) = 'expired'
-        )
+        ${ACTIVE_MEMBER_SLOT_CONDITION}
       WHERE ga.id = ?
         AND ga.user_id = ?
-      GROUP BY ga.id, ga.email, ga.total_slots, ga.is_suspended, ga.created_at
+      GROUP BY ga.id, ga.category, ga.email, ga.subscription_expires_at, ga.total_slots, ga.is_suspended, ga.created_at
       LIMIT 1`,
     [id, Number(user.id)],
   );
@@ -218,6 +250,7 @@ async function deleteForUser(user, accountId) {
 export const googleAccountService = {
   listForUser,
   createForUser,
+  updateForUser,
   setSuspendedForUser,
   deleteForUser,
 };

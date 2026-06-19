@@ -23,6 +23,17 @@ export async function createGoogleAccount(req, res) {
   }
 }
 
+export async function updateGoogleAccount(req, res) {
+  try {
+    const item = await googleAccountService.updateForUser(req.user, req.params.accountId, req.body);
+    realtimeService.emitTrxGeminiChanged(req.user.id, { source: "google_account_update" });
+    res.json({ message: "Google Account berhasil diubah", item });
+  } catch (err) {
+    logger.error(err, "Update google account error");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Gagal mengubah Google Account" });
+  }
+}
+
 export async function updateGoogleAccountSuspend(req, res) {
   try {
     const suspended = Boolean(req.body?.suspended ?? req.body?.isSuspended);
