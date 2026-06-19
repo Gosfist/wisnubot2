@@ -1,15 +1,20 @@
-async function importSocketonQuietly() {
+async function importWhatsappLibraryQuietly() {
   const originalConsoleLog = console.log;
   console.log = () => undefined;
   try {
-    const module = await import("socketon");
-    return module.default ?? module;
+    try {
+      return await import("@whiskeysockets/baileys");
+    } catch (err) {
+      logger.warn(err, "Official Baileys import failed, falling back to socketon");
+      const module = await import("socketon");
+      return module.default ?? module;
+    }
   } finally {
     console.log = originalConsoleLog;
   }
 }
 
-const pkg = await importSocketonQuietly();
+const pkg = await importWhatsappLibraryQuietly();
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -1147,7 +1152,8 @@ class BaileysManager {
           keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         logger: this.createBaileysLogger({ module: "baileys" }),
-        browser: options.usePairingCode ? PAIRING_BROWSER : DEFAULT_BROWSER,
+        browser: options.usePairingCode || isPendingPairing ? PAIRING_BROWSER : DEFAULT_BROWSER,
+        printQRInTerminal: isPendingPairing && !options.usePairingCode,
         syncFullHistory: false,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: true,

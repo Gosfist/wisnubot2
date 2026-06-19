@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { Bell, Bolt, Info, PlusCircle, RefreshCw, Save } from "lucide-react";
+import { Bell, Bolt, Info, PlusCircle, RefreshCw, Save, Trash2 } from "lucide-react";
 import { OwnerBotConnectModal } from "../../components/OwnerBotConnectModal";
 import { PageHeader } from "../../components/PageHeader";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -16,6 +16,7 @@ export function DashboardPage() {
   const [isLoading, setIsLoading] = useState(!appData.bots.length);
   const [error, setError] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
+  const [deletingBotId, setDeletingBotId] = useState<number | null>(null);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [connectPurpose, setConnectPurpose] = useState<DashboardBotPurpose>("main");
   const [activityLogs, setActivityLogs] = useState<ActivityLogModel[]>([]);
@@ -144,6 +145,24 @@ export function DashboardPage() {
     }
   }
 
+  async function handleDeleteBot(bot: BotModel) {
+    const confirmed = window.confirm(`Hapus bot ${bot.phoneNumber || ""}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingBotId(bot.id);
+    try {
+      const message = await appData.disconnectBot(bot.id);
+      await Promise.all([appData.refreshBots(), appData.refreshGroups(), refreshActivityLogs()]);
+      showToast(message, "success");
+    } catch (nextError) {
+      showToast(nextError instanceof Error ? nextError.message : "Gagal menghapus bot.", "danger");
+    } finally {
+      setDeletingBotId(null);
+    }
+  }
+
   function BotPanel({
     bot,
     purpose,
@@ -207,6 +226,17 @@ export function DashboardPage() {
             <PlusCircle size={15} />
             {bot ? "Ganti Bot" : "Tambah Bot"}
           </button>
+          {bot ? (
+            <button
+              className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.12)] px-3 py-2 text-sm font-semibold text-danger transition hover:bg-[rgba(239,68,68,0.18)] disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              onClick={() => void handleDeleteBot(bot)}
+              disabled={deletingBotId === bot.id}
+            >
+              <Trash2 size={15} />
+              {deletingBotId === bot.id ? "Menghapus..." : "Hapus Bot"}
+            </button>
+          ) : null}
         </div>
       </div>
     );
