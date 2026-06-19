@@ -159,9 +159,12 @@ export async function connectBot(req, res) {
       ...(normalizedPhoneNumber ? { expectedPhoneNumber: normalizedPhoneNumber } : {}),
       ...(normalizedOwnerPhoneNumber ? { ownerPhoneNumber: normalizedOwnerPhoneNumber } : {}),
     });
+    if (!usePairingCode) {
+      baileysManager.emitLatestQr(userId);
+    }
 
     res.json({
-      message: `Memulai pairing bot ${botPurposeLabel(botPurpose)} dengan pairing code`,
+      message: `Memulai pairing bot ${botPurposeLabel(botPurpose)} dengan barcode`,
       sessionName: pendingPairing.sessionName,
       pending: true,
       pairingCode: pendingPairing.pairingCode,

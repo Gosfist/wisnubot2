@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Copy } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
+import { QRCodeCanvas } from "qrcode.react";
 import { useAppData } from "../hooks/useAppData";
 import { useToast } from "../hooks/useToast";
-import { copyTextToClipboard } from "../lib/clipboard";
 import { socketService } from "../lib/socket";
 import { Modal } from "./Modal";
 
@@ -42,7 +42,7 @@ export function OwnerBotConnectModal({
   const { showToast } = useToast();
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneError, setPhoneError] = useState("");
-  const [pairingCode, setPairingCode] = useState("");
+  const [qrCode, setQrCode] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingSessionName, setPendingSessionName] = useState("");
@@ -78,7 +78,7 @@ export function OwnerBotConnectModal({
       setIsLoading(false);
       setPendingSessionName("");
       pendingSessionRef.current = "";
-      setPairingCode("");
+      setQrCode("");
 
       if (reason === "phone_mismatch") {
         showToast("Nomor yang dimasukkan tidak sesuai. Session dihapus, silakan coba lagi.", "danger");
@@ -92,21 +92,27 @@ export function OwnerBotConnectModal({
       if (reason === "qr_timeout" || reason === "offline_removed") {
         const message =
           reason === "qr_timeout"
-            ? "Pairing code kedaluwarsa dan session sudah dihapus. Silakan start lagi."
+            ? "Barcode kedaluwarsa dan session sudah dihapus. Silakan connect lagi."
             : "Bot offline, session dan data bot sudah dihapus. Silakan start lagi.";
         showToast(message, "danger");
       }
     });
 
+    const unsubscribeQr = socketService.onQr((qr) => {
+      setQrCode(qr);
+      setIsLoading(false);
+    });
+
     return () => {
       unsubscribeStatus();
+      unsubscribeQr();
     };
   }, [open, onConnected, showToast]);
 
   function resetState() {
     setPhoneNumber("");
     setPhoneError("");
-    setPairingCode("");
+    setQrCode("");
     setIsConnected(false);
     setIsLoading(false);
     setPendingSessionName("");
@@ -168,7 +174,7 @@ export function OwnerBotConnectModal({
 
     setIsLoading(true);
     setIsConnected(false);
-    setPairingCode("");
+    setQrCode("");
 
     try {
       if (pendingSessionRef.current) {
@@ -180,34 +186,15 @@ export function OwnerBotConnectModal({
       const result = await appData.connectBot({
         purpose,
         phoneNumber: normalizedPhoneNumber,
-        pairingMethod: "code",
+        pairingMethod: "qr",
       });
 
       const nextSessionName = String(result.sessionName ?? "");
-      const nextPairingCode = String(result.pairingCode ?? "");
       setPendingSessionName(nextSessionName);
       pendingSessionRef.current = nextSessionName;
-      setPairingCode(nextPairingCode);
-      setIsLoading(false);
     } catch (error) {
       setIsLoading(false);
-      showToast(error instanceof Error ? error.message : "Gagal membuat pairing code.", "danger");
-    }
-  }
-
-  async function handleCopyCode() {
-    if (!pairingCode) {
-      return;
-    }
-
-    try {
-      const copied = await copyTextToClipboard(pairingCode);
-      if (!copied) {
-        throw new Error("copy_failed");
-      }
-      showToast("Code berhasil disalin", "success");
-    } catch {
-      showToast("Gagal menyalin code", "danger");
+      showToast(error instanceof Error ? error.message : "Gagal membuat barcode.", "danger");
     }
   }
 
@@ -246,25 +233,17 @@ export function OwnerBotConnectModal({
 
 
             <div className="space-y-2">
-              <span className="text-sm font-semibold text-text-secondary">Code</span>
-              <div className="flex h-[54px] items-center justify-between gap-3 rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] px-4 text-sm text-white">
-                <div className="min-w-0 flex-1 font-semibold">
-                  <span
-                    className={`truncate font-bold tracking-[0.18em] ${pairingCode ? "text-white" : "text-text-muted"
-                      }`}
-                  >
-                    {pairingCode ? (pairingCode.length === 8 ? `${pairingCode.slice(0, 4)} - ${pairingCode.slice(4)}` : pairingCode) : "XXXX - XXXX"}
-                  </span>
-                </div>
-                <button
-                  className="inline-flex shrink-0 items-center gap-2 rounded-[14px] border border-[rgba(148,163,184,0.22)] bg-[rgba(148,163,184,0.14)] px-3 py-2 text-xs font-semibold text-text-primary transition hover:bg-[rgba(148,163,184,0.22)] disabled:cursor-not-allowed disabled:opacity-50"
-                  type="button"
-                  onClick={() => void handleCopyCode()}
-                  disabled={!pairingCode}
-                >
-                  <Copy size={14} />
-                  Salin
-                </button>
+              <span className="text-sm font-semibold text-text-secondary">Barcode</span>
+              <div className="grid min-h-[250px] place-items-center rounded-[18px] border border-[rgba(56,189,248,0.16)] bg-[rgba(15,23,42,0.72)] p-5">
+                {qrCode ? (
+                  <div className="rounded-[18px] bg-white p-4">
+                    <QRCodeCanvas value={qrCode} size={210} includeMargin={false} />
+                  </div>
+                ) : (
+                  <div className="text-center text-sm text-text-secondary">
+                    {isLoading ? "Menyiapkan barcode..." : "Masukkan nomor lalu klik Connect untuk menampilkan barcode."}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -274,7 +253,7 @@ export function OwnerBotConnectModal({
               onClick={handleStart}
               disabled={isLoading}
             >
-              START
+              {isLoading ? "MENYIAPKAN..." : qrCode ? "REFRESH BARCODE" : "CONNECT"}
             </button>
           </div>
         )}
