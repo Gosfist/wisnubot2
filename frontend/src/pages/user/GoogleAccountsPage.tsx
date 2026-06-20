@@ -31,7 +31,7 @@ type SelectedMember = {
 };
 
 type AccountSlotFilter = "all" | "available" | "full" | "suspended";
-type AccountSlotSort = "default" | "most" | "least";
+type AccountSlotSort = "default" | "most" | "least" | "subscription-longest" | "subscription-shortest";
 
 function splitBuyerEmails(item: TransactionModel) {
   const fallback = item.buyerEmail || item.customerJid;
@@ -66,6 +66,12 @@ function formatDate(value: string | null) {
     month: "short",
     year: "numeric",
   }).format(parsed);
+}
+
+function getSubscriptionSortTime(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
 function toDateInputValue(value: string | null) {
@@ -357,7 +363,7 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
       if (slotFilter === "available" && (item.isSuspended || full)) return false;
       if (slotFilter === "full" && (item.isSuspended || !full)) return false;
       if (slotFilter === "suspended" && !item.isSuspended) return false;
-      if (slotSort !== "default" && (item.isSuspended || full)) return false;
+      if ((slotSort === "most" || slotSort === "least") && (item.isSuspended || full)) return false;
       if (!keyword) return true;
 
       const statusText = item.isSuspended ? "google account suspended suspend" : "google account aktif";
@@ -367,6 +373,17 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
     if (slotSort === "default") return nextItems;
 
     return [...nextItems].sort((a, b) => {
+      if (slotSort === "subscription-longest" || slotSort === "subscription-shortest") {
+        const timeA = getSubscriptionSortTime(a.subscriptionExpiresAt);
+        const timeB = getSubscriptionSortTime(b.subscriptionExpiresAt);
+        if (timeA === null && timeB === null) return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
+        if (timeA === null) return 1;
+        if (timeB === null) return -1;
+        const diff = timeA - timeB;
+        if (diff !== 0) return slotSort === "subscription-shortest" ? diff : -diff;
+        return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
+      }
+
       const diff = getAvailableSlots(a) - getAvailableSlots(b);
       if (diff !== 0) return slotSort === "least" ? diff : -diff;
       return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
@@ -418,9 +435,11 @@ export function GoogleAccountsPage({ embedded = false }: { embedded?: boolean })
           value={slotSort}
           onChange={(event) => setSlotSort(event.target.value as AccountSlotSort)}
         >
-          <option className="bg-[#5b6473] text-white" value="default">Urut Slot</option>
+          <option className="bg-[#5b6473] text-white" value="default">Urut</option>
           <option className="bg-[#5b6473] text-white" value="most">Slot Terbanyak</option>
           <option className="bg-[#5b6473] text-white" value="least">Slot Tersedikit</option>
+          <option className="bg-[#5b6473] text-white" value="subscription-longest">Langganan Paling Lama</option>
+          <option className="bg-[#5b6473] text-white" value="subscription-shortest">Langganan Paling Sebentar</option>
         </select>
         <ChevronDown size={18} className="pointer-events-none absolute right-4 text-text-secondary" />
       </label>
