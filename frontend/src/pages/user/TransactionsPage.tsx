@@ -1595,7 +1595,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               />
             </label>
 
-            <label className="block space-y-1.5">
+            <label className={cn("block space-y-1.5", editForm.platform !== "whatsapp" && "md:col-span-2")}>
               <span className="text-xs font-semibold text-text-secondary">Email</span>
               <input
                 className={editControlClass}
