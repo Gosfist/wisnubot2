@@ -181,7 +181,7 @@ export interface TransactionModel {
   stockContent: string | null;
   platform: string;
   activeStatus: "aktif" | "expired" | null;
-  memberStatus: "anggota" | "kick";
+  memberStatus: "anggota" | "kick" | "keluar";
   reportStatus: "proses" | "selesai";
   proofDriveFileId: string | null;
   proofDriveUrl: string | null;
