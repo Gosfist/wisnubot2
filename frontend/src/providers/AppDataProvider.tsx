@@ -371,6 +371,7 @@ function parseGeminiPricePlan(payload: Record<string, unknown>): GeminiPricePlan
 }
 
 function parseTransaction(payload: Record<string, unknown>): TransactionModel {
+  const rawMemberStatus = String(payload.memberStatus ?? payload.member_status ?? "anggota").toLowerCase();
   return {
     id: Number(payload.id ?? 0),
     idTrx: String(payload.idTrx ?? payload.id_trx ?? ""),
@@ -392,7 +393,7 @@ function parseTransaction(payload: Record<string, unknown>): TransactionModel {
     activeStatus: payload.activeStatus ?? payload.active_status
       ? (String(payload.activeStatus ?? payload.active_status).toLowerCase() === "expired" ? "expired" : "aktif")
       : null,
-    memberStatus: String(payload.memberStatus ?? payload.member_status ?? "anggota").toLowerCase() === "kick" ? "kick" : "anggota",
+    memberStatus: rawMemberStatus === "kick" || rawMemberStatus === "keluar" ? rawMemberStatus : "anggota",
     reportStatus: String(payload.reportStatus ?? payload.report_status ?? "proses").toLowerCase() === "selesai" ? "selesai" : "proses",
     proofDriveFileId: payload.proofDriveFileId ?? payload.proof_drive_file_id ? String(payload.proofDriveFileId ?? payload.proof_drive_file_id) : null,
     proofDriveUrl: payload.proofDriveUrl ?? payload.proof_drive_url ? String(payload.proofDriveUrl ?? payload.proof_drive_url) : null,

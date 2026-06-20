@@ -21,6 +21,11 @@ function formatCustomerJid(value: string) {
   return value.replace("@s.whatsapp.net", "");
 }
 
+function formatWhatsappNumber(value: string) {
+  const formatted = formatCustomerJid(value);
+  return formatted.includes("@") ? "" : formatted;
+}
+
 function formatBuyerEmailDisplay(value: string) {
   return String(value ?? "")
     .split(/[,;\n]+/)
@@ -74,6 +79,14 @@ function getGoogleAccountAvailableSlots(item: GoogleAccountModel) {
   return Math.max(getGoogleAccountTotalSlots(item) - getGoogleAccountUsedSlots(item), 0);
 }
 
+function getGoogleAccountCategoryLabel(item: GoogleAccountModel) {
+  return item.category?.trim() || "No kategori";
+}
+
+function getGoogleAccountSlotLabel(item: GoogleAccountModel) {
+  return `${getGoogleAccountAvailableSlots(item)} slot`;
+}
+
 function isGoogleAccountAvailable(item: GoogleAccountModel) {
   return !item.isSuspended && getGoogleAccountAvailableSlots(item) > 0;
 }
@@ -86,6 +99,96 @@ function sortAvailableGoogleAccounts(items: GoogleAccountModel[]) {
       if (availableDiff !== 0) return availableDiff;
       return a.email.localeCompare(b.email, "id", { sensitivity: "base", numeric: true });
     });
+}
+
+function GoogleAccountSelect({
+  accounts,
+  value,
+  onChange,
+  className,
+}: {
+  accounts: GoogleAccountModel[];
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selectedAccount = accounts.find((account) => String(account.id) === value) ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleDocumentMouseDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    return () => document.removeEventListener("mousedown", handleDocumentMouseDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        className={cn(
+          "flex min-h-[52px] w-full items-center gap-3 rounded-[14px] border border-glass-border bg-card px-4 py-3.5 text-left text-text-primary outline-none transition focus:border-accent",
+          className,
+        )}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className={cn("min-w-0 flex-1 truncate text-sm", !selectedAccount && "text-text-secondary")}>
+          {selectedAccount
+            ? `${getGoogleAccountCategoryLabel(selectedAccount)} - ${selectedAccount.email} `
+            : "Pilih akun Google"}
+          {selectedAccount ? <span className="font-extrabold text-success">{getGoogleAccountSlotLabel(selectedAccount)}</span> : null}
+        </span>
+        <ChevronDown size={16} className={cn("shrink-0 text-white transition", open && "rotate-180")} />
+      </button>
+
+      {open ? (
+        <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-[14px] border border-glass-border bg-card py-1.5 shadow-soft [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            className={cn(
+              "flex w-full items-center px-4 py-2.5 text-left text-text-secondary transition hover:bg-primary hover:text-white",
+              !value && "bg-primary text-white",
+            )}
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            Pilih akun Google
+          </button>
+          {accounts.map((account) => {
+            const active = String(account.id) === value;
+            return (
+              <button
+                key={account.id}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-3 px-4 py-2.5 text-left text-white transition hover:bg-primary",
+                  active && "bg-primary",
+                )}
+                onClick={() => {
+                  onChange(String(account.id));
+                  setOpen(false);
+                }}
+              >
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {getGoogleAccountCategoryLabel(account)} - {account.email}
+                </span>
+                <span className="shrink-0 text-sm font-extrabold text-success">{getGoogleAccountSlotLabel(account)}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function getDefaultPricePlanForPlatform(plans: GeminiPricePlanModel[], platform: string) {
@@ -289,7 +392,24 @@ function normalizeActiveStatusImport(value: unknown) {
 
 function normalizeMemberStatusImport(value: unknown) {
   const raw = String(value ?? "").trim().toLowerCase();
-  return raw === "kick" ? "kick" : "anggota";
+  if (raw === "kick" || raw === "keluar") return raw;
+  return "anggota";
+}
+
+function normalizeMemberStatus(value: unknown): TransactionModel["memberStatus"] {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return raw === "kick" || raw === "keluar" ? raw : "anggota";
+}
+
+function isInactiveMemberStatus(value: unknown) {
+  return normalizeMemberStatus(value) !== "anggota";
+}
+
+function getMemberStatusLabel(value: unknown) {
+  const status = normalizeMemberStatus(value);
+  if (status === "kick") return "KICK";
+  if (status === "keluar") return "KELUAR";
+  return "ANGGOTA";
 }
 
 function normalizePlatformImport(value: unknown) {
@@ -403,6 +523,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
     googleAccountId: "",
     idTrx: "",
     buyerEmail: "",
+    phoneNumber: "",
     platform: "",
     reportStatus: "proses",
     activeStatus: "aktif",
@@ -459,7 +580,9 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       const activeStatus = getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform).toLowerCase();
       if (activeStatusFilter !== "all" && activeStatus !== activeStatusFilter) return false;
 
-      if (memberStatusFilter !== "all" && item.memberStatus !== memberStatusFilter) return false;
+      if (memberStatusFilter === "anggota" && normalizeMemberStatus(item.memberStatus) !== "anggota") return false;
+      if (memberStatusFilter === "kick" && !isInactiveMemberStatus(item.memberStatus)) return false;
+      if (memberStatusFilter === "keluar" && normalizeMemberStatus(item.memberStatus) !== "keluar") return false;
 
       if (reportStatusFilter !== "all" && item.reportStatus !== reportStatusFilter) return false;
 
@@ -584,10 +707,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       googleAccountId: matchedAccount ? String(matchedAccount.id) : "",
       idTrx: item.idTrx,
       buyerEmail: item.buyerEmail ?? formatCustomerJid(item.customerJid),
+      phoneNumber: formatWhatsappNumber(item.customerJid),
       platform: item.platform || "whatsapp",
       reportStatus: item.reportStatus,
       activeStatus: getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform).toLowerCase(),
-      memberStatus: item.memberStatus,
+      memberStatus: normalizeMemberStatus(item.memberStatus),
       activeStartAt: toDateOnlyInputValue(item.activeStartAt),
       activeExpiresAt: toDateOnlyInputValue(item.activeExpiresAt),
       warrantyExpiresAt: toDateOnlyInputValue(item.warrantyExpiresAt),
@@ -680,7 +804,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       Exp: formatShortDate(item.activeExpiresAt),
       Laporan: item.reportStatus === "selesai" ? "Selesai" : "Proses",
       "Masa Aktif": getActiveStatus(item.activeExpiresAt, item.activeStatus, item.platform),
-      "Status Akun": item.memberStatus === "kick" ? "kick" : "Anggota",
+      "Status Akun": getMemberStatusLabel(item.memberStatus),
       Total: item.amount,
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -827,11 +951,13 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
         googleAccountId: Number(editForm.googleAccountId),
         idTrx: editForm.idTrx,
         buyerEmail: normalizeBuyerEmail(editForm.buyerEmail, { requireGmail: true }),
-        noBuyer: normalizeBuyerEmail(editForm.buyerEmail, { requireGmail: true }),
+        phoneNumber: editForm.platform === "whatsapp" ? editForm.phoneNumber : undefined,
+        noBuyer: editForm.platform === "whatsapp" ? editForm.phoneNumber : normalizeBuyerEmail(editForm.buyerEmail, { requireGmail: true }),
+        customerJid: editForm.platform === "whatsapp" ? editForm.phoneNumber : normalizeBuyerEmail(editForm.buyerEmail, { requireGmail: true }),
         platform: editForm.platform,
         reportStatus: editForm.reportStatus,
         activeStatus: editForm.activeStatus,
-        memberStatus: editForm.memberStatus,
+        memberStatus: normalizeMemberStatus(editForm.memberStatus),
         amount: editingItem.amount,
         activeStartAt: normalizeDateTextInput(editForm.activeStartAt),
         activeExpiresAt: normalizeDateTextInput(editForm.activeExpiresAt),
@@ -876,11 +1002,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
       ...editingItem,
       idTrx: editForm.idTrx,
       buyerEmail: normalizeBuyerEmail(editForm.buyerEmail),
-      customerJid: normalizeBuyerEmail(editForm.buyerEmail) || editingItem.customerJid,
+      customerJid: editForm.platform === "whatsapp" ? editForm.phoneNumber || editingItem.customerJid : normalizeBuyerEmail(editForm.buyerEmail) || editingItem.customerJid,
       platform: editForm.platform,
       reportStatus: editForm.reportStatus === "selesai" ? "selesai" : "proses",
       activeStatus: editForm.activeStatus === "expired" ? "expired" : "aktif",
-      memberStatus: editForm.memberStatus === "kick" ? "kick" : "anggota",
+      memberStatus: normalizeMemberStatus(editForm.memberStatus),
       activeStartAt: normalizeDateTextInput(editForm.activeStartAt) || editingItem.activeStartAt,
       activeExpiresAt: normalizeDateTextInput(editForm.activeExpiresAt) || editingItem.activeExpiresAt,
       warrantyExpiresAt: normalizeDateTextInput(editForm.warrantyExpiresAt) || editingItem.warrantyExpiresAt,
@@ -1027,6 +1153,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 <option value="all">Status</option>
                 <option value="anggota">Anggota</option>
                 <option value="kick">Kick</option>
+                <option value="keluar">Keluar</option>
               </select>
               <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
             </label>
@@ -1148,12 +1275,12 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                         <td className="px-2 py-2.5 text-center">
                           <span
                             className={
-                              item.memberStatus === "kick"
+                              isInactiveMemberStatus(item.memberStatus)
                                 ? "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(239,68,68,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-danger"
                                 : "inline-flex min-w-[68px] justify-center rounded-[10px] bg-[rgba(56,189,248,0.14)] px-2.5 py-1.5 text-[11px] font-extrabold uppercase text-accent"
                             }
                           >
-                            {item.memberStatus === "kick" ? "KICK" : "ANGGOTA"}
+                            {getMemberStatusLabel(item.memberStatus)}
                           </span>
                         </td>
                         <td className="px-2 py-2.5">
@@ -1236,21 +1363,11 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block space-y-2">
               <span className="text-sm font-semibold text-text-secondary">Akun Google</span>
-              <div className="relative">
-                <select
-                  className="w-full appearance-none pr-11"
-                  value={manualForm.googleAccountId}
-                  onChange={(event) => setManualForm((current) => ({ ...current, googleAccountId: event.target.value }))}
-                >
-                  <option value="">Pilih akun Google</option>
-                  {availableGoogleAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.email} - {getGoogleAccountAvailableSlots(account)}/{getGoogleAccountTotalSlots(account)}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
-              </div>
+              <GoogleAccountSelect
+                accounts={availableGoogleAccounts}
+                value={manualForm.googleAccountId}
+                onChange={(googleAccountId) => setManualForm((current) => ({ ...current, googleAccountId }))}
+              />
             </label>
 
             <label className="block space-y-2">
@@ -1430,21 +1547,12 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block space-y-1.5">
               <span className="text-xs font-semibold text-text-secondary">Akun Google</span>
-              <div className="relative">
-                <select
-                  className={cn(editControlClass, "appearance-none pr-11")}
-                  value={editForm.googleAccountId}
-                  onChange={(event) => setEditForm((current) => ({ ...current, googleAccountId: event.target.value }))}
-                >
-                  <option value="">Pilih akun Google</option>
-                  {editableGoogleAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.email} - {getGoogleAccountAvailableSlots(account)}/{getGoogleAccountTotalSlots(account)}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
-              </div>
+              <GoogleAccountSelect
+                accounts={editableGoogleAccounts}
+                value={editForm.googleAccountId}
+                onChange={(googleAccountId) => setEditForm((current) => ({ ...current, googleAccountId }))}
+                className={cn(editControlClass, "min-h-[42px]")}
+              />
             </label>
 
             <label className="block space-y-1.5">
@@ -1497,6 +1605,21 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
               />
             </label>
 
+            {editForm.platform === "whatsapp" ? (
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-text-secondary">Nomor WA</span>
+                <input
+                  className={editControlClass}
+                  value={editForm.phoneNumber}
+                  onChange={(event) => setEditForm((current) => ({ ...current, phoneNumber: event.target.value }))}
+                  placeholder="62812xxxx"
+                  inputMode="tel"
+                />
+              </label>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
             <label className="block space-y-1.5">
               <span className="text-xs font-semibold text-text-secondary">Masa Aktif</span>
               <div className="relative">
@@ -1522,6 +1645,7 @@ export function TransactionsPage({ embedded = false }: { embedded?: boolean }) {
                 >
                   <option value="anggota">ANGGOTA</option>
                   <option value="kick">KICK</option>
+                  <option value="keluar">KELUAR</option>
                 </select>
                 <ChevronDown size={16} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white" />
               </div>

@@ -2235,12 +2235,9 @@ async function createManualTransactionForUser(user, payload) {
   const activeStatus = normalizeActiveStatus(
     payload.activeStatus ?? payload.active_status,
   );
-  const memberStatus =
-    String(payload.memberStatus ?? payload.member_status ?? "anggota")
-      .trim()
-      .toLowerCase() === "kick"
-      ? "kick"
-      : "anggota";
+  const memberStatus = normalizeMemberStatus(
+    payload.memberStatus ?? payload.member_status,
+  );
   const orderStatus = normalizeOrderStatus(
     payload.orderStatus ?? payload.order_status ?? payload.statusText,
   );
@@ -2410,6 +2407,11 @@ function normalizeCustomerJid(value) {
   return phone ? `${phone}@s.whatsapp.net` : "";
 }
 
+function normalizeMemberStatus(value) {
+  const raw = String(value ?? "anggota").trim().toLowerCase();
+  return raw === "kick" || raw === "keluar" ? raw : "anggota";
+}
+
 function nullableDate(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
@@ -2444,17 +2446,21 @@ async function updateTransactionForUser(user, transactionId, payload) {
     payload.buyerEmail ?? payload.email ?? payload.buyer_email,
   );
   const customerJid =
-    buyerEmail ||
     normalizeCustomerJid(
-      payload.noBuyer ?? payload.customerJid ?? payload.customer_jid,
-    );
+      payload.phoneNumber ??
+        payload.phone_number ??
+        payload.noHp ??
+        payload.no_hp ??
+        payload.waNumber ??
+        payload.wa_number ??
+        payload.noBuyer ??
+        payload.customerJid ??
+        payload.customer_jid,
+    ) || buyerEmail;
   const platform = normalizePlatform(payload.platform || "shopee");
-  const memberStatus =
-    String(payload.memberStatus ?? payload.member_status ?? "anggota")
-      .trim()
-      .toLowerCase() === "kick"
-      ? "kick"
-      : "anggota";
+  const memberStatus = normalizeMemberStatus(
+    payload.memberStatus ?? payload.member_status,
+  );
   const reportStatus = normalizeReportStatusForPlatform(
     platform,
     payload.reportStatus ?? payload.report_status,
