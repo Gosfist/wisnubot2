@@ -1,14 +1,5 @@
 import { getPool } from "../config/database.js";
 
-const FIXED_PRICE_PLANS = [
-  { label: "SHP 1 Bulan", durationDays: 30, price: 10000 },
-  { label: "SHP 2 Bulan", durationDays: 60, price: 20000 },
-  { label: "SHP 3 Bulan", durationDays: 90, price: 30000 },
-  { label: "WA 1 Bulan", durationDays: 30, price: 15000 },
-  { label: "WA 2 Bulan", durationDays: 60, price: 25000 },
-  { label: "WA 3 Bulan", durationDays: 90, price: 35000 },
-];
-
 function mapPlan(row) {
   return {
     id: Number(row.id),
@@ -22,53 +13,72 @@ function mapPlan(row) {
 }
 
 function normalizeMutablePayload(payload = {}) {
+  const label = String(payload.label ?? payload.nama ?? "").trim();
+  const durationDays = Math.floor(
+    Number(payload.durationDays ?? payload.duration_days ?? payload.masaAktif ?? 0),
+  );
   const price = Math.floor(Number(payload.price ?? 0));
   const isActive = Boolean(payload.isActive ?? payload.is_active ?? true);
 
+  if (!label) {
+    throw new Error("Nama harga wajib diisi");
+  }
+  if (!Number.isFinite(durationDays) || durationDays <= 0) {
+    throw new Error("Masa aktif wajib diisi dalam hari");
+  }
   if (!Number.isFinite(price) || price <= 0) {
     throw new Error("Harga wajib lebih dari 0");
   }
 
-  return { price, isActive };
-}
-
-async function ensureFixedPlansForUser(userId) {
-  const pool = getPool();
-  for (const plan of FIXED_PRICE_PLANS) {
-    const [rows] = await pool.execute(
-      "SELECT id FROM gemini_price_plans WHERE user_id = ? AND label = ? LIMIT 1",
-      [Number(userId), plan.label],
-    );
-    if (rows.length > 0) continue;
-
-    await pool.execute(
-      `INSERT INTO gemini_price_plans (user_id, label, duration_days, price, is_active)
-       VALUES (?, ?, ?, ?, 1)`,
-      [Number(userId), plan.label, plan.durationDays, plan.price],
-    );
-  }
+  return { label, durationDays, price, isActive };
 }
 
 async function listForUser(user) {
-  await ensureFixedPlansForUser(user.id);
   const pool = getPool();
-  const fixedLabels = FIXED_PRICE_PLANS.map((plan) => plan.label);
   const [rows] = await pool.execute(
     `SELECT id, label, duration_days, price, is_active, created_at, updated_at
        FROM gemini_price_plans
       WHERE user_id = ?
-        AND label IN (${fixedLabels.map(() => "?").join(", ")})
-      ORDER BY CASE WHEN label LIKE 'SHP %' THEN 0 ELSE 1 END,
+      ORDER BY is_active DESC,
                duration_days ASC,
+               lower(label) ASC,
                id ASC`,
-    [Number(user.id), ...fixedLabels],
+    [Number(user.id)],
   );
   return rows.map(mapPlan);
 }
 
 async function createForUser(user, payload) {
-  await ensureFixedPlansForUser(user.id);
-  throw new Error("Paket harga sudah fix. Edit harga dan status saja.");
+  const normalized = normalizeMutablePayload(payload);
+  const pool = getPool();
+
+  const [exists] = await pool.execute(
+    "SELECT id FROM gemini_price_plans WHERE user_id = ? AND lower(label) = lower(?) LIMIT 1",
+    [Number(user.id), normalized.label],
+  );
+  if (exists.length > 0) {
+    throw new Error("Nama harga sudah digunakan");
+  }
+
+  const [result] = await pool.execute(
+    `INSERT INTO gemini_price_plans (user_id, label, duration_days, price, is_active)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
+      Number(user.id),
+      normalized.label,
+      normalized.durationDays,
+      normalized.price,
+      normalized.isActive ? 1 : 0,
+    ],
+  );
+  const [rows] = await pool.execute(
+    `SELECT id, label, duration_days, price, is_active, created_at, updated_at
+       FROM gemini_price_plans
+      WHERE id = ? AND user_id = ?
+      LIMIT 1`,
+    [Number(result.insertId), Number(user.id)],
+  );
+  return mapPlan(rows[0]);
 }
 
 async function updateForUser(user, planId, payload) {
@@ -77,19 +87,34 @@ async function updateForUser(user, planId, payload) {
   if (!id) throw new Error("Paket harga tidak valid");
 
   const pool = getPool();
+  const [exists] = await pool.execute(
+    `SELECT id
+       FROM gemini_price_plans
+      WHERE user_id = ?
+        AND lower(label) = lower(?)
+        AND id <> ?
+      LIMIT 1`,
+    [Number(user.id), normalized.label, id],
+  );
+  if (exists.length > 0) {
+    throw new Error("Nama harga sudah digunakan");
+  }
+
   const [result] = await pool.execute(
     `UPDATE gemini_price_plans
-        SET price = ?,
+        SET label = ?,
+            duration_days = ?,
+            price = ?,
             is_active = ?,
             updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND user_id = ?
-        AND label IN (${FIXED_PRICE_PLANS.map(() => "?").join(", ")})`,
+      WHERE id = ? AND user_id = ?`,
     [
+      normalized.label,
+      normalized.durationDays,
       normalized.price,
       normalized.isActive ? 1 : 0,
       id,
       Number(user.id),
-      ...FIXED_PRICE_PLANS.map((plan) => plan.label),
     ],
   );
   if (Number(result.affectedRows ?? 0) === 0) {
@@ -107,7 +132,15 @@ async function updateForUser(user, planId, payload) {
 }
 
 async function deleteForUser(user, planId) {
-  throw new Error("Paket harga fix tidak bisa dihapus. Ubah status menjadi non aktif.");
+  const id = Number(planId);
+  if (!id) throw new Error("Paket harga tidak valid");
+
+  const pool = getPool();
+  const [result] = await pool.execute(
+    "DELETE FROM gemini_price_plans WHERE id = ? AND user_id = ?",
+    [id, Number(user.id)],
+  );
+  return Number(result.affectedRows ?? 0) > 0;
 }
 
 async function getActiveForUser(userId, planId) {
