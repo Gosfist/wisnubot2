@@ -1,4 +1,4 @@
-import { Edit2 } from "lucide-react";
+import { Edit2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { SurfaceCard } from "../../components/SurfaceCard";
@@ -8,7 +8,6 @@ import { useToast } from "../../hooks/useToast";
 import type { GeminiPricePlanModel } from "../../types/models";
 
 function formatDurationLabel(days: number) {
-  if (days % 30 === 0) return `${days / 30} Bulan`;
   return `${days} Hari`;
 }
 
@@ -62,18 +61,30 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
     setIsModalOpen(true);
   }
 
+  function openCreateModal() {
+    setEditingItem(null);
+    setForm(defaultForm());
+    setIsModalOpen(true);
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const payload = {
+      label: form.label.trim(),
+      durationDays: Number(form.durationDays),
       price: Number(form.price),
       isActive: form.isActive === "true",
     };
 
     setSaving(true);
     try {
-      if (!editingItem) return;
-      await appData.updateGeminiPricePlan(editingItem.id, payload);
-      showToast("Harga Gemini berhasil diperbarui.", "success");
+      if (editingItem) {
+        await appData.updateGeminiPricePlan(editingItem.id, payload);
+        showToast("Harga Gemini berhasil diperbarui.", "success");
+      } else {
+        await appData.createGeminiPricePlan(payload);
+        showToast("Harga Gemini berhasil ditambahkan.", "success");
+      }
       const nextItems = await appData.fetchGeminiPricePlans();
       setItems(nextItems);
       setIsModalOpen(false);
@@ -86,8 +97,35 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
+  async function handleDelete(item: GeminiPricePlanModel) {
+    if (!window.confirm(`Hapus harga "${item.label}"?`)) return;
+    setSaving(true);
+    try {
+      await appData.deleteGeminiPricePlan(item.id);
+      showToast("Harga Gemini berhasil dihapus.", "success");
+      const nextItems = await appData.fetchGeminiPricePlans();
+      setItems(nextItems);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Gagal menghapus harga Gemini.", "danger");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          className="inline-flex items-center justify-center gap-2 rounded-[14px] bg-linear-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-white shadow-glow transition hover:brightness-110 disabled:opacity-60"
+          type="button"
+          onClick={openCreateModal}
+          disabled={saving}
+        >
+          <Plus size={16} />
+          Tambah Harga
+        </button>
+      </div>
+
       {loading ? null : items.length === 0 ? (
         <SurfaceCard className="py-10 text-center text-sm text-text-secondary">
           Belum ada harga Gemini.
@@ -140,6 +178,16 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
                         >
                           <Edit2 size={15} />
                         </button>
+                        <button
+                          className="inline-flex size-8 items-center justify-center rounded-[10px] border border-[rgba(248,113,113,0.26)] text-danger transition hover:bg-[rgba(248,113,113,0.08)] disabled:opacity-50"
+                          type="button"
+                          onClick={() => void handleDelete(item)}
+                          aria-label="Hapus harga"
+                          title="Hapus harga"
+                          disabled={saving}
+                        >
+                          <Trash2 size={15} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -153,7 +201,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
 
       <Modal
         open={isModalOpen}
-        title="Edit Harga"
+        title={editingItem ? "Edit Harga" : "Tambah Harga"}
         onClose={() => setIsModalOpen(false)}
       >
         <form className="space-y-5" onSubmit={handleSubmit}>
@@ -161,21 +209,23 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
             <span className="text-sm font-semibold text-text-secondary">Nama</span>
             <input
               value={form.label}
-              readOnly
-              disabled
+              onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))}
+              placeholder="contoh: SHP 45 Hari"
+              required
             />
           </label>
 
           <label className="block space-y-2">
             <span className="text-sm font-semibold text-text-secondary">Masa Aktif</span>
-            <select
+            <input
+              type="number"
+              min="1"
+              step="1"
               value={form.durationDays}
-              disabled
-            >
-              <option value="30">1 Bulan</option>
-              <option value="60">2 Bulan</option>
-              <option value="90">3 Bulan</option>
-            </select>
+              onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))}
+              placeholder="30"
+              required
+            />
           </label>
 
           <label className="block space-y-2">
@@ -183,9 +233,11 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
             <input
               type="number"
               min="1"
+              step="1"
               value={form.price}
               onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))}
               placeholder="10000"
+              required
             />
           </label>
 
@@ -205,7 +257,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
             type="submit"
             disabled={saving}
           >
-            {saving ? "Menyimpan..." : "Simpan Harga"}
+            {saving ? "Menyimpan..." : editingItem ? "Simpan Harga" : "Tambah Harga"}
           </button>
         </form>
       </Modal>
