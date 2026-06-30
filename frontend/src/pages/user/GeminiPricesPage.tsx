@@ -20,6 +20,17 @@ function defaultForm() {
   };
 }
 
+function sortPricePlansByName(items: GeminiPricePlanModel[]) {
+  return [...items].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    const nameDiff = a.label.localeCompare(b.label, "id", { sensitivity: "base", numeric: true });
+    if (nameDiff !== 0) return nameDiff;
+    const durationDiff = a.durationDays - b.durationDays;
+    if (durationDiff !== 0) return durationDiff;
+    return a.id - b.id;
+  });
+}
+
 export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
   void embedded;
   const appData = useAppData();
@@ -35,7 +46,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
     setLoading(true);
     try {
       const data = await appData.fetchGeminiPricePlans();
-      setItems(data);
+      setItems(sortPricePlansByName(data));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal memuat harga Gemini", "danger");
     } finally {
@@ -86,7 +97,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
         showToast("Harga Gemini berhasil ditambahkan.", "success");
       }
       const nextItems = await appData.fetchGeminiPricePlans();
-      setItems(nextItems);
+      setItems(sortPricePlansByName(nextItems));
       setIsModalOpen(false);
       setEditingItem(null);
       setForm(defaultForm());
@@ -104,7 +115,7 @@ export function GeminiPricesPage({ embedded = false }: { embedded?: boolean }) {
       await appData.deleteGeminiPricePlan(item.id);
       showToast("Harga Gemini berhasil dihapus.", "success");
       const nextItems = await appData.fetchGeminiPricePlans();
-      setItems(nextItems);
+      setItems(sortPricePlansByName(nextItems));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Gagal menghapus harga Gemini.", "danger");
     } finally {
