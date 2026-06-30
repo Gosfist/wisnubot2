@@ -41,20 +41,7 @@ function normalizeNullableDate(value) {
 
 const ACTIVE_MEMBER_SLOT_CONDITION = `
         AND tx.status = 'paid'
-        AND COALESCE(tx.member_status, 'anggota') = 'anggota'
-        AND (
-          (
-            COALESCE(tx.active_status, '') = 'aktif'
-            AND COALESCE(tx.platform, '') = 'pribadi'
-          )
-          OR (
-            COALESCE(tx.active_status, '') <> 'expired'
-            AND (
-              tx.active_expires_at IS NULL
-              OR tx.active_expires_at >= CURRENT_TIMESTAMP
-            )
-          )
-        )`;
+        AND COALESCE(tx.member_status, 'anggota') = 'anggota'`;
 
 function mapAccount(row) {
   const totalSlots = getEffectiveTotalSlots(row);

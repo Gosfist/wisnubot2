@@ -85,13 +85,7 @@ function toDateInputValue(value: string | null) {
 function isActiveMemberTransaction(transaction: TransactionModel) {
   if (transaction.memberStatus !== "anggota") return false;
   if (transaction.status !== "paid") return false;
-  if (transaction.activeStatus === "expired") return false;
-  if (transaction.platform === "pribadi" && transaction.activeStatus === "aktif") return true;
-  if (!transaction.activeExpiresAt) return true;
-  const parsed = new Date(transaction.activeExpiresAt);
-  if (Number.isNaN(parsed.getTime())) return true;
-  parsed.setHours(23, 59, 59, 999);
-  return parsed.getTime() >= Date.now();
+  return true;
 }
 
 function sortGoogleAccounts(items: GoogleAccountModel[]) {

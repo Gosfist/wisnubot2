@@ -37,11 +37,11 @@ async function listForUser(user) {
   const pool = getPool();
   const [rows] = await pool.execute(
     `SELECT id, label, duration_days, price, is_active, created_at, updated_at
-       FROM gemini_price_plans
+      FROM gemini_price_plans
       WHERE user_id = ?
       ORDER BY is_active DESC,
-               duration_days ASC,
                lower(label) ASC,
+               duration_days ASC,
                id ASC`,
     [Number(user.id)],
   );
